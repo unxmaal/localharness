@@ -387,3 +387,75 @@ device name is "Apple M2 Pro", which contains no "M5", so TensorOps is off.
 Practical result: this machine gets the BF16 path only and forfeits the int8 gain
 (36.30 s BF16 versus 25.80 s int8 on an M5 Max). The `--use-int8-row-fc2` flag is
 inert here.
+
+## h3.c generation on 32 GiB, SETTLED (2026-09-05)
+
+The open question was whether MiniMax H3 can generate on a 32 GiB M2 Pro.
+It can. KNOWLEDGE #67's "not viable on 32GB, video is post-Studio" is superseded
+by measurement.
+
+Weights: FL2VA only, 134.2 GiB, downloaded in 24.1 min (~95 MB/s sustained to the
+Models volume), 81 files, zero partials. `Ref2VA DiT  0 files  0 tensors  0.000 GiB`
+in `--info` confirms the optional component degrades cleanly.
+
+Command:
+
+    ./h3 -d /Volumes/Models/MiniMax-H3 \
+      -p "A red fox walks through falling snow in a quiet forest." \
+      -o outputs/test1.mp4 --ssd-streaming --profile \
+      --width 320 --height 320 --frames 8 --steps 6 --layers 40
+
+Result: `h3: wrote outputs/test1.mp4`, a real h264 + aac file, 320x320, 22 frames,
+0.925 s, 32 kHz stereo audio, 131 KB.
+
+### The numbers that matter
+
+    750 s wall (12.5 min)
+    maximum resident set size  9.48 GiB      <- against a 19 GiB practical ceiling
+    swaps                      0
+    page faults                1849
+
+Per phase, from `--profile`:
+
+    Qwen text encoder  total  wall=131.750s  peak=2.727GiB  alloc=46.862GiB
+    H3 DiT             load   wall= 81.117s  peak=1.607GiB  alloc=27.466GiB
+    H3 DiT      Euler denoise  wall=501.436s peak=1.607GiB  alloc= 0.000GiB  wait=68.250s
+    H3 DiT             total  wall=582.624s  peak=1.607GiB  alloc=27.466GiB
+    audio VAE decoder  total  wall=  3.137s  peak=0.282GiB  alloc= 0.543GiB
+    video VAE decoder  total  wall= 31.481s  peak=0.775GiB  alloc= 9.554GiB
+
+`peak` versus `alloc` is the whole story. The text encoder allocates **46.9 GiB**
+cumulatively but peaks at **2.7 GiB**, because it streams 50 layers with a
+prefetch depth of 2 (`h3_gpu_is_m5(gpu) ? 3 : 2`) at roughly 0.98 GiB per layer.
+The DiT allocates 27.5 GiB and peaks at 1.6 GiB under `--ssd-streaming`. Nothing
+is ever fully resident, so a 62 GiB text encoder and a 61.7 GiB DiT both run in
+under 3 GiB each.
+
+Highest per-phase peak was the text encoder at 2.727 GiB. Process max RSS of
+9.48 GiB is well above the sum of phase peaks, which is expected: RSS includes
+page cache from streaming ~74 GiB off disk, not just live tensors.
+
+### Predictions checked
+
+- "The text encoder phase is the peak-memory candidate": **right**, it is the
+  highest per-phase peak at 2.727 GiB, but the magnitude was wrong by an order of
+  magnitude in the safe direction.
+- "62 GiB text encoder does not fit in 19 GiB": **wrong as stated.** It never
+  needs to fit; it is layer-streamed by design via `text_layer_prefetch`.
+- "Plan against ~22 GiB, not 25.0": moot. Actual demand was under 10 GiB.
+- `TEXT_LAYERS = 50` against the checkpoint's `num_hidden_layers = 64` is
+  deliberate, not an incompatibility. The progress display confirms it: the
+  text encoder counts to 50/50.
+
+### Where the time goes
+
+Denoise is 501 s of the 750 s, and **68.25 s of that is `wait`**, the GPU idle on
+streaming I/O. That is the `--ssd-streaming` tax, about 14% of denoise wall here.
+It scales with disk throughput, which is the concrete payoff of putting weights on
+the Models volume at 959 MB/s rather than the T7 at 432.
+
+### Flag note
+
+`--reuse` and `--core-reuse` cannot be combined; h3 rejects it in 0.04 s with
+"core reuse and denoiser reuse cannot be combined". It also warns when `--reuse`
+is paired with very few steps.
