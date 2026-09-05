@@ -69,6 +69,15 @@ VOICE_ONSET_TIMEOUT="${VOICE_ONSET_TIMEOUT:-12}"
 # Kill switch. `touch` this file to go quiet without editing settings.json.
 VOICE_MUTE_FLAG="${VOICE_MUTE_FLAG:-$HOME/.claude/voice-mute}"
 
+# A GUI-launched app hands its children a minimal PATH (/usr/bin:/bin:/usr/sbin:
+# /sbin). listen.sh is spawned by the wezterm GUI, and rec, jq and wezterm all
+# live in /opt/homebrew/bin, so without this the keybinding fires and the script
+# dies on "command not found" with nothing to show for it.
+case ":$PATH:" in
+  *:/opt/homebrew/bin:*) ;;
+  *) PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; export PATH ;;
+esac
+
 VOICE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VOICE_RUN="${VOICE_RUN:-${TMPDIR:-/tmp}/claude-voice}"
 mkdir -p "$VOICE_RUN"

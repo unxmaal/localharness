@@ -10,9 +10,20 @@ source "$(dirname "$0")/config.sh"
 
 REC_PID_FILE="$VOICE_RUN/rec.pid"
 WAV="$VOICE_RUN/listen.wav"
+LOG="$VOICE_RUN/listen.log"
+
+log() { printf '%s  %s\n' "$(date +%H:%M:%S)" "$*" >> "$LOG"; }
+log "invoked (pane=${WEZTERM_PANE:-none})"
+
+# Fail loudly into the log rather than dying on "command not found" somewhere a
+# GUI-spawned process has no terminal to complain to.
+for tool in rec curl jq; do
+  command -v "$tool" >/dev/null 2>&1 || { log "FATAL: $tool not on PATH ($PATH)"; exit 1; }
+done
 
 # Second press while recording: stop and let the first invocation continue.
 if [ -f "$REC_PID_FILE" ] && kill -0 "$(cat "$REC_PID_FILE")" 2>/dev/null; then
+  log "second press, stopping recording"
   kill -INT "$(cat "$REC_PID_FILE")" 2>/dev/null
   exit 0
 fi
@@ -58,7 +69,16 @@ wait "$REC_PID" 2>/dev/null
 kill "$WATCHDOG" 2>/dev/null
 rm -f "$REC_PID_FILE"
 
-[ -s "$WAV" ] || exit 0
+# A killed-before-onset recording leaves a 44-byte WAV header, which `-s` treats
+# as a real file. At 16 kHz mono 16-bit that is 32000 bytes per second, so
+# require enough for ~0.25s of speech before bothering the transcriber.
+BYTES=$(stat -f %z "$WAV" 2>/dev/null || echo 0)
+if [ "$BYTES" -lt 8000 ]; then
+  log "no speech captured (${BYTES} bytes, header only)"
+  rm -f "$WAV"
+  exit 0
+fi
+log "captured ${BYTES} bytes (~$((BYTES / 32000)).$(( (BYTES % 32000) * 10 / 32000 ))s)"
 
 # Transcribe through the same mlx_audio.server that does TTS. It holds Parakeet
 # resident, so this costs ~0.26s instead of ~0.8s with a per-call model load, and
@@ -68,13 +88,15 @@ TEXT=$(curl -s --max-time 60 "$TTS_HOST/v1/audio/transcriptions" \
        | jq -r '.text // empty' | sed 's/^ *//;s/ *$//')
 
 rm -f "$WAV"
-[ -z "$TEXT" ] && exit 0
+if [ -z "$TEXT" ]; then log "transcription returned nothing"; exit 0; fi
+log "transcript: $TEXT"
 
 # Type it into the pane that invoked us. --no-paste sends it as keystrokes so it
 # lands in the prompt for review; you press Enter, not this script. Putting words
 # in your mouth AND hitting send is a bridge too far for a speech recognizer.
 if [ -n "${WEZTERM_PANE:-}" ]; then
-  wezterm cli send-text --pane-id "$WEZTERM_PANE" --no-paste "$TEXT"
+  wezterm cli send-text --pane-id "$WEZTERM_PANE" --no-paste "$TEXT" \
+    || log "FATAL: wezterm cli send-text failed for pane $WEZTERM_PANE"
 else
   printf '%s\n' "$TEXT"
 fi
