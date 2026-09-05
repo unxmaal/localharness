@@ -47,6 +47,20 @@ PROMPT
 # 0.53s model load.
 PARAKEET_MODEL="${PARAKEET_MODEL:-mlx-community/parakeet-tdt-0.6b-v2}"
 
+# Recording gate. VOICE_THRESHOLD is a percentage of full scale: sox starts
+# capturing once the signal exceeds it and stops after VOICE_HANG seconds below
+# it. 2% proved too high to trigger on quiet sources; 1% still sits well above
+# a quiet room (measured RMS 59, or 0.18% of full scale, on a Yeti with nobody
+# talking). Raise it if the gate self-triggers on background noise.
+VOICE_THRESHOLD="${VOICE_THRESHOLD:-1%}"
+VOICE_HANG="${VOICE_HANG:-1.8}"
+VOICE_MAX_SECONDS="${VOICE_MAX_SECONDS:-30}"
+
+# Hard stop on waiting for someone to start talking. Without it a gate that
+# never triggers leaves sox holding the microphone open forever, which is what
+# happened the first time this was tested.
+VOICE_ONSET_TIMEOUT="${VOICE_ONSET_TIMEOUT:-12}"
+
 # Kill switch. `touch` this file to go quiet without editing settings.json.
 VOICE_MUTE_FLAG="${VOICE_MUTE_FLAG:-$HOME/.claude/voice-mute}"
 

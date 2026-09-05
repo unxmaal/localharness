@@ -85,9 +85,29 @@ No settings.json edit, no restart.
 
 Voice ships MUTED. `rm ~/.claude/voice-mute` to turn it on.
 
+## Recording gate
+
+`VOICE_THRESHOLD` (default 1%) is a percentage of full scale. sox starts
+capturing above it and stops after `VOICE_HANG` seconds below it. The original
+2% never triggered on a quiet source: a Yeti picking up speaker output measured
+RMS 179, or 0.55%. A quiet room with nobody talking measures ~0.18%, so 1% sits
+comfortably between. Raise it if the gate self-triggers.
+
+`VOICE_ONSET_TIMEOUT` (default 12s) is a hard stop on waiting for speech. Without
+it, a gate that never triggers leaves sox holding the microphone open forever,
+which is exactly what happened the first time this was tested: sox wrote a
+0-byte file and never returned.
+
+Note that sox cannot always honour device-level format flags. A Yeti is 48 kHz
+stereo and `rec -c 1 -r 16000` only warns, then records 48k stereo anyway.
+`channels 1 rate 16000` as EFFECTS are applied in software and always hold.
+
 ## Known gaps
 
 - Parakeet is English-only. `mlx-whisper` is the multilingual swap.
+- The gate has only been exercised against speaker playback, not a person
+  talking directly into the mic. Direct speech is far louder, so 1% should be
+  conservative, but the threshold may want tuning in practice.
 - Kokoro-82M-bf16 is the default. `-8bit` and `-4bit` variants exist if load
   time or memory ever matter, though at 82M parameters neither is likely to.
 - Nothing interrupts Claude mid-response by voice; you can only cut off playback

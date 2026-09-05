@@ -20,15 +20,42 @@ fi
 # Do not talk over the user.
 pkill -f 'afplay .*claude-voice' 2>/dev/null
 
-# sox stops on its own after ~1.8s of silence, so the common case needs no
-# second keypress. 16 kHz mono is what Parakeet wants; resampling later costs
-# quality for nothing.
-#   silence 1 0.1 2%   : start recording once sound exceeds 2%
-#           1 1.8 2%   : stop after 1.8s below 2%
-rec -q -c 1 -r 16000 -b 16 "$WAV" \
-    silence 1 0.1 2% 1 1.8 2% trim 0 30 &
-echo $! > "$REC_PID_FILE"
-wait $! 2>/dev/null
+# sox stderr goes to a log rather than the terminal: it emits a harmless
+# "trim: Last 1 position(s) not reached" on every gated recording, which would
+# otherwise print into the pane you are trying to type into. Real failures are
+# still recoverable from $VOICE_RUN/rec.log.
+#
+# sox stops on its own after VOICE_HANG seconds of silence, so the common case
+# needs no second keypress.
+#   silence 1 0.1 <thr>      : start capturing once the signal exceeds <thr>
+#           1 <hang> <thr>   : stop after <hang> seconds below it
+#   trim 0 <max>             : hard cap, applied after the silence gate
+#
+# channels/rate are EFFECTS, not device flags. Asking the device for 16k mono
+# fails on hardware that will not do it (a Yeti is 48k stereo) and sox only
+# warns: "can't set sample rate 16000; using 48000". As effects they are applied
+# in software and always hold.
+rec -q -b 16 "$WAV" \
+    channels 1 rate 16000 \
+    silence 1 0.1 "$VOICE_THRESHOLD" 1 "$VOICE_HANG" "$VOICE_THRESHOLD" \
+    trim 0 "$VOICE_MAX_SECONDS" 2>>"$VOICE_RUN/rec.log" &
+REC_PID=$!
+echo "$REC_PID" > "$REC_PID_FILE"
+
+# Watchdog: if nothing crosses the threshold, sox writes no bytes and waits
+# forever with the microphone open. Give up rather than hang.
+(
+  for _ in $(seq 1 "$VOICE_ONSET_TIMEOUT"); do
+    sleep 1
+    kill -0 "$REC_PID" 2>/dev/null || exit 0
+    [ -s "$WAV" ] && exit 0        # capture started, the silence gate owns it now
+  done
+  kill -INT "$REC_PID" 2>/dev/null
+) &
+WATCHDOG=$!
+
+wait "$REC_PID" 2>/dev/null
+kill "$WATCHDOG" 2>/dev/null
 rm -f "$REC_PID_FILE"
 
 [ -s "$WAV" ] || exit 0
