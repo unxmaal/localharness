@@ -318,3 +318,72 @@ to be downloaded. The plan was corrected.
 
 Lesson worth keeping: a populated-looking `models--*` directory in an HF cache proves
 a repo was referenced, not that its weights were fetched. Check for blobs.
+
+## h3.c built and probed on this machine (2026-09-05)
+
+Clone: `antirez/h3.c` at 8974cc0 "Clarify SSD streaming memory and speed tradeoff".
+Toolchain: Apple clang 21.0.0, macOS SDK 26.5, ffmpeg/ffprobe present via Homebrew.
+
+    $ make -j8
+    build exit=0    errors: 0    warnings: 0
+
+Zero warnings under the project's own `-Wall -Wextra -Wpedantic -Wshadow
+-Wconversion`. Produces `h3` (546K) and `libh3.a` (745K).
+
+    $ make test
+    exit=0
+    ok: 1768 checks
+    ok: native AudioVAE Metal primitives match host references
+    ok: concurrent FFmpeg video/PCM pipes created /tmp/h3-av-mux-test.mp4 (51750 bytes)
+    fail/error/abort/assert lines: 0
+
+    audio primitive Conv1d           max abs 5.960464e-08
+    audio primitive ConvTranspose1d  max abs 2.980232e-08
+    audio primitive SnakeBeta        max abs 2.384186e-07
+
+All skips are weight-dependent fixtures ("released ... weights/fixture are not
+installed"). So the Metal compute path is verified working on an M2 Pro, which the
+project documentation neither claims nor denies.
+
+### Device probe, no weights required
+
+`h3_metal_probe()` is standalone and exported from `libh3.a`, so it runs before any
+checkpoint download. `tools/h3probe.c` calls it:
+
+    Device: Apple M2 Pro (applegpu_g14s)
+      physical memory       32.0 GiB
+      recommended GPU set   25.0 GiB
+      max Metal buffer      18.7 GiB
+      Apple GPU family      8
+      Metal 4               yes
+      unified memory        yes
+
+Three things this settles that were previously estimates:
+
+1. **The GPU working set is 25.0 GiB**, not the "roughly 70 to 75% of unified RAM"
+   the plan had been assuming. That is 78%, and it is a measured value from
+   `device.recommendedMaxWorkingSetSize` rather than a guess.
+2. **`max Metal buffer` is 18.7 GiB**, a hard per-allocation cap that had not been
+   considered at all. No single tensor may exceed it regardless of total memory.
+3. 25.0 GiB does not fit the 36.5 GiB full-residency DiT, so `--ssd-streaming` is
+   mandatory here, not optional. It comfortably fits the 2.0 GiB streamed DiT.
+
+### Correction: Metal 4 does not mean int8
+
+The probe initially concluded "int8 MLP engine available (Metal 4 TensorOps)" from
+the `metal4` flag reading yes. That was wrong. h3 gates TensorOps on a literal
+substring match of the device name, in `h3_gpu.m`:
+
+    BOOL m5 = [gpu.device.name rangeOfString:@"M5"].location != NSNotFound;
+    BOOL wantsTensorOps = m5 && (!nax || !*nax || strcmp(nax, "0") != 0);
+
+It is not a capability query. `[device supportsFamily:MTLGPUFamilyMetal4]` returns
+yes on this M2 Pro because macOS 26 extends the Metal 4 API family well beyond the
+hardware that has tensor units, and h3 never consults that field for gating. The
+device name is "Apple M2 Pro", which contains no "M5", so TensorOps is off.
+
+`H3_NAX` can disable TensorOps on an M5. Nothing enables it on a non-M5.
+
+Practical result: this machine gets the BF16 path only and forfeits the int8 gain
+(36.30 s BF16 versus 25.80 s int8 on an M5 Max). The `--use-int8-row-fc2` flag is
+inert here.

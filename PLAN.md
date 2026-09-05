@@ -221,12 +221,47 @@ Two facts make 32 GB plausible rather than merely smaller:
 - Build is `make -j8`; weights are expected as a Hugging Face snapshot at
   `./MiniMax-H3`, inspectable with `./h3 --info -d ./MiniMax-H3`.
 
-**Honestly unknown.** The documentation names M3 Max and M5 Max throughout and makes
-**no statement** about M1/M2/M3/M4 Pro or base chips, nor about 32 GB or 64 GB
-machines, in either direction. It gives no per-component memory breakdown beyond the
-DiT, and no download command, repo id, or snapshot size. The 32 GB viability argument
-above is inference from the phase structure and the streaming numbers, not something
-the project claims. The only way to settle it is to build it and run it.
+**Built and probed here, 2026-09-05.** `make -j8` succeeds with zero errors and zero
+warnings under the project's own `-Wall -Wextra -Wpedantic -Wconversion`. `make test`
+passes **1768 checks with zero failures**, including native Metal primitives matching
+host references to ~1e-7. Every skip is a weight-dependent fixture. The Metal compute
+path therefore works on an M2 Pro, which the documentation neither claims nor denies.
+
+`tools/h3probe.c` in this repo calls h3's standalone `h3_metal_probe()`, which needs
+no weights, and reports:
+
+    Apple M2 Pro (applegpu_g14s)
+      physical memory       32.0 GiB
+      recommended GPU set   25.0 GiB
+      max Metal buffer      18.7 GiB
+      Apple GPU family      8
+
+Three corrections to earlier assumptions fall out:
+
+1. The GPU working set is **25.0 GiB**, a measured `recommendedMaxWorkingSetSize`,
+   not the "roughly 70 to 75%" this plan had been estimating. It is 78%.
+2. **`max Metal buffer` is 18.7 GiB**, a hard per-allocation ceiling not previously
+   considered. No single tensor may exceed it whatever the total.
+3. 25.0 GiB does not fit the 36.5 GiB full-residency DiT, so `--ssd-streaming` is
+   **mandatory** here rather than an optimization. It fits the 2.0 GiB streamed DiT
+   with room to spare.
+
+**Correction: Metal 4 does not imply int8.** h3 gates TensorOps on a literal
+substring match of the device name (`h3_gpu.m`):
+
+    BOOL m5 = [gpu.device.name rangeOfString:@"M5"].location != NSNotFound;
+
+The probe's `metal4` field reads yes on this M2 Pro, because macOS 26 extends the
+Metal 4 API family far beyond hardware with tensor units, but h3 never consults it.
+"Apple M2 Pro" contains no "M5", so `--use-int8-row-fc2` is inert here and the BF16
+path is the only path. `H3_NAX` can disable TensorOps on an M5; nothing enables it
+on a non-M5.
+
+**Still unknown.** No per-component memory breakdown beyond the DiT, no download
+command, repo id, or snapshot size in the docs. Whether a real generation fits inside
+25.0 GiB with streaming remains untested, since the text-encoder phase is the other
+candidate for peak and its size here is unmeasured. `--profile` prints per-phase
+Metal timing and allocation data, which is the instrument for settling it.
 
 **The one real commitment** is disk: KNOWLEDGE #67 puts the full BF16 checkpoint at
 roughly 129 GiB, with a task partition at 134 to 160 GB. The Models volume has about
