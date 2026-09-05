@@ -31,12 +31,41 @@ t = re.sub(r"https?://\S+", " ", t)
 t = re.sub(r"(?:/[\w.\-]+){2,}", " ", t)              # unix paths
 t = re.sub(r"[#*_>`]", "", t)                         # markdown punctuation
 
+# Diagnostic output is useful to read and awful to hear: "gateway 200, MLX 200,
+# TTS 200" is spoken as "gateway two hundred, emm ell exx two hundred". Drop the
+# obvious shapes. Prose-embedded diagnostics are handled by the prompt instead,
+# since regex cannot reliably tell them from real sentences.
+t = re.sub(r"^\s*[\w .\-/]{1,30}:\s*(?:\d{3}|up|down|ok|green|red)\s*$",
+           "", t, flags=re.M | re.I)                  # "gateway:  200"
+t = re.sub(r"\b(?:HTTP|exit|status)\s*=?\s*\d{1,3}\b", "", t, flags=re.I)
+t = re.sub(r"\bport\s+\d{2,5}\b", "", t, flags=re.I)
+
 # Dropping content leaves stranded referring phrases ("See ."). Remove the
 # fragments that pointed at what was just deleted.
 t = re.sub(r"(?i)\b(see|check|from|in|at|run)\s*[:,]?\s*(?=[.;!?])", "", t)
 t = re.sub(r"\s+([.,;!?])", r"\1", t)
 t = re.sub(r"([.;!?])(\s*\1)+", r"\1", t)
 t = re.sub(r"\s+", " ", t).strip()
+
+# Acronyms a speech synthesizer spells out letter by letter. Expanded only where
+# the spoken form is clearly better; MLX and VAE are left alone because they are
+# proper nouns and spelling them is the correct reading.
+SPOKEN = {
+    r"\bTTS\b": "text to speech",
+    r"\bSTT\b": "speech to text",
+    r"\bLLM\b": "language model",
+    r"\bLLMs\b": "language models",
+    r"\bSTDIN\b": "standard input",
+    r"\bGiB\b": "gigabytes",
+    r"\bMiB\b": "megabytes",
+    r"\bKiB\b": "kilobytes",
+    r"\bGB/s\b": "gigabytes per second",
+    r"\bMB/s\b": "megabytes per second",
+    r"\btok/s\b": "tokens per second",
+    r"\bx(\d+)\b": r"times \1",
+}
+for pattern, replacement in SPOKEN.items():
+    t = re.sub(pattern, replacement, t)
 
 question = ""
 sentences = re.split(r"(?<=[.!?])\s+", t)

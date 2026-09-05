@@ -37,6 +37,11 @@ Rules:
 - Keep first person: if the speaker said "I did X", you say "I did X".
 - If the transcript ends with a question to the listener, reproduce that question as your final sentence, unchanged in meaning.
 - Plain speech. No markdown, lists, code, or file paths.
+- This will be READ ALOUD. Omit status codes, port numbers, version strings, and
+  diagnostic output. Say the outcome in words: "everything came up" rather than
+  "gateway 200, MLX 200, TTS 200".
+- Avoid strings of letters that must be spelled out. Prefer "the local models"
+  over "MLX", "the gateway" over ":4000".
 - Output only the rewritten text.
 PROMPT
 )}"
