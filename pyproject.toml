@@ -1,0 +1,12 @@
+[project]
+name = "localharness"
+version = "0.1.0"
+description = "Local LLM serving + evaluation harness for Apple Silicon"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "mlx-lm>=0.31.3",
+    "httpx>=0.27",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]

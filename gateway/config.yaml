@@ -1,0 +1,18 @@
+model_list:
+  - model_name: local-small
+    litellm_params:
+      model: openai/mlx-community/Qwen2.5-0.5B-Instruct-4bit
+      api_base: http://127.0.0.1:8081/v1
+      api_key: not-needed
+  - model_name: local-mid
+    litellm_params:
+      model: openai/mlx-community/Qwen2.5-1.5B-Instruct-4bit
+      api_base: http://127.0.0.1:8081/v1
+      api_key: not-needed
+
+litellm_settings:
+  drop_params: true
+  # mlx_lm.server implements /v1/chat/completions but NOT /v1/responses.
+  # Without this, LiteLLM routes /v1/messages through its Responses adapter
+  # and every Anthropic-shaped request 404s upstream.
+  use_chat_completions_url_for_anthropic_messages: true
