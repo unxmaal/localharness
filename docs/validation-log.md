@@ -69,7 +69,37 @@ The T7 numbers are trustworthy: 460 MB/s cold, reproduced across two different
 pre-existing files, which is 5 Gbps saturation. The T7 is a 10 Gbps device, so the
 VIA hub is halving it.
 
-The 2TB numbers are NOT trustworthy as a drive measurement. Every file on that volume
+### Superseded: the 2TB reclaimed and re-measured
+
+The user repartitioned the 2 TB NVMe into `Backups` and `Models`, two APFS volumes in
+one container with 1 TB quotas each. `Models` is not a Time Machine target, so it
+mounts `eric:staff` and writable.
+
+Re-measured with 4 GiB dd and a cold read forced by `diskutil unmount` +
+`diskutil mount`, so the page cache cannot inflate it:
+
+    Models write     : 4294967296 bytes in 4.238520 secs (1,013,317,690 B/s)
+    Models COLD read : 4294967296 bytes in 4.478884 secs (  958,936,935 B/s)
+    Models warm read : 1073741824 bytes in 0.390211 secs (2,751,695,426 B/s)  <- cache, not the drive
+
+    T7 write         : 4294967296 bytes in 10.168272 secs (422,389,104 B/s)
+    T7 COLD read     : 4294967296 bytes in  9.932652 secs (432,408,917 B/s)
+
+Models is 2.2x the T7 and effectively matches the internal SSD. This vindicates
+discarding the earlier 229 MB/s reading rather than recording it: the clean volume is
+over four times faster, confirming that number measured Time Machine's fragmented
+backup structure and not the drive.
+
+HF_HOME moved to /Volumes/Models/hf; the 1.1 GiB of existing weights were rsynced
+from the T7 (82 files, 1,169,990,654 bytes) and all six smoke checks pass on the new
+volume.
+
+Guard re-verified by exit code after the switch: auto-pick 0, explicit Models 0,
+explicit T7 0, explicit nonexistent 1.
+
+### Original (superseded) reading
+
+The 2TB numbers below are NOT trustworthy as a drive measurement. Every file on that volume
 is Time Machine backup data stored with APFS clones and heavy fragmentation, and a
 write test is impossible:
 

@@ -32,61 +32,56 @@ rebuild rather than a candidate to measure. Two things fix that permanently:
 
 ### Storage, resolved
 
-`HF_HOME` is chosen at launch by `scripts/env.sh`, preferring the faster volume and
-failing closed if none is usable.
+`HF_HOME` is `/Volumes/Models/hf`, chosen at launch by `scripts/env.sh`, which
+prefers the faster volume and fails closed if none is usable.
 
-Link speeds, from `ioreg` `"Device Speed"` (3 = SuperSpeed 5 Gbps,
-4 = SuperSpeed+ 10 Gbps). Neither drive is Thunderbolt; `SPThunderboltDataType`
-reports no device connected on any port.
+The user repartitioned the 2 TB NVMe into two APFS volumes sharing one container,
+`Backups` and `Models`, each with a 1 TB quota. `Models` is not a Time Machine
+target, so it is `eric:staff` and writable, which resolves the earlier blocker.
 
-| Volume | Device | Link | Topology | Free |
-|---|---|---|---|---|
-| **2TB** | DockCase SSD Enclosure C1P | **Speed=4, 10 Gbps** | direct to host controller | 780 GiB |
-| T7 | Samsung PSSD T7 | Speed=3, 5 Gbps | behind a VIA Labs USB3.0 hub | 470 GiB |
-| internal | APPLE SSD AP1024Z | NVMe | n/a | 76 GiB at 92% |
+Measured 2026-09-05, 4 GiB `dd`, cold reads forced by unmount/remount so the page
+cache cannot flatter the number:
 
-**The 2TB is the target.** It has double the link budget and a direct path.
+| Volume | Device | Link (ioreg) | Topology | Write | Cold read | Free |
+|---|---|---|---|---|---|---|
+| **Models** | DockCase C1P | **Speed=4, 10 Gbps** | direct to host controller | **1013 MB/s** | **959 MB/s** | 931 GiB |
+| T7 | Samsung PSSD T7 | Speed=3, 5 Gbps | behind a VIA Labs USB3.0 hub | 422 MB/s | 432 MB/s | 469 GiB |
+| internal | APPLE SSD AP1024Z | NVMe | n/a | 1.15 GB/s | n/a | 76 GiB at 92% |
 
-Measured throughput, 1 GiB `dd`:
+`Models` is **2.2x** the T7 and effectively matches the internal SSD, so external
+storage is no longer a meaningful penalty. Neither external drive is Thunderbolt;
+`SPThunderboltDataType` reports no device connected on any port.
 
-- T7 cold sequential read: **460 MB/s**, consistent across two different
-  pre-existing files. That is 5 Gbps saturation, so the T7 is bus-limited, not
-  media-limited. Note the T7 is itself a 10 Gbps device: the VIA hub is halving it,
-  and moving it to a direct port should roughly double it.
-- Internal write: 1.15 GB/s.
-- 2TB: **not fairly measurable today.** Reads of existing files returned 229 MB/s and
-  119 MB/s, but every file on it is Time Machine backup data stored with APFS clones
-  and heavy fragmentation, so those numbers measure the backup structure rather than
-  the drive. A clean write/read test after reclaiming the volume is the real
-  measurement. Expect roughly 900 MB/s to 1 GB/s for a decent NVMe at 10 Gbps.
+The T7 is itself a 10 Gbps device. It negotiates 5 Gbps only because of the VIA Labs
+hub, so moving it to a direct port is free and should roughly double it. Worth doing
+even though weights no longer live there.
 
-**Blocker on the 2TB, being resolved by the user.** It is an active Time Machine
-destination and its root is `root:wheel` with this user not in `wheel`, so writes fail
-with `Permission denied`. `scripts/env.sh` therefore probes writability, not just
-mount state, and falls back to the T7 until that changes. No code change is needed
-when it does: the preference order picks up the 2TB automatically.
+Why this matters more than capacity: `mlx_lm.server` hot-swaps models per request
+(section 4), so model load time is paid on every switch. A 40 GB model is roughly
+42 s at 959 MB/s, against roughly 93 s on the T7.
 
-Why this matters more than raw capacity: model load time scales directly with it, and
-the hot-swap design (section 4) pays that cost on every model switch. A 40 GB model is
-roughly 90 s at 460 MB/s against roughly 40 s at 1 GB/s.
+An earlier reading of 229 MB/s from the old `2TB` volume was discarded rather than
+recorded as a drive measurement: every file on it was fragmented Time Machine backup
+data. The clean partition confirms that judgment, coming in over four times higher.
 
 **Mount guard.** `scripts/env.sh` refuses to start unless it finds a mounted,
 writable model volume, rather than letting `huggingface_hub` silently recreate the
-cache and re-download tens of GB onto a volume with no room. An explicit `HF_ROOT` is
-validated the same way; it pins a location but does not bypass the check. VALIDATED
-across four cases: auto-pick succeeds, explicit-and-writable succeeds, explicit-but-
-unwritable fails with exit 1, explicit-but-unmounted fails with exit 1.
+cache and re-download tens of GB onto a volume with no room. An explicit `HF_ROOT`
+pins a location but is validated the same way rather than bypassing the check.
+VALIDATED across four cases by exit code: auto-pick 0, explicit-Models 0, explicit-T7
+0, explicit-nonexistent 1.
 
 **Ollama reclaim, DONE.** All eight stale models (44 GB, 9 to 20 months old) deleted
 2026-09-05 with the user's approval; `~/.ollama` is now 1.0 MB. Note `df` did not
 move, because local Time Machine snapshots retain the blocks. The space is purgeable
-and macOS reclaims it under pressure; `diskutil` already reports 81.4 GB container
-free space against `df`'s 76 GiB. To force it: `tmutil deletelocalsnapshots /`.
+and macOS reclaims it under pressure. To force it: `tmutil deletelocalsnapshots /`.
 
-**Not migrated.** `~/.cache/huggingface` still holds 9.3 GiB (FLUX.1-dev,
+**Still not migrated.** `~/.cache/huggingface` holds 9.3 GiB (FLUX.1-dev,
 FLUX.1-schnell, flux_text_encoders, CLIP, Chatterbox), directly relevant to the media
-lane. Moving it waits on a decision to set `HF_HOME` globally rather than per-project,
-since it affects `tsatd_video` and anything else assuming the default path.
+lane. Now that a dedicated `Models` volume exists at 959 MB/s, moving it there and
+setting `HF_HOME` globally in the shell profile is the obvious end state. It waits
+only on the decision, since it affects `tsatd_video` and anything else assuming the
+default path.
 
 ### Target hardware
 
@@ -317,12 +312,8 @@ fine; `HF_HOME` is `/Volumes/T7/hf`.
 Still open:
 
 1. Set `HF_HOME` globally in the shell profile and migrate the existing 9.3 GiB
-   cache, or keep it per-project? Global is better for the media lane, which wants
-   the FLUX weights, but it affects `tsatd_video` and anything else that assumes the
-   default path.
+   cache to `/Volumes/Models/hf`? Now clearly the right end state, but it affects
+   `tsatd_video` and anything else assuming the default path.
 2. Which cloud providers should the gateway carry, and under which alias names?
-3. Once the 2TB is writable, benchmark it clean and record the real number. If it
-   lands near 1 GB/s, storage stops being the bottleneck until the Studio.
-4. Separately, the T7 sits behind a VIA Labs USB3.0 hub that halves it to 5 Gbps.
-   Moving it to a direct port is free and roughly doubles it, worth doing regardless
-   of which volume ends up holding weights.
+3. Move the T7 off the VIA Labs USB3.0 hub to a direct port. Free, and roughly
+   doubles it from 432 MB/s. Worth doing even though weights now live on `Models`.

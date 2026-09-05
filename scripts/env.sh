@@ -3,13 +3,17 @@
 # Model weights live on external storage, not the internal disk: the internal
 # volume runs at 92% and a single 70B at 4-bit is ~40GB.
 #
-# Preference order is by measured link speed (ioreg "Device Speed"):
-#   /Volumes/2TB  DockCase SSD Enclosure C1P, Speed=4 (SuperSpeed+, 10 Gbps),
-#                 connected DIRECTLY to a host controller. Preferred.
-#   /Volumes/T7   Samsung PSSD T7, Speed=3 (SuperSpeed, 5 Gbps) because it sits
-#                 behind a VIA Labs USB3.0 hub. Measured 460 MB/s cold read,
-#                 which is bus saturation. The T7 is a 10 Gbps device; moving it
-#                 off the hub to a direct port should roughly double it.
+# Preference order is by MEASURED throughput (4 GiB dd, cold read forced by
+# unmount/remount so the page cache cannot flatter the number):
+#
+#   /Volumes/Models  DockCase SSD Enclosure C1P, ioreg Speed=4 (SuperSpeed+,
+#                    10 Gbps), direct to a host controller.
+#                    1013 MB/s write, 959 MB/s cold read. PREFERRED.
+#   /Volumes/T7      Samsung PSSD T7, ioreg Speed=3 (SuperSpeed, 5 Gbps) because
+#                    it sits behind a VIA Labs USB3.0 hub.
+#                    422 MB/s write, 432 MB/s cold read. 2.2x slower.
+#                    The T7 is itself a 10 Gbps device: the hub is halving it,
+#                    and moving it to a direct port should roughly double it.
 #
 # Model load time scales directly with this, and the hot-swap design (PLAN.md
 # section 4) pays it on every model switch: ~40GB is ~90s at 460 MB/s.
@@ -35,13 +39,12 @@ if [ -n "${HF_ROOT:-}" ]; then
   fi
 else
   HF_ROOT=""
-  for _cand in /Volumes/2TB/hf /Volumes/T7/hf; do
+  for _cand in /Volumes/Models/hf /Volumes/T7/hf; do
     if _hf_usable "$_cand"; then HF_ROOT="$_cand"; break; fi
   done
   if [ -z "$HF_ROOT" ]; then
-    echo "FATAL: no writable model volume found (tried /Volumes/2TB, /Volumes/T7)." >&2
-    echo "       Plug one in, or make /Volumes/2TB writable (it is root:wheel" >&2
-    echo "       while it serves as a Time Machine destination)." >&2
+    echo "FATAL: no writable model volume found (tried /Volumes/Models, /Volumes/T7)." >&2
+    echo "       Plug in the external SSD holding the Models volume." >&2
     return 1 2>/dev/null || exit 1
   fi
 fi
