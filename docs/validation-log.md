@@ -631,3 +631,33 @@ Discord started partway through and swap climbed from 1.0GB to 8.8GB. The wall
 times above were taken under that pressure and are therefore pessimistic, though
 both candidates ran in the same session so the comparison between them stands.
 Re-measure on a quiet machine before treating the absolute numbers as a baseline.
+
+### The eval missed the thing that decided it
+
+Both candidates scored 3/3. The suite therefore ranked them on speed and memory
+and presented the result as a tradeoff: klein faster, Z-Image Turbo lighter.
+
+Eric looked at the six images and said: "flux2 looks real. z-image-turbo not so
+much."
+
+That inverts the conclusion. If klein is both faster AND visibly better, 3.3 GiB
+of extra peak against a 25.0 GiB working set buys nothing, and Z-Image Turbo has
+no remaining case. **Decision: mflux/flux2-klein-4b is the image engine.**
+
+The objective checks did their job and it was a smaller job than it looked.
+"Does it decode, is it the right size, is it non-uniform" is a COMPETENCE GATE:
+it separates a working pipeline from a broken one. It cannot rank two working
+pipelines, and reporting a median latency next to a 100% pass rate implies a
+ranking it has not earned.
+
+Two honest options, and the suite should say which one it is doing:
+
+1. Keep the checks as a gate, and state plainly that ranking beyond the gate is
+   a human judgement. Cheap, truthful, and it still catches real failures.
+2. Add a quality dimension. For images that means a local VLM scoring prompt
+   adherence and artefacts against the generated file. That is a materially
+   bigger build, needs its own eval to know whether the judge is any good, and
+   introduces a model whose taste is not the user's.
+
+Recorded before choosing, because the failure mode to avoid is a suite that
+looks rigorous and quietly answers a different question than the one asked.
