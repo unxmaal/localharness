@@ -16,10 +16,35 @@ TTS_SPEED="${TTS_SPEED:-1.15}"
 # a couple of spoken sentences; reading a response with code blocks and tables
 # aloud verbatim is unusable.
 GATEWAY="${GATEWAY:-http://127.0.0.1:4000}"
-SUMMARY_MODEL="${SUMMARY_MODEL:-local-mid}"
+SUMMARY_MODEL="${SUMMARY_MODEL:-local-summarize}"
 SUMMARY_MAX_TOKENS="${SUMMARY_MAX_TOKENS:-90}"
 
-# STT
+# The summarizer prompt is load-bearing, not decoration. A small instruct model
+# reads an assistant message as a turn to RESPOND to, not text to condense. The
+# first version of this prompt made Qwen2.5-1.5B answer the closing question
+# instead of relaying it, turning "Want me to wire up the voice layer next?" into
+# "No, I don't need to wire up the voice layer next." Spoken aloud that is a
+# fabricated answer in Claude's own voice, which is worse than saying nothing.
+#
+# The fixes that mattered: name the role as compressor rather than assistant,
+# state outright that nothing is being asked, pin first person, and require the
+# closing question be reproduced rather than resolved.
+SUMMARY_SYSTEM="${SUMMARY_SYSTEM:-$(cat <<'PROMPT'
+You are a text compressor, not a conversational partner. You will be given a transcript of something ANOTHER speaker already said. Rewrite it as at most two sentences to be read aloud, preserving their meaning and their point of view.
+
+Rules:
+- NEVER answer, agree, refuse, or react. You are not being asked anything.
+- Keep first person: if the speaker said "I did X", you say "I did X".
+- If the transcript ends with a question to the listener, reproduce that question as your final sentence, unchanged in meaning.
+- Plain speech. No markdown, lists, code, or file paths.
+- Output only the rewritten text.
+PROMPT
+)}"
+
+# STT: served by the SAME mlx_audio.server as TTS, on /v1/audio/transcriptions.
+# It accepts a Parakeet model id and holds it resident. Measured 0.26s to
+# transcribe 6.5s of speech, against 0.79s in-process where each call pays a
+# 0.53s model load.
 PARAKEET_MODEL="${PARAKEET_MODEL:-mlx-community/parakeet-tdt-0.6b-v2}"
 
 # Kill switch. `touch` this file to go quiet without editing settings.json.

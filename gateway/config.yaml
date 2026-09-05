@@ -10,6 +10,16 @@ model_list:
       api_base: http://127.0.0.1:8081/v1
       api_key: not-needed
 
+  # Summarizer for the voice layer. Qwen2.5-1.5B mangles technical claims when
+  # condensing ("plateaus" came out as "scales superlinearly", the opposite of
+  # the source). Anything that speaks in Claude's voice needs a model that keeps
+  # facts straight.
+  - model_name: local-summarize
+    litellm_params:
+      model: openai/mlx-community/Qwen2.5-7B-Instruct-4bit
+      api_base: http://127.0.0.1:8081/v1
+      api_key: not-needed
+
 litellm_settings:
   drop_params: true
   # mlx_lm.server implements /v1/chat/completions but NOT /v1/responses.

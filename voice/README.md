@@ -13,7 +13,35 @@ Speaking and hearing for Claude Code in wezterm. Local models only.
 | `config.sh` | shared settings, endpoints, mute flag |
 | `speak.sh` | Claude Code `Stop` hook, speaks a 2-sentence summary |
 | `listen.sh` | record, transcribe, type into the pane |
-| `wezterm-snippet.lua` | CTRL+SHIFT+V keybinding |
+| `strip.py` | markdown -> speakable prose, splits off the closing question |
+| `wezterm-snippet.lua` | reference copy of the CTRL+SHIFT+V keybinding |
+
+## Measured
+
+    TTS   0.5s to generate 6.45s of audio      12-13x realtime
+    STT   0.26s to transcribe 6.5s of speech   resident, no per-call load
+    hook  0.024s to return                     playback is detached
+
+## Why the closing question never reaches the summarizer
+
+`strip.py` splits a trailing question out and `speak.sh` reattaches it verbatim
+after summarization. This is not tidiness. Qwen2.5-1.5B, asked to condense
+"Want me to wire up the voice layer next?", produced "No, I don't need to wire up
+the voice layer next" and, on another run, "Next, I'll wire up the voice layer."
+The first answers a question that was never asked; the second converts it into a
+commitment. Both spoken in Claude's own voice.
+
+It happened non-deterministically, which is worse than consistently: 4 runs of
+the same input gave different handling. So the highest-stakes sentence is taken
+out of the model's hands entirely. Verified 4/4 verbatim afterwards.
+
+## Why a 7B and not the 1.5B
+
+The 1.5B also mangles technical claims. Condensing "does NOT scale
+superlinearly, it plateaus" it produced "It scales superlinearly up to ~9.4 GiB",
+the opposite of the source. Qwen2.5-7B-Instruct-4bit (`local-summarize` in the
+gateway) gave 4/4 identical, correct output on the same input. Anything speaking
+in Claude's voice needs a model that keeps facts straight.
 
 ## Why a summary rather than the whole response
 
@@ -29,6 +57,13 @@ down it falls back to the first two sentences rather than going silent.
 Enter. A speech recognizer that both puts words in your mouth and submits them
 is one mis-hearing away from an unwanted action.
 
+## What did it say?
+
+    tail -f ${TMPDIR:-/tmp}/claude-voice/spoken.log
+
+Every spoken line is logged with a timestamp. A summarizer that said something
+wrong and one that never ran are otherwise indistinguishable.
+
 ## Mute
 
     touch ~/.claude/voice-mute     # quiet
@@ -42,8 +77,13 @@ No settings.json edit, no restart.
    port 8083). First run pulls ~330MB to `$HF_HOME`.
 2. Start the gateway: `./scripts/serve-mlx.sh &` and `./scripts/serve-gateway.sh &`
 3. Register the Stop hook in `~/.claude/settings.json` (see `settings-snippet.json`).
-4. Add the keybinding from `wezterm-snippet.lua` to `~/.wezterm.lua`.
-5. First run of `listen.sh` downloads the Parakeet weights (~600MB) to `$HF_HOME`.
+   DONE on this machine.
+4. Add the keybinding to `~/.wezterm.lua`. DONE on this machine, in
+   `dotfiles/.wezterm.lua`; `wezterm-snippet.lua` is kept as a portable copy.
+5. Weights land in `$HF_HOME` on first use: Kokoro-82M ~330MB, Parakeet ~600MB,
+   Qwen2.5-7B-Instruct-4bit ~4.3GB for the summarizer.
+
+Voice ships MUTED. `rm ~/.claude/voice-mute` to turn it on.
 
 ## Known gaps
 

@@ -33,13 +33,13 @@ rm -f "$REC_PID_FILE"
 
 [ -s "$WAV" ] || exit 0
 
-TEXT=$(uv run --no-project --with parakeet-mlx python - "$WAV" "$PARAKEET_MODEL" <<'PY' 2>/dev/null
-import sys
-from parakeet_mlx import from_pretrained
-model = from_pretrained(sys.argv[2])
-print(model.transcribe(sys.argv[1]).text.strip())
-PY
-)
+# Transcribe through the same mlx_audio.server that does TTS. It holds Parakeet
+# resident, so this costs ~0.26s instead of ~0.8s with a per-call model load, and
+# it is one fewer moving part than a second process.
+TEXT=$(curl -s --max-time 60 "$TTS_HOST/v1/audio/transcriptions" \
+         -F "file=@$WAV" -F "model=$PARAKEET_MODEL" 2>/dev/null \
+       | jq -r '.text // empty' | sed 's/^ *//;s/ *$//')
+
 rm -f "$WAV"
 [ -z "$TEXT" ] && exit 0
 
