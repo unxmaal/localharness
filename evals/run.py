@@ -15,10 +15,29 @@ import time
 from pathlib import Path
 
 from evals.core import load_cases, summarize
+from evals.runners.image import ImageRunner, mflux_engine
 from evals.runners.text import TextRunner
 
 ROOT = Path(__file__).resolve().parent
 TEXT_MODALITIES = {"svg", "web"}
+
+
+def build_runner(modality: str, candidate: str, gateway: str, outdir: Path):
+    """A candidate is a gateway alias for text, and an engine spec for image.
+
+    Image candidates are written `mflux:<model>[:steps]`, matching mflux's own
+    `mflux-generate-<model>` entry points, so adding one is a string rather than
+    a code change.
+    """
+    if modality in TEXT_MODALITIES:
+        return TextRunner(gateway, candidate)
+    if candidate.startswith("mflux:"):
+        parts = candidate.split(":")
+        model = parts[1]
+        steps = int(parts[2]) if len(parts) > 2 else None
+        return ImageRunner(mflux_engine(model, steps=steps),
+                           outdir or Path(".logs/images"))
+    raise SystemExit(f"unknown candidate '{candidate}' for modality {modality}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -33,7 +52,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="write artifacts and results.json here")
     args = ap.parse_args(argv)
 
-    wanted = TEXT_MODALITIES if args.modality == "all" else {args.modality}
+    if args.modality == "all":
+        wanted = set(TEXT_MODALITIES)
+    else:
+        wanted = {args.modality}
     cases = [c for c in load_cases(args.cases) if c.modality in wanted]
     if not cases:
         print(f"no cases for modality {args.modality}", file=sys.stderr)
@@ -46,7 +68,8 @@ def main(argv: list[str] | None = None) -> int:
 
     results = []
     for candidate in candidates:
-        runner = TextRunner(args.gateway, candidate)
+        runner = build_runner(next(iter(wanted)) if len(wanted) == 1
+                              else "svg", candidate, args.gateway, outdir)
         print(f"\n── {candidate}", flush=True)
         for case in cases:
             r = runner.run(case)
@@ -56,20 +79,22 @@ def main(argv: list[str] | None = None) -> int:
             warn = f"  ({len(r.warnings)} warn)" if r.warnings else ""
             print(f"  {mark}  {r.seconds:6.2f}s  {case.id}{warn}{note}",
                   flush=True)
-            if outdir and r.artifact:
+            if outdir and r.artifact and case.modality in TEXT_MODALITIES:
                 ext = "svg" if case.modality == "svg" else "html"
                 (outdir / f"{candidate.replace('/', '_')}--{case.id}.{ext}"
                  ).write_text(r.artifact)
 
     summary = summarize(results)
     print("\n" + "=" * 66)
-    print(f"{'candidate':22} {'pass':>7} {'rate':>6} {'median':>8} {'total':>8}")
+    print(f"{'candidate':26} {'pass':>7} {'rate':>6} {'median':>8} "
+          f"{'total':>8} {'peak':>9}")
     for name, s in sorted(summary.items(),
                           key=lambda kv: (-kv[1]["pass_rate"],
                                           kv[1]["median_s"])):
-        print(f"{name:22} {s['passed']:>3}/{s['total']:<3} "
+        peak = f"{s['peak_kb'] / 1024 / 1024:.1f}GiB" if s["peak_kb"] else "-"
+        print(f"{name:26} {s['passed']:>3}/{s['total']:<3} "
               f"{s['pass_rate']:>6.0%} {s['median_s']:>7.2f}s "
-              f"{s['total_s']:>7.1f}s")
+              f"{s['total_s']:>7.1f}s {peak:>9}")
     for name, s in summary.items():
         for f in s["failures"]:
             print(f"  {name}: {f}")

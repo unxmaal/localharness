@@ -76,12 +76,20 @@ if [ -n "${HF_ROOT:-}" ]; then
     || _hf_fatal "HF_ROOT=$HF_ROOT is not on writable external storage." \
     || return 1 2>/dev/null || exit 1
 else
+  # Split the colon list by parameter expansion, NOT by an IFS word-splitting
+  # loop. This file is SOURCED, so it runs in whatever shell the user has, and
+  # zsh does not word-split unquoted parameters: `for x in $VAR` yields one
+  # item there and HF_HOME ends up as the whole "a:b" string, a plausible path
+  # that does not exist. Verified against bash, zsh and sh.
   HF_ROOT=""
-  _hf_saved_ifs="$IFS"; IFS=":"
-  for _cand in $HF_CANDIDATES; do
+  _hf_rest="$HF_CANDIDATES"
+  while [ -n "$_hf_rest" ]; do
+    _cand="${_hf_rest%%:*}"
+    if [ "$_hf_rest" = "$_cand" ]; then _hf_rest=""; else _hf_rest="${_hf_rest#*:}"; fi
+    [ -n "$_cand" ] || continue
     if _hf_usable "$_cand"; then HF_ROOT="$_cand"; break; fi
   done
-  IFS="$_hf_saved_ifs"; unset _hf_saved_ifs _cand
+  unset _hf_rest _cand
   [ -n "$HF_ROOT" ] \
     || _hf_fatal "no writable external volume found (tried $HF_CANDIDATES)." \
     || return 1 2>/dev/null || exit 1

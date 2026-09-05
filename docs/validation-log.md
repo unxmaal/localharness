@@ -562,3 +562,39 @@ The first watchdog checked `pgrep -qx h3` immediately after launching
 `nohup bash ... &`, before `bash -> /usr/bin/time -> h3` had spawned, and
 declared the run dead at t=0. Same shape as the LiteLLM readiness race earlier in
 this log: **wait for a process to exist before watching for its absence.**
+
+## Image generation via mflux, measured (2026-09-05)
+
+Engine: `mflux` (2310 stars, MLX-native), model Z-Image Turbo 6B, 8 steps,
+512x512, seed 42, 8-bit quantized. Weights 6.1 GB to /Volumes/Models/hf.
+
+    candidate                     pass   rate   median    total      peak
+    mflux/z-image-turbo          3/3     100%  119.16s   624.4s    6.2GiB
+
+    fox-snow      387.2s   <- includes the cold model load
+    product-shot  119.2s
+    text-render   118.0s
+
+Peak RSS 6.2 GiB against the 25.0 GiB working set measured by tools/h3probe, so
+image generation is comfortable on this machine and could run concurrently with
+most things.
+
+The 387s first case versus ~119s after is exactly why the summary reports a
+median rather than a mean: a cold load would otherwise triple the apparent cost
+of every candidate.
+
+`text-render` is the notable pass. Legible, correctly spelled "OPEN" in carved
+serif, which is historically where local image models fail.
+
+### Two install traps
+
+`uv tool install mflux` picked **Python 3.9** from a pyenv shim, and mflux uses
+`int | None` annotations, so every entry point died at import with
+
+    TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'
+
+`uv tool install --python 3.12 mflux` fixes it. Worth checking the interpreter
+whenever a `uv tool install` produces a binary that cannot import itself.
+
+The first install also produced only 2 executables against 37 on the second,
+which is a quieter symptom of the same failure.

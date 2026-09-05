@@ -5,6 +5,7 @@ internal disk, which is at 91% and cannot hold a 134GB checkpoint. Every case
 here is a way that guard could fail open.
 """
 import os
+import shutil
 import subprocess
 import uuid
 from pathlib import Path
@@ -19,7 +20,7 @@ pytestmark = pytest.mark.skipif(
     reason="needs the Models volume mounted to exercise the real mount check")
 
 
-def run_env(hf_root=None, candidates=None):
+def run_env(hf_root=None, candidates=None, shell="bash"):
     """Source env.sh in a clean shell; return (exit_code, HF_HOME, stderr)."""
     env = {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"]}
     if hf_root is not None:
@@ -27,7 +28,7 @@ def run_env(hf_root=None, candidates=None):
     if candidates is not None:
         env["HF_CANDIDATES"] = candidates
     p = subprocess.run(
-        ["bash", "-c", f'source "{REPO}/scripts/env.sh" && echo "HF_HOME=$HF_HOME"'],
+        [shell, "-c", f'source "{REPO}/scripts/env.sh" && echo "HF_HOME=$HF_HOME"'],
         capture_output=True, text=True, env=env)
     home = ""
     for line in p.stdout.splitlines():
@@ -132,3 +133,23 @@ def test_hf_home_is_exported_to_children(scratch):
         capture_output=True, text=True, env=env)
     assert p.returncode == 0
     assert str(scratch / "hf") in p.stdout
+
+
+# ---- shell portability -----------------------------------------------------
+
+@pytest.mark.parametrize("shell", ["bash", "zsh", "sh"])
+def test_candidate_splitting_works_in_every_shell(scratch, shell):
+    """env.sh is SOURCED, so it runs in whatever shell the user has.
+
+    zsh does not word-split unquoted parameters. An IFS-based `for x in $VAR`
+    loop silently yields ONE item there, and HF_HOME ends up set to the entire
+    colon-joined candidate list. That is a plausible-looking path that does not
+    exist, so weights would land somewhere useless.
+    """
+    if not shutil.which(shell):
+        pytest.skip(f"{shell} not installed")
+    code, home, _ = run_env(
+        candidates=f"/Volumes/NoSuchVolume/hf:{scratch}/hf", shell=shell)
+    assert code == 0
+    assert home == f"{scratch}/hf", f"{shell} mis-split the candidate list"
+    assert ":" not in home
