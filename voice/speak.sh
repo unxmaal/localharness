@@ -61,10 +61,10 @@ PY
   [ -z "$SUMMARY" ] && exit 0
 
   WAV="$VOICE_RUN/say-$$.wav"
-  curl -s --max-time 60 "$KOKORO_HOST/v1/audio/speech" \
+  curl -s --max-time 60 "$TTS_HOST/v1/audio/speech" \
     -H 'Content-Type: application/json' \
-    -d "$(jq -n --arg v "$KOKORO_VOICE" --arg i "$SUMMARY" --argjson s "$KOKORO_SPEED" \
-          '{model:"kokoro",voice:$v,input:$i,response_format:"wav",speed:$s}')" \
+    -d "$(jq -n --arg m "$TTS_MODEL" --arg v "$TTS_VOICE" --arg i "$SUMMARY" --argjson s "$TTS_SPEED" \
+          '{model:$m,voice:$v,input:$i,response_format:"wav",speed:$s}')" \
     -o "$WAV" 2>/dev/null
 
   if [ -s "$WAV" ]; then

@@ -4,7 +4,7 @@ Speaking and hearing for Claude Code in wezterm. Local models only.
 
     you speak  -> rec (sox, silence-gated) -> parakeet-mlx -> wezterm cli send-text
     claude ends turn -> Stop hook -> strip markdown -> local summary via :4000
-                     -> kokoro /v1/audio/speech -> afplay
+                     -> mlx-audio kokoro :8083 -> afplay
 
 ## Pieces
 
@@ -38,9 +38,8 @@ No settings.json edit, no restart.
 
 ## Setup, in order
 
-1. Start Kokoro: `cd ~/projects/github/unxmaal/local_chat && docker compose up -d kokoro-tts`
-   Raise `cpus: 0.3` in that compose file first; it is throttled for batch VO,
-   not for conversation.
+1. Start TTS: `./scripts/serve-tts.sh &` (Kokoro-82M on the GPU via mlx-audio,
+   port 8083). First run pulls ~330MB to `$HF_HOME`.
 2. Start the gateway: `./scripts/serve-mlx.sh &` and `./scripts/serve-gateway.sh &`
 3. Register the Stop hook in `~/.claude/settings.json` (see `settings-snippet.json`).
 4. Add the keybinding from `wezterm-snippet.lua` to `~/.wezterm.lua`.
@@ -49,7 +48,7 @@ No settings.json edit, no restart.
 ## Known gaps
 
 - Parakeet is English-only. `mlx-whisper` is the multilingual swap.
-- Kokoro runs in a CPU container. `mlx-audio` would move it onto the GPU and is
-  the obvious upgrade if latency disappoints.
+- Kokoro-82M-bf16 is the default. `-8bit` and `-4bit` variants exist if load
+  time or memory ever matter, though at 82M parameters neither is likely to.
 - Nothing interrupts Claude mid-response by voice; you can only cut off playback
   by starting a new recording.
