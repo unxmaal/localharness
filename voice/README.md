@@ -6,8 +6,12 @@ interaction layer. What survives from here is the backend: `mlx_audio.server`
 serving Parakeet STT and Kokoro TTS on the GPU, which is faster than what
 voicemode ships, plus `stt_shim.py` to bridge them.
 
-`speak.sh` / `listen.sh` still work and are kept as a fallback and as a record of
-the summarization approach, which voicemode does not do.
+The Stop-hook front end (`speak.sh`, `listen.sh`, `strip.py`, the wezterm
+keybinding) has been removed. Its one idea worth remembering: it summarized
+responses to two spoken sentences and reattached any closing question verbatim,
+because a small model asked to condense "Want me to do X?" would sometimes answer
+it instead. voicemode reads responses directly and does not have this problem in
+the same form, but it is a trap worth knowing if summarization is ever added.
 
 ## Serving voicemode
 
