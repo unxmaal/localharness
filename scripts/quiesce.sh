@@ -12,7 +12,7 @@
 #
 # Usage: scripts/quiesce.sh [--apps] [--dry-run]
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 mkdir -p .logs
 STATE=.logs/quiesce-state.json
 APPS=0; DRY=0
@@ -54,6 +54,7 @@ if [ -n "$CONTAINERS" ]; then
       "$CONTAINERS" \
       "$(pgrep -q -f 'Docker.app/Contents/MacOS/Docker' && echo true || echo false)" \
       "$APPS" > "$STATE"
+    # shellcheck disable=SC2046  # word splitting is the point: a name list
     docker stop $(echo "$CONTAINERS" | tr ',' ' ') >/dev/null 2>&1
   fi
 else

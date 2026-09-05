@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Undo scripts/quiesce.sh using the state it recorded.
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 STATE=.logs/quiesce-state.json
 [ -f "$STATE" ] || { echo "no $STATE; nothing recorded to restore" >&2; exit 1; }
 
@@ -20,7 +20,8 @@ fi
 
 if [ -n "$CONTAINERS" ]; then
   echo "starting containers"
-  docker start $(echo "$CONTAINERS" | tr ',' ' ') 2>&1 | sed 's/^/  /'
+  # shellcheck disable=SC2046  # word splitting is the point: a name list
+  docker start $(echo "$CONTAINERS" | tr ',' ' ') 2>&1 | sed 's/^/  /' 
 fi
 
 echo ""

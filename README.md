@@ -5,6 +5,16 @@ Local LLM serving and evaluation on Apple Silicon.
 Read `PLAN.md` first. `docs/validation-log.md` holds the evidence behind every
 claim in it, including one conclusion that was wrong and how it was caught.
 
+## Develop
+
+    make check     # shellcheck + bash -n + unit tests, no services needed
+    make test      # unit tests only
+    make smoke     # end-to-end, REQUIRES the services running
+
+Tests are red-proofed by mutation: every guard has been broken deliberately and
+the corresponding test confirmed to fail. `docs/testing.md` records which
+mutations were run and which two survived, and why.
+
 ## Run it
 
     ./scripts/serve-mlx.sh       # inference engine on :8081

@@ -9,4 +9,15 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "pytest>=8",
+    "respx>=0.21",
+    "fastapi>=0.110",
+    "httpx>=0.27",
+    "uvicorn>=0.30",
+    "python-multipart>=0.0.9",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"

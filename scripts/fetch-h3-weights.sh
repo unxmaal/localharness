@@ -24,7 +24,14 @@ if [ "$AVAIL_GB" -lt 160 ]; then
 fi
 echo "dest  $DEST (${AVAIL_GB}GB free)"
 
-exec uv run --no-project --with 'huggingface_hub[hf_transfer]' python - "$DEST" <<'PY'
+# Publish liveness so h3-weights-status.sh can tell a running download from a
+# crashed one without pattern-matching command lines.
+mkdir -p .logs
+PIDFILE="${H3_DOWNLOAD_PIDFILE:-.logs/h3-weights.pid}"
+echo $$ > "$PIDFILE"
+trap 'rm -f "$PIDFILE"' EXIT
+
+uv run --no-project --with 'huggingface_hub[hf_transfer]' python - "$DEST" <<'PY'
 import os, sys, time
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 from huggingface_hub import snapshot_download
