@@ -36,6 +36,53 @@ sudo and does not survive a reboot.
 volume. They are stale mountpoints, not attached drives. Confirmed by `df` reporting
 the same filesystem and by `mount | grep -E 'Raid|External1'` returning nothing.
 
+## External drives (measured after the user reconnected them)
+
+    $ df -h /Volumes/T7 /Volumes/2TB
+    /dev/disk53s1   931Gi  461Gi  470Gi  50%  /Volumes/T7
+    /dev/disk51s1   1.8Ti  1.1Ti  780Gi  59%  /Volumes/2TB
+
+Link speeds, ioreg "Device Speed" (3 = SuperSpeed 5Gbps, 4 = SuperSpeed+ 10Gbps):
+
+    +-o AppleT8112USBXHCI@00000000
+    | +-o DockCase SSD Enclosure C1P@00200000     <- /Volumes/2TB
+    |       "Device Speed" = 4                     direct to host controller
+    +-o AppleEmbeddedUSBXHCIASMedia3142@08000000
+      +-o USB3.0 Hub@08100000  (VIA Labs)
+      |     "Device Speed" = 3
+      +-o PSSD T7@08200000                         <- /Volumes/T7
+            "Device Speed" = 3                     behind the hub
+
+`SPThunderboltDataType` reports "No device connected" on every port, so neither drive
+is Thunderbolt.
+
+Throughput, 1 GiB dd:
+
+    T7,  cold read of pre-existing itunes_backup.tar.gz : 459,927,758 B/s (460 MB/s)
+    T7,  same file at offset 400M (page cache)          : 1,117,559,080 B/s
+    T7,  write                                          : 430,744,510 B/s
+    internal, write                                     : 1,152,784,821 B/s
+    2TB, read of a 12GB TM backup .img                  : 229,010,986 B/s
+    2TB, same file at offset 2G                         : 118,718,271 B/s
+
+The T7 numbers are trustworthy: 460 MB/s cold, reproduced across two different
+pre-existing files, which is 5 Gbps saturation. The T7 is a 10 Gbps device, so the
+VIA hub is halving it.
+
+The 2TB numbers are NOT trustworthy as a drive measurement. Every file on that volume
+is Time Machine backup data stored with APFS clones and heavy fragmentation, and a
+write test is impossible:
+
+    $ dd if=/dev/zero of=/Volumes/2TB/.bench_tmp bs=1m count=1024
+    dd: /Volumes/2TB/.bench_tmp: Permission denied
+
+    $ ls -ld /Volumes/2TB
+    drwxrwxr-x@ 8 root wheel /Volumes/2TB
+    $ id -Gn eric | grep -x wheel   ->  eric NOT in wheel
+
+Time Machine owns the volume root. Re-measure with a clean write/read test once the
+user reclaims it.
+
 ## MLX backend
 
     $ uv run python -c "import mlx.core as mx; print(mx.default_device(), mx.metal.is_available())"
