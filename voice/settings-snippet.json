@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/projects/github/unxmaal/localharness/voice/speak.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
