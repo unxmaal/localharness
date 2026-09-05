@@ -102,3 +102,56 @@ def test_artifacts_are_named_per_case_so_runs_do_not_collide(tmp_path):
     b = runner.run(case(id="two"))
     assert Path(a.artifact).name != Path(b.artifact).name
     assert Path(a.artifact).exists() and Path(b.artifact).exists()
+
+
+# ---- mflux engine spec parsing --------------------------------------------
+
+from evals.runners.image import mflux_engine  # noqa: E402
+
+
+def argv_for(spec, **assertions):
+    from evals.core import Case
+    eng = mflux_engine(spec)
+    c = Case(id="t", modality="image", prompt="a fox",
+             assertions=assertions or {})
+    return eng, eng.argv(c, Path("/tmp/o.png"), c.assertions)
+
+
+def test_plain_model_uses_its_own_entry_point():
+    """`z-image-turbo` ships as mflux-generate-z-image-turbo."""
+    eng, argv = argv_for("z-image-turbo")
+    assert argv[0] == "mflux-generate-z-image-turbo"
+    assert "--model" not in argv
+    assert eng.name == "mflux/z-image-turbo"
+
+
+def test_entrypoint_slash_model_passes_model_as_a_flag():
+    """flux2-klein-4b is a --model of the flux2 entry point, not a binary.
+
+    Getting this wrong invents mflux-generate-flux2-klein-4b, which does not
+    exist, and the run fails as 'not installed' rather than as a bad spec.
+    """
+    eng, argv = argv_for("flux2/flux2-klein-4b")
+    assert argv[0] == "mflux-generate-flux2"
+    assert argv[argv.index("--model") + 1] == "flux2-klein-4b"
+    assert eng.name == "mflux/flux2-klein-4b"
+
+
+def test_steps_and_dimensions_are_forwarded():
+    _, argv = argv_for("z-image-turbo", width=512, height=512, steps=8, seed=42)
+    assert argv[argv.index("--width") + 1] == "512"
+    assert argv[argv.index("--steps") + 1] == "8"
+    assert argv[argv.index("--seed") + 1] == "42"
+
+
+def test_case_steps_override_the_candidate_default():
+    eng = mflux_engine("z-image-turbo", steps=4)
+    from evals.core import Case
+    c = Case(id="t", modality="image", prompt="x", assertions={"steps": 20})
+    argv = eng.argv(c, Path("/tmp/o.png"), c.assertions)
+    assert argv[argv.index("--steps") + 1] == "20"
+
+
+def test_prompt_is_passed_as_one_argument_not_split():
+    _, argv = argv_for("z-image-turbo")
+    assert "a fox" in argv

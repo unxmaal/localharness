@@ -97,13 +97,33 @@ def _to_kb(maxrss: int) -> int:
     return maxrss // 1024 if sys.platform == "darwin" else maxrss
 
 
-def mflux_engine(model: str, quantize: int | None = 8,
+def mflux_engine(spec: str, quantize: int | None = 8,
                  steps: int | None = None) -> Engine:
-    """mflux, the MLX-native image stack (mflux-generate-<model>)."""
-    binary = f"mflux-generate-{model}"
+    """mflux, the MLX-native image stack.
+
+    `spec` is either a model that ships its own entry point:
+
+        z-image-turbo        -> mflux-generate-z-image-turbo
+
+    or `entrypoint/model` for variants selected by a flag:
+
+        flux2/flux2-klein-4b -> mflux-generate-flux2 --model flux2-klein-4b
+
+    The distinction matters: flux2-klein-4b has no binary of its own, and
+    guessing one produces a "not installed" failure that reads as a missing
+    dependency rather than a bad spec.
+    """
+    if "/" in spec:
+        entrypoint, model = spec.split("/", 1)
+    else:
+        entrypoint, model = spec, None
+    binary = f"mflux-generate-{entrypoint}"
+    label = model or entrypoint
 
     def argv(case: Case, out: Path, a: dict) -> list[str]:
         cmd = [binary, "--prompt", case.prompt, "--output", str(out)]
+        if model:
+            cmd += ["--model", model]
         if a.get("width"):
             cmd += ["--width", str(a["width"])]
         if a.get("height"):
@@ -117,4 +137,4 @@ def mflux_engine(model: str, quantize: int | None = 8,
             cmd += ["-q", str(quantize)]
         return cmd
 
-    return Engine(name=f"mflux/{model}", argv=argv)
+    return Engine(name=f"mflux/{label}", argv=argv)

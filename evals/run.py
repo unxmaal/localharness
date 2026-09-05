@@ -33,9 +33,9 @@ def build_runner(modality: str, candidate: str, gateway: str, outdir: Path):
         return TextRunner(gateway, candidate)
     if candidate.startswith("mflux:"):
         parts = candidate.split(":")
-        model = parts[1]
+        spec = parts[1]
         steps = int(parts[2]) if len(parts) > 2 else None
-        return ImageRunner(mflux_engine(model, steps=steps),
+        return ImageRunner(mflux_engine(spec, steps=steps),
                            outdir or Path(".logs/images"))
     raise SystemExit(f"unknown candidate '{candidate}' for modality {modality}")
 

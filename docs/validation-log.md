@@ -598,3 +598,36 @@ whenever a `uv tool install` produces a binary that cannot import itself.
 
 The first install also produced only 2 executables against 37 on the second,
 which is a quieter symptom of the same failure.
+
+## Image head to head: Z-Image Turbo 6B vs FLUX.2 klein 4B (2026-09-05)
+
+512x512, 8 steps, seed 42, 8-bit quantized, same three prompts.
+
+    candidate                     pass   rate   median    total      peak
+    mflux/flux2-klein-4b         3/3     100%   64.65s   351.8s    6.6GiB
+    mflux/z-image-turbo          3/3     100%  120.89s   378.6s    3.3GiB
+
+    per case (s)        fox-snow  product-shot  text-render
+    flux2-klein-4b        222.53*        64.65        64.61
+    z-image-turbo         137.80*       120.89       119.96
+                          * cold model load
+
+**FLUX.2 klein is 1.9x faster warm at 2x the memory.** Both pass every objective
+check, so this is a tradeoff rather than a winner: klein when latency matters,
+Z-Image Turbo when something else needs the RAM.
+
+Cold load is worth 158s on klein and only 18s on Z-Image Turbo, so klein's
+advantage only exists once it is warm. For one-shot generation from cold they
+are roughly level.
+
+Both rendered legible, correctly spelled text, which is where local image models
+usually fail. klein's output is the more photographic of the two and Z-Image
+Turbo's the more studio-clean; that difference is taste and the harness
+deliberately does not score it.
+
+### Measurement caveat
+
+Discord started partway through and swap climbed from 1.0GB to 8.8GB. The wall
+times above were taken under that pressure and are therefore pessimistic, though
+both candidates ran in the same session so the comparison between them stands.
+Re-measure on a quiet machine before treating the absolute numbers as a baseline.
