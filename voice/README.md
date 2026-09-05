@@ -1,5 +1,33 @@
 # voice
 
+**Status: superseded as a front end.** [mbailey/voicemode](https://github.com/mbailey/voicemode)
+(1349 stars, 189 forks, actively developed) does this better and is now the
+interaction layer. What survives from here is the backend: `mlx_audio.server`
+serving Parakeet STT and Kokoro TTS on the GPU, which is faster than what
+voicemode ships, plus `stt_shim.py` to bridge them.
+
+`speak.sh` / `listen.sh` still work and are kept as a fallback and as a record of
+the summarization approach, which voicemode does not do.
+
+## Serving voicemode
+
+    scripts/serve-tts.sh        mlx_audio (Kokoro + Parakeet) on 8085
+    scripts/serve-stt-shim.sh   model-rewriting proxy on 8083
+
+voicemode points at 8083 for both TTS and STT. The shim exists because voicemode
+hardcodes the STT model as `whisper-1` with no override, and mlx_audio wants a
+HuggingFace repo id. It rewrites that one field and proxies everything else.
+
+Required voicemode settings, found the hard way:
+
+    VOICEMODE_TTS_BASE_URLS=http://127.0.0.1:8083/v1
+    VOICEMODE_STT_BASE_URLS=http://127.0.0.1:8083/v1
+    VOICEMODE_TTS_MODELS=mlx-community/Kokoro-82M-bf16
+    VOICEMODE_VAD_AGGRESSIVENESS=1      # default 3 detects no speech on a Yeti
+    OPENAI_API_KEY=<anything>           # required even for a local endpoint
+
+Measured through this stack: `stt 0.1s`, `gen 0.4s`, `ttfa 0.4s`.
+
 Speaking and hearing for Claude Code in wezterm. Local models only.
 
     you speak  -> rec (sox, silence-gated) -> parakeet-mlx -> wezterm cli send-text

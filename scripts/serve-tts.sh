@@ -24,4 +24,4 @@ exec uv run --no-project \
   --with mlx-audio --with uvicorn --with webrtcvad \
   --with fastapi --with python-multipart --with 'setuptools>=70,<81' \
   --with 'misaki[en]' \
-  python -m mlx_audio.server --host 127.0.0.1 --port "${TTS_PORT:-8083}"
+  python -m mlx_audio.server --host 127.0.0.1 --port "${TTS_PORT:-8085}"
