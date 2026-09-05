@@ -266,3 +266,55 @@ negative case and confirm the failure returns. See KB rule "LiteLLM
 
 `litellm/__init__.py:239` reads the flag as `bool(os.getenv(...))`, so any non-empty
 value is true, including the string `false`. Set it to 1 or leave it unset.
+
+
+## HF_HOME made global, cache migrated
+
+`~/.zshrc` is a symlink to `projects/github/unxmaal/dotfiles/zshrc`, so the export
+went in the repo, not the home directory:
+
+    export HF_HOME=/Volumes/Models/hf
+
+Verified in a fresh login shell and through the library itself:
+
+    $ zsh -lic 'echo $HF_HOME'
+    /Volumes/Models/hf
+    $ python -c "from huggingface_hub import constants; print(constants.HF_HUB_CACHE)"
+    /Volumes/Models/hf/hub
+
+Deliberately not guarded by a mount check. `/Volumes` is `drwxr-xr-x root:wheel`, and
+a user `mkdir` there fails with `Permission denied` (tested), so an absent drive makes
+`huggingface_hub` fail loudly instead of silently re-downloading to a full disk.
+
+Migration verified before deleting the source:
+
+    $ rsync -a --checksum --dry-run --itemize-changes ~/.cache/huggingface/ /Volumes/Models/hf/
+    differences: 0
+    src md5 (6.2GB fastchat-t5 blob): 583dfa4de314b9226939172dd8a9b914
+    dst md5                         : 583dfa4de314b9226939172dd8a9b914
+    src sum of regular file bytes: 10.3955 GB
+    dst sum of regular file bytes: 10.3957 GB
+
+### Correction: the FLUX weights were never there
+
+A `du` discrepancy looked at first like 1.1 GB had gone missing. It had not: the Qwen
+models were present in BOTH trees, because the MLX server had run against the default
+`HF_HOME` before it was repointed. Source and destination byte sums match.
+
+Investigating it did surface a real error in an earlier draft of PLAN.md, which
+claimed FLUX weights were already cached and image generation was ready to go:
+
+    $ find ~/.cache/huggingface/hub/models--black-forest-labs--FLUX.1-dev
+    .../models--black-forest-labs--FLUX.1-dev
+    .../models--black-forest-labs--FLUX.1-dev/refs
+    .../models--black-forest-labs--FLUX.1-dev/refs/main
+
+    $ find .../FLUX.1-dev -type f -size +1M | wc -l
+    0
+
+All three FLUX directories hold only a `refs/main` pointer. No blobs. The 10 GB cache
+is fastchat-t5 (6.2 GB) plus Chatterbox (3.0 GB) plus the Qwen test models. FLUX has
+to be downloaded. The plan was corrected.
+
+Lesson worth keeping: a populated-looking `models--*` directory in an HF cache proves
+a repo was referenced, not that its weights were fetched. Check for blobs.

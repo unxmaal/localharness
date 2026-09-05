@@ -176,15 +176,71 @@ retry, and artifact management. That is a different service from a chat proxy.
 
 Existing knowledge that applies directly, from the `tsatd_video` work:
 
-- FLUX weights are already in the HF cache and image generation is viable on this
-  32 GB machine today.
-- MiniMax H3 video needs roughly 40 GB resident and is **not** viable on 32 GB
-  (KNOWLEDGE #67). It becomes plausible on the 96 GB Studio. Video is therefore a
-  post-Studio phase, and renting stays the correct answer until then.
-- `ComfyUI_MiniMax_H3_Extender` is genuinely local, not an API wrapper
-  (KNOWLEDGE #70), and its Motion Context feature carries a previous clip's sampled
-  latent forward. That is a real continuity capability the hosted API does not expose,
-  and it is the reason to revisit local video on the Studio.
+- **Correction.** An earlier draft said FLUX weights were already cached. They are
+  not. `models--black-forest-labs--FLUX.1-dev`, `FLUX.1-schnell`, and
+  `flux_text_encoders` each contain only a `refs/main` file, zero blobs, nothing
+  over 1 MB. The 10 GB cache is fastchat-t5 (6.2 GB) and Chatterbox (3.0 GB).
+  FLUX has to be downloaded. Image generation on 32 GB is still expected to be
+  viable, but nothing about it has been tested here.
+- **Video goes through `antirez/h3.c`, not ComfyUI.** This supersedes the earlier
+  conclusion that video is strictly post-Studio. See section 3.1.
+
+### 3.1 Video: antirez/h3.c
+
+The chosen engine for MiniMax H3 is `antirez/h3.c`: a native C implementation with
+Metal GPU acceleration and Objective-C shims, targeting Apple Silicon directly rather
+than going through PyTorch or ComfyUI. It handles video, image and audio generation
+with first/last-frame anchoring and reference-based conditioning.
+
+**Why this changes the earlier conclusion.** KNOWLEDGE #67 concluded H3 needs roughly
+40 GB resident and is not viable on 32 GB, making video strictly post-Studio. h3.c has
+a `--ssd-streaming` flag that "keeps two DiT blocks in memory and reads the next block
+from SSD while the GPU runs the current one." Stated effect: DiT storage falls from
+about **36.5 GiB to 2.0 GiB** at 512 square, 2.1 GiB at 864x480.
+
+Two facts make 32 GB plausible rather than merely smaller:
+
+1. Only the DiT streams. Prompt encoding and the two VAEs "run in separate phases",
+   so peak memory is the largest phase, not the sum of all of them. The DiT phase is
+   the big one, and it is exactly the one that streams.
+2. The storage work done earlier is now load-bearing rather than convenient. SSD
+   streaming reads a DiT block per step off disk, so throughput directly sets the
+   penalty. The Models volume at 959 MB/s cold read is well suited; on the T7 at
+   432 MB/s the same feature would have cost roughly twice as much.
+
+**Costs and constraints, from the project's own documentation:**
+
+- Speed: a warm 50-block forward measured 1.35 s without streaming against 2.49 s
+  with it at 512 square, quoted as **84% slower**. That is on an M5 Max.
+- int8 requires "supported M5 Metal 4 TensorOps hardware" and is computed at runtime
+  rather than downloaded. On an M2 Pro this machine gets the **BF16 path only**, and
+  the int8 speedup (36.30 s to 25.80 s on M5 Max) is unavailable.
+- Canvas dimensions must be multiples of 32, product not exceeding 768x1344.
+- Audio references are limited to 2 to 15 seconds total.
+- FFmpeg and FFprobe are required.
+- Build is `make -j8`; weights are expected as a Hugging Face snapshot at
+  `./MiniMax-H3`, inspectable with `./h3 --info -d ./MiniMax-H3`.
+
+**Honestly unknown.** The documentation names M3 Max and M5 Max throughout and makes
+**no statement** about M1/M2/M3/M4 Pro or base chips, nor about 32 GB or 64 GB
+machines, in either direction. It gives no per-component memory breakdown beyond the
+DiT, and no download command, repo id, or snapshot size. The 32 GB viability argument
+above is inference from the phase structure and the streaming numbers, not something
+the project claims. The only way to settle it is to build it and run it.
+
+**The one real commitment** is disk: KNOWLEDGE #67 puts the full BF16 checkpoint at
+roughly 129 GiB, with a task partition at 134 to 160 GB. The Models volume has about
+920 GB free, so it fits comfortably, but it is a large download to undertake before
+knowing whether the machine can run it.
+
+Recommended order: build h3.c first (`make -j8` costs nothing), confirm it compiles
+and that `--info` works, and only then commit to the weight download.
+
+`ComfyUI_MiniMax_H3_Extender` (KNOWLEDGE #70) remains interesting for its Motion
+Context feature, which carries a previous clip's sampled latent forward rather than
+just a last-frame still. That is a continuity capability the hosted API does not
+expose. It is a ComfyUI plugin, so it does not compose with h3.c; treat it as the
+fallback path if h3.c does not work out on this hardware.
 
 ### Engine choices, text lane
 
@@ -291,17 +347,23 @@ provider. OpenExecutive already has `OpenAICompatibleProvider` at its
 `providers/provider.py` seam (KNOWLEDGE #79); note that entry's caveat that prompt
 caching is load-bearing there and local models will not reproduce it.
 
-**Phase 5, media lane, images.** ComfyUI on :8188 with outputs on T7. FLUX weights
-are already cached and this is viable on 32 GB today. Build the job dispatcher here,
-where jobs are minutes rather than the tens of minutes video costs.
+**Phase 5, media lane, images.** ComfyUI on :8188 with outputs on the Models volume.
+FLUX weights need downloading; they are not cached, contrary to an earlier draft.
+Build the job dispatcher here, where jobs are minutes rather than the tens of minutes
+video costs.
 
 **Phase 6, Studio migration.** Should be close to a no-op if the seam held. Move
 `$HF_HOME`, re-run the eval suite, and treat the score sheet as the migration test.
 Only then revisit `iogpu.wired_limit_mb`.
 
-**Phase 7, media lane, video.** Post-Studio by necessity: H3 needs roughly 40 GB
-resident against 32 GB available today. Revisit `ComfyUI_MiniMax_H3_Extender` for
-Motion Context. Until then, renting remains correct.
+**Phase 7, media lane, video, via `antirez/h3.c`.** No longer strictly post-Studio.
+Order: build with `make -j8` and verify `./h3 --info` before committing to a ~130 to
+160 GB weight download. Then test `--ssd-streaming` at 512 square on this 32 GB
+machine and record actual peak memory and wall time, which is the number nobody has
+published for this hardware class. Expect BF16 only, no int8, and an 84% streaming
+penalty on top of an already slower chip. If it works at all here, the Studio turns it
+from a proof of concept into something usable. If it does not, renting remains correct
+and `ComfyUI_MiniMax_H3_Extender` is the fallback. See section 3.1.
 
 ## 6. Resolved and open
 
