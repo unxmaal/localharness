@@ -58,7 +58,11 @@ PARAKEET_MODEL="${PARAKEET_MODEL:-mlx-community/parakeet-tdt-0.6b-v2}"
 # a quiet room (measured RMS 59, or 0.18% of full scale, on a Yeti with nobody
 # talking). Raise it if the gate self-triggers on background noise.
 VOICE_THRESHOLD="${VOICE_THRESHOLD:-1%}"
-VOICE_HANG="${VOICE_HANG:-1.8}"
+# Trailing silence before sox stops. This is paid on EVERY utterance after you
+# stop talking, so it is the single biggest lever on perceived latency. 1.8s was
+# too patient. 0.9s still tolerates the pause inside "so it works, ... but it
+# is slow"; drop it further if it clips you, raise it if it cuts you off.
+VOICE_HANG="${VOICE_HANG:-0.9}"
 VOICE_MAX_SECONDS="${VOICE_MAX_SECONDS:-30}"
 
 # Hard stop on waiting for someone to start talking. Without it a gate that

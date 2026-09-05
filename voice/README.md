@@ -85,6 +85,26 @@ No settings.json edit, no restart.
 
 Voice ships MUTED. `rm ~/.claude/voice-mute` to turn it on.
 
+## Latency
+
+Measured end to end for a 4.1s utterance, total 6.76s:
+
+    +0.13s  invoked        script startup
+    +6.13s  captured       4.1s speech + 0.9s hang + ~1.0s waiting for onset
+    +6.49s  transcript     0.36s transcription
+    +6.76s  done           0.27s typing into the pane
+
+Fixed overhead is ~1.66s. The models are not the bottleneck: Parakeet transcribes
+a 6.5s clip in 0.24s, held resident.
+
+The variable cost is the gap between pressing the key and starting to talk, which
+was 2-4s in early use. sox discards leading silence, so starting immediately
+cannot clip you. `VOICE_HANG` is the only real knob; 0.6s feels snappier and will
+cut you off if you pause mid-sentence.
+
+`$VOICE_RUN/listen.log` timestamps every stage with elapsed time, so a slow run
+can be attributed rather than guessed at.
+
 ## Recording gate
 
 `VOICE_THRESHOLD` (default 1%) is a percentage of full scale. sox starts

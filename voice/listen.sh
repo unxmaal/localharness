@@ -12,7 +12,13 @@ REC_PID_FILE="$VOICE_RUN/rec.pid"
 WAV="$VOICE_RUN/listen.wav"
 LOG="$VOICE_RUN/listen.log"
 
-log() { printf '%s  %s\n' "$(date +%H:%M:%S)" "$*" >> "$LOG"; }
+T0=$(python3 -c 'import time;print(time.time())' 2>/dev/null || date +%s)
+log() {
+  local now el
+  now=$(python3 -c 'import time;print(time.time())' 2>/dev/null || date +%s)
+  el=$(python3 -c "print(f'{$now-$T0:5.2f}')" 2>/dev/null || echo "  ?")
+  printf '%s +%ss  %s\n' "$(date +%H:%M:%S)" "$el" "$*" >> "$LOG"
+}
 log "invoked (pane=${WEZTERM_PANE:-none})"
 
 # Fail loudly into the log rather than dying on "command not found" somewhere a
@@ -78,6 +84,8 @@ if [ "$BYTES" -lt 8000 ]; then
   rm -f "$WAV"
   exit 0
 fi
+# Elapsed minus the audio itself minus the hang is time spent waiting for you
+# to start talking, which no amount of tuning can recover.
 log "captured ${BYTES} bytes (~$((BYTES / 32000)).$(( (BYTES % 32000) * 10 / 32000 ))s)"
 
 # Transcribe through the same mlx_audio.server that does TTS. It holds Parakeet
@@ -90,6 +98,7 @@ TEXT=$(curl -s --max-time 60 "$TTS_HOST/v1/audio/transcriptions" \
 rm -f "$WAV"
 if [ -z "$TEXT" ]; then log "transcription returned nothing"; exit 0; fi
 log "transcript: $TEXT"
+log "done"
 
 # Type it into the pane that invoked us. --no-paste sends it as keystrokes so it
 # lands in the prompt for review; you press Enter, not this script. Putting words
