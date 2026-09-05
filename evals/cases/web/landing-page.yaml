@@ -1,0 +1,10 @@
+id: landing-page
+modality: web
+prompt: |
+  Write a complete self-contained HTML page: a landing page for a local AI
+  media toolkit. Header with nav, hero with a headline and one call to action,
+  three feature cards, footer. Inline CSS, dark theme, responsive. No external
+  resources, no frameworks.
+assert:
+  must_contain: ["<style", "footer"]
+  must_not_contain: ["http://", "https://"]

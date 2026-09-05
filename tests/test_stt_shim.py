@@ -9,11 +9,7 @@ import pytest
 import respx
 from fastapi.testclient import TestClient
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "voice"))
-
-import stt_shim  # noqa: E402
+import stt_shim
 
 UPSTREAM = stt_shim.UPSTREAM
 TRANSCRIBE = f"{UPSTREAM}/v1/audio/transcriptions"

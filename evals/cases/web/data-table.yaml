@@ -1,0 +1,9 @@
+id: data-table
+modality: web
+prompt: |
+  Write a complete self-contained HTML page showing a sortable table of 6 GPU
+  benchmark rows (name, VRAM GB, tokens/sec). Sorting is done with inline
+  JavaScript, no libraries. Include a caption.
+assert:
+  must_contain: ["<table", "<script"]
+  must_not_contain: ["https://"]

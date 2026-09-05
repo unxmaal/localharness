@@ -14,6 +14,12 @@ lint:                     ## shellcheck every script, syntax-check every one
 smoke:                    ## end-to-end; REQUIRES the services to be running
 	./scripts/smoke.sh
 
+evals:                    ## compare candidates; REQUIRES the gateway running
+	uv run python -m evals.run --modality all \
+	  --candidates $(CANDIDATES) --out .logs/evals-$$(date +%Y%m%d-%H%M%S)
+
+CANDIDATES ?= local-mid,local-summarize
+
 clean:
 	rm -f tools/h3probe
 	rm -rf .pytest_cache voice/__pycache__ tests/__pycache__

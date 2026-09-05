@@ -1,0 +1,8 @@
+id: chart-bars
+modality: svg
+prompt: |
+  Draw an SVG bar chart with exactly 5 bars of heights 3, 7, 4, 9, 6 units,
+  with a baseline axis. Label each bar with its value.
+assert:
+  min_shapes: 6
+  must_contain: ["text"]

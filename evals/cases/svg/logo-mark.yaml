@@ -1,0 +1,8 @@
+id: logo-mark
+modality: svg
+prompt: |
+  Draw a minimal geometric logo mark: three overlapping triangles forming a
+  rough hexagon, two fill colours. Vector shapes only.
+assert:
+  min_shapes: 3
+  must_not_contain: ["data:image"]
