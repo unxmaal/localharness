@@ -459,3 +459,60 @@ the Models volume at 959 MB/s rather than the T7 at 432.
 `--reuse` and `--core-reuse` cannot be combined; h3 rejects it in 0.04 s with
 "core reuse and denoiser reuse cannot be combined". It also warns when `--reuse`
 is paired with very few steps.
+
+## h3.c quality run at 512x512 (2026-09-05)
+
+    ./h3 -d /Volumes/Models/MiniMax-H3 \
+      -p "A red fox walks through falling snow in a quiet forest, late afternoon
+          light, shallow depth of field." \
+      -o outputs/quality1.mp4 --ssd-streaming --profile \
+      --width 512 --height 512 --frames 8 --steps 20 --layers 50 --seed 42
+
+Output is photographic and coherent: correct fox anatomy, fur detail, believable
+depth of field, the prompted late-afternoon light and falling snow both present.
+
+    2431.40 real (40.5 min)     <- predicted ~90 min, over by 2.2x
+    maximum resident set size  9.60 GiB
+    swaps                      0
+
+### The peak phase moved
+
+                        peak @320x320   peak @512x512
+    Qwen text encoder      2.727 GiB       2.728 GiB    unchanged
+    H3 DiT                 1.607 GiB       2.002 GiB    ~flat
+    video VAE decoder      0.775 GiB       9.454 GiB    12.2x
+
+The video VAE decoder is the binding constraint, not the DiT and not the text
+encoder. It is the only major component that does not stream. 2.56x the pixels
+produced 12.2x the memory, which is superlinear and consistent with attention
+over spatial tokens: its `attention` count went 36 -> 144 over the same change.
+
+Two points are a trend and not a law, but if that curve holds, h3's default
+864x480 needs far more than the 25.0 GiB working set and would fail. **512x512
+is at or near the ceiling on this hardware, and VAE decode is what breaks
+first.** Worth measuring 640x640 before assuming anything.
+
+This also revises the earlier conclusion. At 320x320 the text encoder looked like
+the peak-memory component; that was an artifact of a resolution small enough to
+make the VAE trivial. The text encoder is fixed-cost and streams; the VAE is
+resolution-driven and does not.
+
+### The streaming tax roughly doubled
+
+                     wait / denoise wall     share
+    320x320, 6 steps, 40 layers    68.25s / 501.44s     13.6%
+    512x512, 20 steps, 50 layers  644.29s / 2177.53s    29.6%
+
+Block loads went from 6x40=240 to 20x50=1000. The `--ssd-streaming` cost scales
+with steps x layers, so quality settings pay for it twice: more compute and more
+I/O stalls. At 29.6% idle, storage throughput is now a first-order term in wall
+time, which is the clearest argument yet for the Models volume at 959 MB/s over
+the T7 at 432.
+
+### Prediction accuracy
+
+- Wall time: predicted ~90 min from linear scaling of resolution x steps x layers,
+  actual 40.5 min. Linear scaling overestimated by 2.2x.
+- Peak memory: predicted "should stay near 9.5 GiB". Held (9.48 -> 9.60 GiB RSS),
+  but for the wrong reason: per-phase peaks moved substantially and RSS is
+  dominated by streaming page cache rather than live tensors.
