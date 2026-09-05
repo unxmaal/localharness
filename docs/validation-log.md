@@ -516,3 +516,49 @@ the T7 at 432.
 - Peak memory: predicted "should stay near 9.5 GiB". Held (9.48 -> 9.60 GiB RSS),
   but for the wrong reason: per-phase peaks moved substantially and RSS is
   dominated by streaming page cache rather than live tensors.
+
+## 640x640 probe: the VAE plateaus, it does not scale superlinearly (2026-09-05)
+
+Prediction from the 320->512 pair was that the video VAE scaled with a ~2.66
+exponent, putting 640x640 near 30 GiB and expecting failure. Run with a swap
+watchdog to fail fast rather than thrash. It succeeded comfortably.
+
+    --width 640 --height 640 --frames 8 --steps 4 --layers 40
+
+    596.61 real (9.9 min)
+    maximum resident set size  10.84 GiB
+    swap                       flat at 1027M for the entire run, never moved
+
+    video VAE peak:  320x320  0.775 GiB
+                     512x512  9.454 GiB
+                     640x640  9.365 GiB   <- FLAT, slightly lower
+
+The VAE peak plateaus around 9.4 GiB. The 12x jump between 320 and 512 was a
+threshold effect, almost certainly the decoder switching to a tiled path, not a
+smooth curve. Fitting an exponent to two points on opposite sides of a threshold
+produced a confident and completely wrong extrapolation.
+
+Practical consequence: **the resolution ceiling is well above 640x640.** h3's
+default 864x480 is 414,720 px against 640x640's 409,600, essentially identical,
+so the default resolution should run on this machine.
+
+VAE `attention` counts across the three runs were 36, 144, 324, which does grow
+quadratically in linear resolution. Memory did not follow it, which is what
+tiling is for.
+
+### Wait-per-block-load grows with resolution
+
+    320x320,  6 steps x 40 layers =  240 loads,  68.25s wait -> 0.28 s/load
+    512x512, 20 steps x 50 layers = 1000 loads, 644.29s wait -> 0.64 s/load
+    640x640,  4 steps x 40 layers =  160 loads, 173.53s wait -> 1.08 s/load
+
+So the `--ssd-streaming` stall is not purely a function of block count. It grows
+with resolution too, which points at activation-related stalls rather than pure
+weight I/O. At 640x640 the wait was 51.9% of denoise wall.
+
+### Watchdog bug worth remembering
+
+The first watchdog checked `pgrep -qx h3` immediately after launching
+`nohup bash ... &`, before `bash -> /usr/bin/time -> h3` had spawned, and
+declared the run dead at t=0. Same shape as the LiteLLM readiness race earlier in
+this log: **wait for a process to exist before watching for its absence.**
