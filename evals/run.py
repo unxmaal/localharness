@@ -15,7 +15,8 @@ import time
 from pathlib import Path
 
 from evals.core import load_cases, summarize
-from evals.runners.image import ImageRunner, mflux_engine
+from evals.environment import capture
+from evals.runners.process import ProcessRunner, mflux_engine
 from evals.runners.text import TextRunner
 
 ROOT = Path(__file__).resolve().parent
@@ -35,7 +36,7 @@ def build_runner(modality: str, candidate: str, gateway: str, outdir: Path):
         parts = candidate.split(":")
         spec = parts[1]
         steps = int(parts[2]) if len(parts) > 2 else None
-        return ImageRunner(mflux_engine(spec, steps=steps),
+        return ProcessRunner(mflux_engine(spec, steps=steps),
                            outdir or Path(".logs/images"))
     raise SystemExit(f"unknown candidate '{candidate}' for modality {modality}")
 
@@ -102,6 +103,7 @@ def main(argv: list[str] | None = None) -> int:
     if outdir:
         (outdir / "results.json").write_text(json.dumps(
             {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
+             "environment": capture(),
              "summary": summary,
              "rows": [vars(r) for r in results]}, indent=2))
         print(f"\nartifacts + results.json in {outdir}")

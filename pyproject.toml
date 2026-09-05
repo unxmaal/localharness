@@ -24,6 +24,5 @@ dev = [
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
 # The repo root, so `from evals...` resolves without a sys.path hack in every
-# test module. voice/ is added too: stt_shim.py is a standalone service script
-# rather than part of a package.
-pythonpath = [".", "voice"]
+# test module.
+pythonpath = ["."]

@@ -612,9 +612,17 @@ which is a quieter symptom of the same failure.
     z-image-turbo         137.80*       120.89       119.96
                           * cold model load
 
-**FLUX.2 klein is 1.9x faster warm at 2x the memory.** Both pass every objective
-check, so this is a tradeoff rather than a winner: klein when latency matters,
-Z-Image Turbo when something else needs the RAM.
+**FLUX.2 klein is 1.9x faster warm.** The memory column above is RETRACTED: it
+came from a before/after delta of `resource.getrusage(RUSAGE_CHILDREN).ru_maxrss`,
+which is a monotone high-water mark across all waited children, so the delta
+reads 0 for every child after the largest, and plain RSS falls under memory
+pressure besides. The same Z-Image config measured 6.2 GiB on a quiet machine
+and 3.3 GiB on a loaded one. The two models are probably comparable on memory
+and the "2x" claim was never supported.
+
+Peak is now measured with `/usr/bin/time -l` "peak memory footprint", the same
+phys_footprint metric the h3 runs used, so image and video numbers are finally
+on one scale. The comparison needs re-running to get a real number.
 
 Cold load is worth 158s on klein and only 18s on Z-Image Turbo, so klein's
 advantage only exists once it is warm. For one-shot generation from cold they

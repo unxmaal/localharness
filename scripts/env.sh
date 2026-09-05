@@ -99,5 +99,9 @@ fi
 mkdir -p "$HF_ROOT" || _hf_fatal "cannot create $HF_ROOT" \
   || return 1 2>/dev/null || exit 1
 
+# Cached weights should not depend on the network. mlx_lm.server issues a HEAD
+# to huggingface.co on every model switch even for local files, so a wifi blip
+# turns into a model "failure" mid-run. Set HF_HUB_OFFLINE=0 to fetch new ones.
+export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export HF_HOME="$HF_ROOT"
 echo "hf    HF_HOME=$HF_HOME" >&2

@@ -1,4 +1,7 @@
-"""Runner for image generators that are external processes.
+"""Runner for generators that are external processes.
+
+Not image-specific: mflux, h3.c and any audio engine are the same shape, so they
+plug in as Engines rather than as new Runner classes.
 
 The text runner parses a completion; there is nothing to parse here. What is
 measurable is the process itself: exit status, wall time, peak resident memory,
@@ -10,7 +13,6 @@ model's size on disk, and the same is true of diffusion.
 """
 from __future__ import annotations
 
-import resource
 import subprocess
 import time
 from dataclasses import dataclass
@@ -34,7 +36,39 @@ class Engine:
     output_suffix: str = ".png"
 
 
-class ImageRunner:
+def measure_peak_kb(argv, timeout=None, capture=True):
+    """Run argv, returning (peak_footprint_kb, returncode).
+
+    Uses `/usr/bin/time -l`, whose "peak memory footprint" is macOS's
+    phys_footprint: it accounts for compressed and swapped pages and is the
+    number Activity Monitor shows. This is the same metric the h3 runs were
+    reported in, so image and video numbers are finally comparable.
+
+    Not resource.getrusage(RUSAGE_CHILDREN).ru_maxrss: that is a monotone
+    high-water mark across ALL waited children, so a before/after delta reads 0
+    for every child after the largest, and plain RSS falls under memory
+    pressure. Both errors were live, and a documented "2x the memory"
+    conclusion rested on them.
+    """
+    import re
+    import shutil
+    import subprocess
+
+    # /usr/bin/time always exists, so a missing target would otherwise surface
+    # as time's own non-zero exit rather than as "not installed".
+    if shutil.which(argv[0]) is None:
+        raise FileNotFoundError(argv[0])
+
+    proc = subprocess.run(["/usr/bin/time", "-l", *argv],
+                          capture_output=capture, text=True, timeout=timeout)
+    peak = 0
+    m = re.search(r"(\d+)\s+peak memory footprint", proc.stderr or "")
+    if m:
+        peak = int(m.group(1)) // 1024  # bytes -> KB
+    return peak, proc.returncode
+
+
+class ProcessRunner:
     def __init__(self, engine: Engine, outdir: str | Path,
                  timeout: float = 900.0):
         self.engine = engine
@@ -48,11 +82,9 @@ class ImageRunner:
             out.unlink()
         argv = self.engine.argv(case, out, case.assertions)
 
-        before = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
         started = time.monotonic()
         try:
-            proc = subprocess.run(argv, capture_output=True, text=True,
-                                  timeout=self.timeout)
+            peak_kb, returncode = measure_peak_kb(argv, timeout=self.timeout)
         except subprocess.TimeoutExpired:
             return self._fail(case, started,
                               f"timed out after {self.timeout}s")
@@ -61,19 +93,10 @@ class ImageRunner:
                               f"{argv[0]} not installed or not on PATH")
         except OSError as exc:
             return self._fail(case, started, f"could not launch: {exc}")
-
         elapsed = time.monotonic() - started
-        after = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-        # ru_maxrss is the high-water mark across ALL children, so it only
-        # rises. The delta attributes the peak to this run when it is the
-        # largest so far, and reports the standing mark otherwise.
-        peak_kb = _to_kb(max(after - before, after if before == 0 else 0) or after)
 
-        if proc.returncode != 0:
-            tail = (proc.stderr or proc.stdout or "").strip().splitlines()
-            hint = tail[-1][:160] if tail else ""
-            return self._fail(case, started,
-                              f"exit {proc.returncode}: {hint}", peak_kb)
+        if returncode != 0:
+            return self._fail(case, started, f"exit {returncode}", peak_kb)
 
         expect = None
         if case.assertions.get("width") and case.assertions.get("height"):
@@ -89,12 +112,6 @@ class ImageRunner:
               peak_kb: int = 0) -> Result:
         return Result(case.id, self.engine.name, False,
                       round(time.monotonic() - started, 2), peak_kb, detail)
-
-
-def _to_kb(maxrss: int) -> int:
-    """ru_maxrss is BYTES on macOS and KILOBYTES on Linux."""
-    import sys
-    return maxrss // 1024 if sys.platform == "darwin" else maxrss
 
 
 def mflux_engine(spec: str, quantize: int | None = 8,

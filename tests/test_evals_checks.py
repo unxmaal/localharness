@@ -81,6 +81,23 @@ def test_valid_html_passes():
     assert r.has_title
 
 
+def test_a_doctyped_page_does_not_warn_about_a_missing_doctype():
+    """extract() searched root tags in order and found <html first, slicing the
+    doctype off before the check looked for it. Every well-formed page in the
+    first eval run carried this warning, and it was the harness, not the model.
+
+    The original test asserted only `ok`, so it never saw the lie.
+    """
+    r = html_check.check(GOOD_HTML)
+    assert not any("doctype" in w.lower() for w in r.warnings), r.warnings
+
+
+def test_a_doctyped_page_inside_a_fence_also_does_not_warn():
+    r = html_check.check("```html\n" + GOOD_HTML + "\n```")
+    assert r.ok
+    assert not any("doctype" in w.lower() for w in r.warnings), r.warnings
+
+
 def test_html_fence_is_recovered():
     r = html_check.check("```html\n" + GOOD_HTML + "\n```")
     assert r.ok

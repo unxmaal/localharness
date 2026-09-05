@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Kokoro TTS on the GPU via mlx-audio. Speaks an OpenAI-compatible
-# /v1/audio/speech, so voice/speak.sh talks to an endpoint, not a library.
+# Kokoro TTS and Parakeet STT on the GPU via mlx-audio, speaking an
+# OpenAI-compatible /v1/audio/speech and /v1/audio/transcriptions.
 #
-# Port 8083 keeps clear of the MLX LLM engine (8081) and the gateway (4000).
+# Port 8890 is deliberate: voicemode's provider_discovery.py classifies that
+# port as "mlx-audio" and then stops sending it "whisper-1", which is the whole
+# reason the old stt_shim existed. Native detection replaces 120 lines of proxy.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh
@@ -24,4 +26,4 @@ exec uv run --no-project \
   --with mlx-audio --with uvicorn --with webrtcvad \
   --with fastapi --with python-multipart --with 'setuptools>=70,<81' \
   --with 'misaki[en]' \
-  python -m mlx_audio.server --host 127.0.0.1 --port "${TTS_PORT:-8085}"
+  python -m mlx_audio.server --host 127.0.0.1 --port "${TTS_PORT:-8890}"

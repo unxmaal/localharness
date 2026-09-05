@@ -42,8 +42,15 @@ class _Parser(HTMLParser):
         if tag == "title":
             self._in_title = False
         if tag in self.stack:
-            while self.stack and self.stack.pop() != tag:
-                pass
+            # Unwinding to `tag` silently closes everything above it. Those are
+            # the unclosed elements, and they used to vanish here: the stack
+            # ended up empty and the only warning left was the doctype one,
+            # which was itself a harness bug. Fixing that exposed this.
+            while self.stack:
+                top = self.stack.pop()
+                if top == tag:
+                    break
+                self.unclosed.append(top)
         else:
             self.unclosed.append(tag)
 
@@ -53,6 +60,10 @@ class _Parser(HTMLParser):
 
 
 def check(text: str) -> CheckResult:
+    # Read the doctype off the ORIGINAL text. extract() searches root tags in
+    # order and finds <html first, slicing the doctype off before this check
+    # could see it, so every well-formed page was warned for a missing doctype.
+    had_doctype = bool(re.search(r"<!doctype\s+html", text, re.I))
     src = extract(text, ("html", "!doctype"))
     if not src.strip():
         return CheckResult(False, "no HTML found in output")
@@ -65,10 +76,11 @@ def check(text: str) -> CheckResult:
         return CheckResult(False, f"HTML parse error: {exc}")
 
     warnings: list[str] = []
-    if not re.match(r"\s*<!doctype", src, re.I):
+    if not had_doctype:
         warnings.append("missing doctype: triggers quirks mode")
-    if p.stack:
-        warnings.append(f"unclosed tags: {', '.join(p.stack[:5])}")
+    left_open = p.unclosed + p.stack
+    if left_open:
+        warnings.append(f"unclosed tags: {', '.join(left_open[:5])}")
     if re.search(r'(?:src|href)\s*=\s*["\']https?://', src, re.I):
         warnings.append("external resource: page is not self-contained")
 

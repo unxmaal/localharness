@@ -9,15 +9,18 @@ gateway and engine processes.
 A test that cannot fail proves nothing. Every guard in this repo has been broken
 deliberately and the corresponding test confirmed to go red.
 
-### stt_shim.py — 5/5 proven
+### stt_shim.py — removed
 
-| mutation | test that caught it |
-|---|---|
-| drop the UploadFile type check | `test_file_field_that_is_not_a_file_is_400_not_500` |
-| drop connect-error handling | `test_upstream_down_is_502_not_500` |
-| drop timeout handling | `test_upstream_timeout_is_504` |
-| stop rewriting the model | `test_rewrites_model_to_parakeet` |
-| force status 200 on every reply | `test_preserves_upstream_status_and_body` |
+The shim and its 5 mutation-proofed tests were deleted. Its premise was false:
+its docstring claimed voicemode "hardcodes the STT model as whisper-1 and
+exposes no override", but voicemode 8.12.0 has `VOICEMODE_STT_MODELS`, and
+`provider_discovery.py` classifies port 8890 as "mlx-audio" and stops sending
+whisper-1 to it entirely. Upstream even carries a comment about mlx-audio
+rejecting whisper-1.
+
+The claim came from a truncated grep of `voice-mode config list` rather than
+from reading the source. Well-tested code solving a problem that does not exist
+is still waste, and the tests made it look more solid than it was.
 
 ### env.sh — 4/5 proven, 1 masked
 
