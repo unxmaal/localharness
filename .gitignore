@@ -7,3 +7,4 @@ __pycache__/
 .claude/mcp-enforcement-*
 voice/__pycache__/
 tools/h3probe
+evals/cases/stt/

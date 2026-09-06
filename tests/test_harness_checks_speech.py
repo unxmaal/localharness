@@ -116,3 +116,39 @@ def test_a_transcriber_that_fails_is_reported_as_such(tmp_path):
     assert not r.ok
     assert "stt unreachable" in r.reason
     assert r.wer is None
+
+
+# ---- counts, so the suite can compute a corpus rate ------------------------
+#
+# Averaging per-utterance rates lets a two-word clip weigh as much as a
+# forty-word one. Measured on LibriSpeech: "Ay me" heard as "I me" is one error
+# in two words = 0.500, and it was the single worst row in a 40-utterance run
+# whose mean was 0.023. Every ASR benchmark reports CORPUS wer -- total errors
+# over total reference words -- and that needs the counts, not just the rate.
+
+def test_wer_counts_reports_errors_and_reference_length():
+    errors, words = speech.wer_counts("the quick brown fox", "the quick brown box")
+    assert (errors, words) == (1, 4)
+
+
+def test_wer_counts_agrees_with_the_rate():
+    ref, hyp = "the quick brown fox jumps", "the quick brown box"
+    errors, words = speech.wer_counts(ref, hyp)
+    assert abs(errors / words - speech.wer(ref, hyp)) < 1e-9
+
+
+def test_wer_counts_normalizes_like_the_rate_does():
+    assert speech.wer_counts("MLX 200 is fast", "mlx two hundred is fast")[0] == 0
+
+
+def test_an_empty_hypothesis_counts_every_word_as_an_error():
+    assert speech.wer_counts("one two three", "") == (3, 3)
+
+
+def test_the_check_publishes_the_counts_for_aggregation(tmp_path):
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(b"x" * 9000)
+    r = speech.check(wav, reference="the quick brown fox",
+                     transcriber=lambda p: "the quick brown box")
+    assert r.metrics["wer_errors"] == 1
+    assert r.metrics["wer_words"] == 4

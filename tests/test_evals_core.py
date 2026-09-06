@@ -210,11 +210,12 @@ def test_score_fails_a_uniform_image(tmp_path):
 
 
 def test_score_of_a_modality_with_no_checker_is_not_a_silent_pass():
-    """stt is declarable but not yet judgeable: ranking it needs reference
-    audio with a human transcript. Reporting it as passed would put a 100%
-    pass rate next to nothing measured."""
-    case = Case(id="s", modality="stt", prompt="a fox")
-    r = score(case, "/tmp/nope.wav")
+    """Every shipped modality has a checker now, so this constructs one that
+    does not. The behaviour still matters: a lane with nothing measuring it
+    would otherwise report a 100% pass rate, which is the most misleading
+    number the suite could print."""
+    case = Case(id="t", modality="telepathy", prompt="a fox")
+    r = score(case, "anything")
     assert not r.passed
     assert "no checker" in r.detail.lower()
 
@@ -225,8 +226,12 @@ def test_the_cases_that_ship_with_the_suite_actually_load():
     from pathlib import Path
     cases = load_cases(Path(__file__).resolve().parent.parent / "evals" / "cases")
     assert len(cases) >= 8
-    assert {c.modality for c in cases} == {
-        "svg", "web", "image", "tts", "video", "code", "extract"}
+    committed = {"svg", "web", "image", "tts", "video", "code", "extract"}
+    present = {c.modality for c in cases}
+    assert committed <= present, f"missing lanes: {committed - present}"
+    # stt cases are generated per machine and gitignored (the audio lives on a
+    # volume), so they may or may not be here. Anything else is a typo.
+    assert present <= committed | {"stt"}, f"unexpected: {present - committed}"
     assert all(c.prompt.strip() for c in cases)
 
 
@@ -718,3 +723,112 @@ def test_checks_is_a_valid_assertion_only_for_code(tmp_path):
         "assert": {"checks": ["1 == 1"]}}))
     with pytest.raises(ValueError, match="checks"):
         load_cases(tmp_path)
+
+
+# ---- stt -------------------------------------------------------------------
+#
+# The mirror of tts. There the prompt is the text to speak and the artifact is
+# audio; here the audio is the input and the prompt is the reference transcript
+# a human wrote. That is what makes this measurement of the STT model ALONE,
+# unlike the tts round trip, which is joint with whatever reads it back.
+
+def test_an_stt_case_carries_the_audio_it_transcribes(tmp_path):
+    clip = tmp_path / "a.wav"
+    clip.write_bytes(b"x" * 9000)
+    (tmp_path / "c.yaml").write_text(yaml.safe_dump({
+        "id": "c", "modality": "stt", "prompt": "the quick brown fox",
+        "audio_file": "a.wav", "assert": {"max_wer": 0.2}}))
+    c = load_cases(tmp_path)[0]
+    assert c.audio == clip
+
+
+def test_a_missing_audio_file_names_the_case(tmp_path):
+    (tmp_path / "c.yaml").write_text(yaml.safe_dump({
+        "id": "c", "modality": "stt", "prompt": "x", "audio_file": "nope.wav"}))
+    with pytest.raises(ValueError, match="c.yaml"):
+        load_cases(tmp_path)
+
+
+def test_an_stt_case_needs_audio(tmp_path):
+    (tmp_path / "c.yaml").write_text(yaml.safe_dump({
+        "id": "c", "modality": "stt", "prompt": "x"}))
+    with pytest.raises(ValueError, match="audio_file"):
+        load_cases(tmp_path)
+
+
+def test_an_absolute_audio_path_is_used_as_given(tmp_path):
+    """Corpus cases are generated against a volume, not shipped with the repo."""
+    clip = tmp_path / "a.wav"
+    clip.write_bytes(b"x" * 9000)
+    (tmp_path / "c.yaml").write_text(yaml.safe_dump({
+        "id": "c", "modality": "stt", "prompt": "x",
+        "audio_file": str(clip)}))
+    assert load_cases(tmp_path)[0].audio == clip
+
+
+def test_stt_is_scored_against_the_human_transcript():
+    case = Case(id="s", modality="stt", prompt="the quick brown fox",
+                assertions={"max_wer": 0.3})
+    r = score(case, "The quick brown fox.")
+    assert r.passed
+    assert r.metrics["wer"] == 0.0
+
+
+def test_stt_fails_a_bad_transcript():
+    case = Case(id="s", modality="stt", prompt="the quick brown fox",
+                assertions={"max_wer": 0.1})
+    r = score(case, "a slow green ox")
+    assert not r.passed
+    assert r.metrics["wer"] > 0.1
+
+
+def test_stt_measures_without_a_threshold():
+    case = Case(id="s", modality="stt", prompt="the quick brown fox")
+    r = score(case, "the quick brown box")
+    assert r.passed
+    assert r.metrics["wer"] == 0.25
+
+
+def test_max_wer_is_the_assertion_for_stt(tmp_path):
+    clip = tmp_path / "a.wav"
+    clip.write_bytes(b"x" * 9000)
+    (tmp_path / "c.yaml").write_text(yaml.safe_dump({
+        "id": "c", "modality": "stt", "prompt": "x", "audio_file": "a.wav",
+        "assert": {"min_shapes": 2}}))
+    with pytest.raises(ValueError, match="min_shapes"):
+        load_cases(tmp_path)
+
+
+def test_a_ratio_metric_aggregates_as_a_corpus_rate_not_a_mean_of_rates():
+    """A two-word utterance must not weigh the same as a forty-word one.
+    Measured on LibriSpeech: one error in "Ay me" scores 0.500 and was the
+    worst row in a run whose mean was 0.023, purely because the clip is short.
+    Corpus wer -- total errors over total words -- is what ASR reports."""
+    rows = [Result("short", "m", True, 0.1, 0, "",
+                   metrics={"wer": 0.5, "wer_errors": 1, "wer_words": 2}),
+            Result("long", "m", True, 0.1, 0, "",
+                   metrics={"wer": 0.0, "wer_errors": 0, "wer_words": 38})]
+    got = summarize(rows)["m"]["metrics"]
+    assert got["wer"] == round(1 / 40, 4)   # corpus rate, not (0.5 + 0.0) / 2
+
+
+def test_the_count_companions_are_not_shown_as_metrics_of_their_own():
+    """wer_errors is bookkeeping. A column of it in the table is noise."""
+    rows = [Result("a", "m", True, 0.1, 0, "",
+                   metrics={"wer": 0.5, "wer_errors": 1, "wer_words": 2})]
+    assert set(summarize(rows)["m"]["metrics"]) == {"wer"}
+
+
+def test_a_metric_with_no_counts_still_averages():
+    rows = [Result("a", "m", True, 0.1, 0, "", metrics={"adherence": 20.0}),
+            Result("b", "m", True, 0.1, 0, "", metrics={"adherence": 24.0})]
+    assert summarize(rows)["m"]["metrics"]["adherence"] == 22.0
+
+
+def test_the_worst_row_is_still_the_worst_row():
+    """The corpus rate is the headline; the outlier must stay visible."""
+    rows = [Result("short", "m", True, 0.1, 0, "",
+                   metrics={"wer": 0.5, "wer_errors": 1, "wer_words": 2}),
+            Result("long", "m", True, 0.1, 0, "",
+                   metrics={"wer": 0.0, "wer_errors": 0, "wer_words": 38})]
+    assert summarize(rows)["m"]["metrics_worst"]["wer"] == 0.5

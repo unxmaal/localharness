@@ -37,6 +37,8 @@ class Case:
     #: case is one line of instruction and forty of material; keeping them
     #: apart leaves the prompt readable and the material swappable.
     context: str = ""
+    #: Input audio for a transcription case, resolved beside the case file.
+    audio: Path | None = None
     #: Generation knobs handed to the engine (width, steps, seed...).
     params: dict = field(default_factory=dict)
     #: Checks applied to whatever came back.
@@ -108,6 +110,25 @@ def _check_tts(artifact, case: Case, transcriber=None) -> CheckResult:
                               transcriber=transcriber)
 
 
+def _check_stt(artifact, case: Case) -> CheckResult:
+    """The mirror of tts, and the reason it is a better measurement.
+
+    Here the audio is the input and the prompt is a transcript a HUMAN wrote,
+    so the word error rate is the STT model's alone. The tts round trip is
+    joint with whatever reads it back and cannot separate the two.
+    """
+    rate = speech_check.wer(case.prompt, artifact)
+    errors, words = speech_check.wer_counts(case.prompt, artifact)
+    limit = case.assertions.get("max_wer")
+    out = CheckResult(limit is None or rate <= limit, "")
+    out.metrics = {"wer": round(rate, 4),
+                   "wer_errors": errors, "wer_words": words}
+    if not out.ok:
+        out.reason = (f"word error rate {rate:.2f} over the limit of {limit}; "
+                      f"heard {str(artifact).strip()!r}")
+    return out
+
+
 # One entry point per modality, so two candidates are always judged by the same
 # ruler. Images were scored inside their runner and therefore lost every shared
 # assertion; that fork is what this dict closes.
@@ -175,10 +196,11 @@ CHECKERS = {
     "code": lambda a, c, **kw: _check_code(a, c),
     "extract": lambda a, c, **kw: _check_extract(a, c),
     "tts": _check_tts,
+    "stt": lambda a, c, **kw: _check_stt(a, c),
 }
 # Modalities that may appear in a case file. video/tts/stt are declarable but
 # not yet judgeable; score() says so rather than passing them.
-MODALITIES = set(CHECKERS) | {"stt"}
+MODALITIES = set(CHECKERS)
 
 # Which way each metric runs. Not optional metadata: every metric was an error
 # rate to begin with, so "lower is better" got baked into both the ranking and
@@ -223,7 +245,8 @@ ASSERTION_KEYS = {"svg": TEXT_ASSERTIONS, "web": TEXT_ASSERTIONS,
                   # wrong the rendering may be. Not must_contain: there is no
                   # text to search, and that could only ever pass vacuously.
                   "image": {"text", "max_cer"},
-                  "tts": {"max_wer"}}
+                  "tts": {"max_wer"},
+                  "stt": {"max_wer"}}
 
 
 @dataclass
@@ -259,6 +282,7 @@ def load_cases(directory: str | Path) -> list[Case]:
                 f"{path.name}: unknown modality '{modality}' "
                 f"(known: {', '.join(sorted(MODALITIES))})")
         context = _load_context(path, raw)
+        audio = _load_audio(path, raw, modality)
         params = raw.get("params") or {}
         assertions = raw.get("assert") or {}
         if modality == "code" and not assertions.get("checks"):
@@ -269,7 +293,7 @@ def load_cases(directory: str | Path) -> list[Case]:
         _reject_unknown(path, modality, "assert", set(assertions),
                         ASSERTION_KEYS.get(modality, set()))
         cases.append(Case(id=raw["id"], modality=modality, prompt=raw["prompt"],
-                          context=context, params=params,
+                          context=context, audio=audio, params=params,
                           assertions=assertions, source=path))
     return cases
 
@@ -287,6 +311,25 @@ def _load_context(path: Path, raw: dict) -> str:
                              f"beside the case")
         return source.read_text()
     return inline or ""
+
+
+def _load_audio(path: Path, raw: dict, modality: str) -> Path | None:
+    """`audio_file:`, absolute or resolved beside the case.
+
+    Absolute is the normal shape for a corpus: LibriSpeech lives on a volume
+    and its cases are generated per machine rather than shipped with the repo.
+    """
+    filename = raw.get("audio_file")
+    if not filename:
+        if modality == "stt":
+            raise ValueError(f"{path.name}: an stt case needs audio_file")
+        return None
+    source = Path(filename)
+    if not source.is_absolute():
+        source = path.parent / filename
+    if not source.exists():
+        raise ValueError(f"{path.name}: audio_file '{filename}' not found")
+    return source
 
 
 def _reject_unknown(path: Path, modality: str, block: str, given: set,
@@ -392,6 +435,15 @@ def _gather_metrics(rows: list[Result]) -> dict[str, list[float]]:
     return gathered
 
 
+#: Metrics that are RATIOS, with the numerator and denominator they are made
+#: of. Aggregating these as a mean of per-case rates lets a two-word utterance
+#: weigh as much as a forty-word one; the correct total is sum(errors) over
+#: sum(words), which is what every ASR benchmark means by "WER".
+RATIO_METRICS = {"wer": ("wer_errors", "wer_words")}
+#: Bookkeeping that should not appear as a column of its own.
+_COMPANIONS = {name for pair in RATIO_METRICS.values() for name in pair}
+
+
 def _mean_metrics(rows: list[Result]) -> dict:
     """Mean of each metric across the rows that reported it.
 
@@ -407,11 +459,22 @@ def _mean_metrics(rows: list[Result]) -> dict:
     zero is the best possible error rate and would rank an unmeasured candidate
     first.
     """
-    return {name: round(statistics.fmean(vals), 4)
-            for name, vals in _gather_metrics(rows).items()}
+    gathered = _gather_metrics(rows)
+    out = {}
+    for name, vals in gathered.items():
+        if name in _COMPANIONS:
+            continue
+        numerator, denominator = RATIO_METRICS.get(name, (None, None))
+        if numerator in gathered and denominator in gathered:
+            total = sum(gathered[denominator])
+            out[name] = round(sum(gathered[numerator]) / total, 4) if total else 0.0
+        else:
+            out[name] = round(statistics.fmean(vals), 4)
+    return out
 
 
 def _worst_metrics(rows: list[Result]) -> dict:
     """The worst value of each metric, which way round depending on direction."""
     return {name: round(max(vals) if direction_of(name) == "lower" else min(vals), 4)
-            for name, vals in _gather_metrics(rows).items()}
+            for name, vals in _gather_metrics(rows).items()
+            if name not in _COMPANIONS}

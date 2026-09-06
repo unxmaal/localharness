@@ -3,6 +3,7 @@ from evals.runners.base import BaseRunner, RunnerError
 from evals.runners.process import ProcessRunner
 from evals.runners.speech import SpeechRunner
 from evals.runners.text import CompletionRunner
+from evals.runners.transcription import TranscriptionRunner
 
 __all__ = ["BaseRunner", "RunnerError", "ProcessRunner", "SpeechRunner",
-           "CompletionRunner"]
+           "CompletionRunner", "TranscriptionRunner"]

@@ -38,12 +38,24 @@ class SpeechResult:
     wer: float | None = None
     transcript: str = ""
 
+    #: Errors and reference length, so the suite can aggregate a CORPUS rate.
+    errors: int = 0
+    words: int = 0
+
     @property
     def metrics(self) -> dict:
         """What the eval ranks on. Empty when nothing was measured, never 0.0:
         a zero error rate is the best possible score and would rank a candidate
-        that never ran at the top."""
-        return {} if self.wer is None else {"wer": round(self.wer, 4)}
+        that never ran at the top.
+
+        The counts travel with the rate so summarize() can total them. A mean
+        of per-utterance rates lets a two-word clip weigh as much as a
+        forty-word one, which is why ASR reports corpus wer instead.
+        """
+        if self.wer is None:
+            return {}
+        return {"wer": round(self.wer, 4),
+                "wer_errors": self.errors, "wer_words": self.words}
 
 
 def normalize(text: str) -> str:
@@ -69,6 +81,23 @@ def wer(reference: str, hypothesis: str) -> float:
         # spelling it out keeps the edge case from depending on jiwer's version.
         return 1.0
     return jiwer.wer(ref, hyp)
+
+
+def wer_counts(reference: str, hypothesis: str) -> tuple[int, int]:
+    """(errors, reference words) after the same normalization wer() uses.
+
+    Needed for a corpus rate: total errors over total words, rather than a mean
+    of per-utterance rates in which a two-word clip outweighs a long one.
+    """
+    ref = normalize(reference)
+    if not ref:
+        raise ValueError("cannot score against an empty reference")
+    words = len(ref.split())
+    hyp = normalize(hypothesis)
+    if not hyp:
+        return words, words
+    out = jiwer.process_words(ref, hyp)
+    return out.substitutions + out.deletions + out.insertions, words
 
 
 def check(path: str | Path, reference: str, max_wer: float | None = None,
@@ -97,10 +126,12 @@ def check(path: str | Path, reference: str, max_wer: float | None = None,
         return SpeechResult(False, f"could not transcribe: {exc}")
 
     rate = wer(reference, transcript)
+    errors, words = wer_counts(reference, transcript)
     if max_wer is not None and rate > max_wer:
         return SpeechResult(
             False,
             f"word error rate {rate:.2f} over the limit of {max_wer}; "
             f"heard {transcript!r}",
-            wer=rate, transcript=transcript)
-    return SpeechResult(True, "", wer=rate, transcript=transcript)
+            wer=rate, transcript=transcript, errors=errors, words=words)
+    return SpeechResult(True, "", wer=rate, transcript=transcript,
+                        errors=errors, words=words)

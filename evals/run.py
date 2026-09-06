@@ -32,6 +32,7 @@ from evals.environment import capture
 from evals.runners.process import ProcessRunner
 from evals.runners.speech import SpeechRunner
 from evals.runners.text import CompletionRunner
+from evals.runners.transcription import TranscriptionRunner
 
 ROOT = Path(__file__).resolve().parent
 TEXT_MODALITIES = {"svg", "web", "code", "extract"}
@@ -49,8 +50,8 @@ def kind_of(candidate: str) -> str:
     head = candidate.split(":", 1)[0].split(",", 1)[0].strip()
     if head in PROCESS_ENGINES:
         return "process"
-    if head == "tts":
-        return "tts"
+    if head in ("tts", "stt"):
+        return head
     return "gateway"
 
 
@@ -58,8 +59,8 @@ def modality_of(candidate: str) -> str | None:
     """The one modality this candidate can run, or None for text candidates,
     which can run all of them."""
     kind = kind_of(candidate)
-    if kind == "tts":
-        return "tts"
+    if kind in ("tts", "stt"):
+        return kind
     if kind == "process":
         engine = engine_for(candidate)
         return engine.modality if engine else None
@@ -100,6 +101,12 @@ def build_runner(candidate: str, gateway: str, outdir: Path | None,
         return CompletionRunner(gateway, candidate)
     if kind == "tts":
         return _speech_runner(candidate, outdir)
+    if kind == "stt":
+        model = candidate.partition(":")[2].strip()
+        if not model:
+            raise SystemExit("an stt candidate needs a model, e.g. "
+                             "stt:mlx-community/parakeet-tdt-0.6b-v2")
+        return TranscriptionRunner(model=model)
     try:
         engine = resolve(candidate)
     except ValueError as exc:
@@ -291,13 +298,18 @@ def _note_ranking_disagreements(summary: dict, metric_names: list) -> None:
     by_rate = [n for n, _ in sorted(summary.items(),
                                     key=lambda kv: -kv[1]["pass_rate"])]
     for metric in metric_names:
-        better = (min if direction_of(metric) == "lower" else max)
+        # Only candidates that actually reported this metric. A model that
+        # failed every case has no opinion about it, and reading its absence as
+        # a score is how a broken candidate wins.
+        scored = {n: s for n, s in summary.items() if metric in s["metrics"]}
+        if len(scored) < 2:
+            continue
         by_metric = [n for n, _ in sorted(
-            summary.items(),
-            key=lambda kv: kv[1]["metrics"].get(metric, 0.0),
+            scored.items(), key=lambda kv: kv[1]["metrics"][metric],
             reverse=direction_of(metric) == "higher")]
-        if by_metric[0] != by_rate[0] and better is not None:
-            print(f"\n  Note: pass rate and {metric} DISAGREE. {by_rate[0]} "
+        by_rate_scored = [n for n in by_rate if n in scored]
+        if by_metric[0] != by_rate_scored[0]:
+            print(f"\n  Note: pass rate and {metric} DISAGREE. {by_rate_scored[0]} "
                   f"passes more cases; {by_metric[0]} scores better on "
                   f"{metric}. A case fails outright on one missed check, so "
                   f"the pass rate punishes a strong model that slips once.")
@@ -319,8 +331,14 @@ def report(summary: dict) -> None:
         # drew LEAST on the top line.
         scores = []
         for name in metric_names:
-            value = s["metrics"].get(name, 0.0)
-            scores.append(value if direction_of(name) == "lower" else -value)
+            value = s["metrics"].get(name)
+            if value is None:
+                # A candidate that reported nothing must sort LAST, not as a
+                # perfect score. Defaulting a lower-is-better metric to 0.0 put
+                # a model that failed all 40 cases at the top of the ranking.
+                scores.append(float("inf"))
+            else:
+                scores.append(value if direction_of(name) == "lower" else -value)
         return (-s["pass_rate"], scores, s["median_s"])
 
     arrows = {n: "v" if direction_of(n) == "lower" else "^" for n in metric_names}

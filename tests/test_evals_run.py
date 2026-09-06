@@ -315,3 +315,58 @@ def test_no_disagreement_note_when_the_orders_agree(capsys):
     ])
     report(s)
     assert "disagree" not in capsys.readouterr().out.lower()
+
+
+# ---- stt candidates --------------------------------------------------------
+
+def test_an_stt_candidate_becomes_a_transcription_runner(tmp_path):
+    from evals.runners.transcription import TranscriptionRunner
+    r = build_runner("stt:mlx-community/parakeet-tdt-0.6b-v2", "http://gw", tmp_path)
+    assert isinstance(r, TranscriptionRunner)
+    assert r.model == "mlx-community/parakeet-tdt-0.6b-v2"
+    assert r.candidate == "parakeet-tdt-0.6b-v2"
+
+
+def test_an_stt_candidate_needs_no_output_directory():
+    """It produces text, not files."""
+    from evals.runners.transcription import TranscriptionRunner
+    assert isinstance(build_runner("stt:some/model", "http://gw", None),
+                      TranscriptionRunner)
+
+
+def test_an_stt_candidate_only_gets_stt_cases():
+    cases = CASES + [Case(id="u", modality="stt", prompt="hello")]
+    assert [c.id for c in runnable("stt:some/model", cases)] == ["u"]
+
+
+def test_tts_and_stt_candidates_are_told_apart():
+    """`tts:` and `stt:` differ by one letter and route to different runners."""
+    from evals.run import modality_of
+    assert modality_of("tts:m") == "tts"
+    assert modality_of("stt:m") == "stt"
+
+
+def test_a_candidate_with_no_metric_is_ranked_last_not_first(capsys):
+    """Seen live: whisper failed all 40 stt cases, reported no wer at all, and
+    a missing lower-is-better metric defaulting to 0.0 read as a PERFECT error
+    rate. The summary table got it right; the ranking and the disagreement note
+    did not."""
+    s = summarize([
+        Result("a", "working", True, 1.0, 0, "",
+               metrics={"wer": 0.02, "wer_errors": 1, "wer_words": 50}),
+        Result("a", "broken", False, 0.1, 0, "server error"),
+    ])
+    report(s)
+    lines = [ln for ln in capsys.readouterr().out.splitlines()
+             if ln.startswith(("working", "broken"))]
+    assert lines[0].startswith("working")
+
+
+def test_a_candidate_with_no_metric_is_left_out_of_the_disagreement_note(capsys):
+    s = summarize([
+        Result("a", "working", True, 1.0, 0, "",
+               metrics={"wer": 0.02, "wer_errors": 1, "wer_words": 50}),
+        Result("a", "broken", False, 0.1, 0, "server error"),
+    ])
+    report(s)
+    assert "disagree" not in capsys.readouterr().out.lower()
