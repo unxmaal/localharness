@@ -22,12 +22,18 @@ from evals.runners.base import BaseRunner, RunnerError
 
 class ProcessRunner(BaseRunner):
     def __init__(self, engine: Engine, outdir: str | Path,
-                 timeout: float | None = None):
+                 timeout: float | None = None, adherence: str | None = None):
         self.engine = engine
+        # A run-level choice, so it travels with the runner rather than being
+        # read from a global by the checker.
+        self.adherence = adherence
         self.candidate = engine.name
         self.outdir = Path(outdir)
         self.outdir.mkdir(parents=True, exist_ok=True)
         self.timeout = timeout if timeout is not None else engine.timeout
+
+    def score_kwargs(self) -> dict:
+        return {"adherence": self.adherence} if self.adherence else {}
 
     def generate(self, case: Case):
         # `/` in a model name would otherwise open a directory that does not

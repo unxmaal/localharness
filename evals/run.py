@@ -26,7 +26,8 @@ from harness.engines import Engine, parse_options, resolve
 
 from dataclasses import replace
 
-from evals.core import MODALITIES, Case, load_cases, summarize
+from evals.core import (MODALITIES, Case, direction_of, load_cases,
+                        summarize)
 from evals.environment import capture
 from evals.runners.process import ProcessRunner
 from evals.runners.speech import SpeechRunner
@@ -92,7 +93,8 @@ def _speech_runner(candidate: str, outdir: Path | None) -> SpeechRunner:
                         voice=options.get("voice", audio.DEFAULT_VOICE))
 
 
-def build_runner(candidate: str, gateway: str, outdir: Path | None):
+def build_runner(candidate: str, gateway: str, outdir: Path | None,
+                 adherence: str | None = None):
     kind = kind_of(candidate)
     if kind == "gateway":
         return CompletionRunner(gateway, candidate)
@@ -106,7 +108,7 @@ def build_runner(candidate: str, gateway: str, outdir: Path | None):
     if outdir is None:
         raise SystemExit(
             f"{candidate} writes files; pass --out to say where they go")
-    return ProcessRunner(engine, outdir)
+    return ProcessRunner(engine, outdir, adherence=adherence)
 
 
 def cases_for(candidate: str, cases: list[Case]) -> list[Case]:
@@ -191,6 +193,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--cases", default=str(ROOT / "cases"))
     ap.add_argument("--out", default=None,
                     help="write artifacts and results.json here")
+    ap.add_argument("--adherence", choices=("pickscore", "hpsv2"), default=None,
+                    help="score how well each image matches its prompt. Loads a "
+                         "multi-GB preference model, so it is opt-in and needs "
+                         "`uv sync --group metrics`. Scores from the two "
+                         "backends are NOT comparable to each other")
     ap.add_argument("--repeat", type=int, default=1,
                     help="samples per case, each with a different seed. One "
                          "sample per prompt ranks noise; 3 is the usual "
@@ -218,7 +225,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\n── {candidate}: no cases of a modality it can run, skipped",
                   file=sys.stderr)
             continue
-        runner = build_runner(candidate, args.gateway, outdir)
+        runner = build_runner(candidate, args.gateway, outdir,
+                              adherence=args.adherence)
         print(f"\n── {runner.candidate}", flush=True)
         for case in mine:
             r = runner.run(case)
@@ -276,15 +284,19 @@ def report(summary: dict) -> None:
 
     def rank(item):
         _, s = item
-        # Every metric so far is an error rate, so lower is better. A metric
-        # where higher is better would need a direction declared with it.
-        return (-s["pass_rate"],
-                [s["metrics"].get(n, 0.0) for n in metric_names],
-                s["median_s"])
+        # Negated for a higher-is-better metric so one ascending sort handles
+        # both. Ranking every metric as an error rate put the candidate that
+        # drew LEAST on the top line.
+        scores = []
+        for name in metric_names:
+            value = s["metrics"].get(name, 0.0)
+            scores.append(value if direction_of(name) == "lower" else -value)
+        return (-s["pass_rate"], scores, s["median_s"])
 
+    arrows = {n: "v" if direction_of(n) == "lower" else "^" for n in metric_names}
     header = f"{'candidate':30} {'pass':>7} {'rate':>6} {'median':>8} {'peak':>9}"
     for name in metric_names:
-        header += f" {name:>7} {name + '.max':>11}"
+        header += f" {name + ' ' + arrows[name]:>9} {name + '.worst':>13}"
     print("\n" + "=" * len(header))
     print(header)
 
@@ -295,9 +307,19 @@ def report(summary: dict) -> None:
         for metric in metric_names:
             value = s["metrics"].get(metric)
             worst = s.get("metrics_worst", {}).get(metric)
-            line += (f" {value:>7.3f}" if value is not None else f" {'-':>7}")
-            line += (f" {worst:>11.3f}" if worst is not None else f" {'-':>11}")
+            line += (f" {value:>9.3f}" if value is not None else f" {'-':>9}")
+            line += (f" {worst:>13.3f}" if worst is not None else f" {'-':>13}")
         print(line)
+
+    if metric_names:
+        low = [n for n in metric_names if direction_of(n) == "lower"]
+        high = [n for n in metric_names if direction_of(n) == "higher"]
+        legend = []
+        if low:
+            legend.append(f"{', '.join(low)}: lower is better (v)")
+        if high:
+            legend.append(f"{', '.join(high)}: higher is better (^)")
+        print("  " + "; ".join(legend))
 
     for name, s in summary.items():
         for f in s["failures"]:

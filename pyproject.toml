@@ -24,6 +24,16 @@ build-backend = "hatchling.build"
 packages = ["harness", "evals"]
 
 [dependency-groups]
+# Prompt-adherence scoring. A separate group because it is the only torch in an
+# otherwise MLX-only repo, and only an image eval needs it:
+#   uv run --group metrics python -m evals.run --modality image ...
+# 687MB installed on macOS arm64, 36 packages, MPS-capable.
+metrics = [
+    "torch>=2.4",
+    "transformers>=4.44",
+    "open_clip_torch>=2.24",
+]
+
 dev = [
     "pytest>=8",
     "respx>=0.21",
@@ -35,7 +45,12 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --strict-markers"
+# `slow` is deselected by default: these load a 4GB model and take minutes,
+# which is not what `make check` is for. `make check-slow` runs them.
+addopts = "-q --strict-markers -m 'not slow'"
+markers = [
+    "slow: needs the optional `metrics` group and loads a multi-GB model",
+]
 # The repo root, so `from evals...` resolves without a sys.path hack in every
 # test module.
 pythonpath = ["."]

@@ -127,3 +127,16 @@ def test_a_slash_in_the_candidate_name_does_not_become_a_directory(tmp_path):
     r = runner.run(case())
     assert r.passed, r.detail
     assert Path(r.artifact).parent == tmp_path
+
+
+def test_the_runner_passes_its_adherence_backend_to_the_checker(tmp_path):
+    """The flag is a run-level choice, so it has to reach score() through the
+    runner rather than being read from a global."""
+    runner = ProcessRunner(fake_engine(WRITE_GOOD), tmp_path,
+                           adherence="pickscore")
+    assert runner.score_kwargs() == {"adherence": "pickscore"}
+
+
+def test_no_adherence_backend_means_no_kwarg(tmp_path):
+    runner = ProcessRunner(fake_engine(WRITE_GOOD), tmp_path)
+    assert runner.score_kwargs() == {}

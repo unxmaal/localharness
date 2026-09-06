@@ -10,11 +10,13 @@ mechanical and shared, so two candidates are always judged by the same ruler.
 from __future__ import annotations
 
 import statistics
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
+from harness.checks import adherence as adherence_check
 from harness.checks import html as html_check
 from harness.checks import image as image_check
 from harness.checks import ocr as ocr_check
@@ -37,7 +39,7 @@ class Case:
     source: Path | None = None
 
 
-def _check_image(artifact, case: Case) -> CheckResult:
+def _check_image(artifact, case: Case, adherence: str | None = None) -> CheckResult:
     """Honouring the requested size IS the check, so it reads from params.
 
     Width and height used to live under `assert:` and do both jobs at once,
@@ -51,15 +53,28 @@ def _check_image(artifact, case: Case) -> CheckResult:
     if not r.ok:
         return CheckResult(r.ok, r.reason, r.warnings)
 
+    metrics: dict = {}
+    warnings_out = list(r.warnings)
+
+    # Opt-in: it loads a multi-GB preference model, which is not a tax to put
+    # on every image run.
+    if adherence:
+        a = adherence_check.check(artifact, case.prompt, backend=adherence)
+        metrics.update(a.metrics)
+        warnings_out += a.warnings
+
     expect_text = case.assertions.get("text")
     if not expect_text:
-        return CheckResult(True, "", r.warnings)
+        out = CheckResult(True, "", warnings_out)
+        out.metrics = metrics
+        return out
 
     o = ocr_check.check(artifact, expect=expect_text,
                         max_cer=case.assertions.get("max_cer",
                                                     ocr_check.DEFAULT_MAX_CER))
-    out = CheckResult(o.ok, o.reason, r.warnings + o.warnings)
-    out.metrics = o.metrics
+    out = CheckResult(o.ok, o.reason, warnings_out + o.warnings)
+    metrics.update(o.metrics)
+    out.metrics = metrics
     return out
 
 
@@ -113,13 +128,38 @@ def _check_video(artifact, case: Case) -> CheckResult:
 CHECKERS = {
     "svg": lambda a, c, **kw: _check_svg(a, c),
     "web": lambda a, c, **kw: html_check.check(a),
-    "image": lambda a, c, **kw: _check_image(a, c),
+    "image": lambda a, c, **kw: _check_image(a, c, kw.get("adherence")),
     "video": lambda a, c, **kw: _check_video(a, c),
     "tts": _check_tts,
 }
 # Modalities that may appear in a case file. video/tts/stt are declarable but
 # not yet judgeable; score() says so rather than passing them.
 MODALITIES = set(CHECKERS) | {"video", "tts", "stt"}
+
+# Which way each metric runs. Not optional metadata: every metric was an error
+# rate to begin with, so "lower is better" got baked into both the ranking and
+# the worst-case column, and `ink` and `motion` silently inverted both the
+# moment they arrived -- more ink IS better, and the "worst" ink in a run was
+# being reported as the best-drawn case in it.
+METRIC_DIRECTION = {
+    "wer": "lower",        # word error rate
+    "cer": "lower",        # character error rate of OCR'd text
+    "ink": "higher",       # fraction of an SVG canvas actually marked
+    "motion": "higher",    # change between video frames
+    "adherence": "higher",  # how well the picture matches the prompt
+}
+
+
+def direction_of(metric: str) -> str:
+    """"lower" or "higher". Warns on an undeclared metric rather than guessing
+    silently, since a wrong guess inverts a ranking with no visible symptom."""
+    if metric not in METRIC_DIRECTION:
+        warnings.warn(
+            f"metric {metric!r} declares no direction in METRIC_DIRECTION; "
+            f"assuming lower is better", UserWarning, stacklevel=2)
+        return "lower"
+    return METRIC_DIRECTION[metric]
+
 
 # Generation knobs any engine might accept. Validated at load so `widht: 512`
 # costs nothing instead of silently generating at the default size and passing.
@@ -295,8 +335,6 @@ def _mean_metrics(rows: list[Result]) -> dict:
 
 
 def _worst_metrics(rows: list[Result]) -> dict:
-    """The worst value of each metric. Every metric so far is an error rate,
-    where worst means highest; a metric where higher is better would need this
-    to know its direction."""
-    return {name: round(max(vals), 4)
+    """The worst value of each metric, which way round depending on direction."""
+    return {name: round(max(vals) if direction_of(name) == "lower" else min(vals), 4)
             for name, vals in _gather_metrics(rows).items()}

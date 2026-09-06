@@ -247,3 +247,40 @@ def test_nothing_is_reported_when_every_case_has_a_candidate():
 def report_unrun(cases, candidates):
     from evals.run import unrun_summary
     return unrun_summary(cases, candidates)
+
+
+def test_a_higher_is_better_metric_ranks_the_larger_value_first(capsys):
+    """`ink` and `motion` were ranked ascending like an error rate, so the
+    candidate that drew least came top."""
+    s = summarize([Result("c", "sparse", True, 1.0, 0, "", metrics={"ink": 0.02}),
+                   Result("c", "rich", True, 1.0, 0, "", metrics={"ink": 0.40})])
+    report(s)
+    lines = [ln for ln in capsys.readouterr().out.splitlines()
+             if ln.startswith(("sparse", "rich"))]
+    assert lines[0].startswith("rich")
+
+
+def test_a_lower_is_better_metric_still_ranks_the_smaller_value_first(capsys):
+    report(two_candidates(0.30, 0.05))
+    lines = [ln for ln in capsys.readouterr().out.splitlines()
+             if ln.startswith(("a ", "b "))]
+    assert lines[0].startswith("b")
+
+
+def test_the_report_marks_which_way_each_metric_runs(capsys):
+    """A column of numbers with no direction is a column you cannot read."""
+    report(two_candidates(0.05, 0.30))
+    out = capsys.readouterr().out
+    assert "wer" in out
+    assert "lower is better" in out or "↓" in out
+
+
+def test_the_adherence_flag_reaches_the_process_runner(tmp_path):
+    r = build_runner("mflux:z-image-turbo", "http://gw", tmp_path,
+                     adherence="hpsv2")
+    assert r.score_kwargs() == {"adherence": "hpsv2"}
+
+
+def test_adherence_is_off_by_default(tmp_path):
+    assert build_runner("mflux:z-image-turbo", "http://gw",
+                        tmp_path).score_kwargs() == {}

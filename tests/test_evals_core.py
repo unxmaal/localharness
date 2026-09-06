@@ -473,3 +473,77 @@ def test_motion_reaches_the_row_for_ranking(tmp_path):
     needs_ffmpeg()
     case = Case(id="v", modality="video", prompt="x", params={})
     assert score(case, make_clip(tmp_path / "v.mp4")).metrics["motion"] > 0
+
+
+# ---- metric direction ------------------------------------------------------
+#
+# Every metric so far was an error rate, so "lower is better" was baked into
+# both the ranking and the worst-case column. `ink` and `motion` broke that
+# silently the moment they were added -- more ink is better -- and prompt
+# adherence breaks it again. A metric that does not declare its direction
+# cannot be ranked on.
+
+def test_every_published_metric_declares_a_direction():
+    from evals.core import METRIC_DIRECTION
+    for name in ("wer", "cer", "ink", "motion"):
+        assert name in METRIC_DIRECTION, f"{name} has no declared direction"
+        assert METRIC_DIRECTION[name] in ("lower", "higher")
+
+
+def test_error_rates_are_lower_is_better():
+    from evals.core import METRIC_DIRECTION
+    assert METRIC_DIRECTION["wer"] == "lower"
+    assert METRIC_DIRECTION["cer"] == "lower"
+
+
+def test_coverage_metrics_are_higher_is_better():
+    from evals.core import METRIC_DIRECTION
+    assert METRIC_DIRECTION["ink"] == "higher"
+    assert METRIC_DIRECTION["motion"] == "higher"
+
+
+def test_the_worst_case_of_a_higher_is_better_metric_is_its_minimum():
+    """metrics_worst took a max unconditionally, so the 'worst' ink was the
+    best-drawn case in the run."""
+    rows = [Result("a", "k", True, 1.0, 0, "", metrics={"ink": 0.02}),
+            Result("b", "k", True, 1.0, 0, "", metrics={"ink": 0.40})]
+    assert summarize(rows)["k"]["metrics_worst"]["ink"] == 0.02
+
+
+def test_the_worst_case_of_a_lower_is_better_metric_is_still_its_maximum():
+    rows = [Result("a", "k", True, 1.0, 0, "", metrics={"wer": 0.0}),
+            Result("b", "k", True, 1.0, 0, "", metrics={"wer": 0.4})]
+    assert summarize(rows)["k"]["metrics_worst"]["wer"] == 0.4
+
+
+def test_an_undeclared_metric_is_treated_as_lower_is_better_and_says_so():
+    """A new checker that forgets to declare a direction should not silently
+    invert the ranking."""
+    from evals.core import direction_of
+    with pytest.warns(UserWarning, match="direction"):
+        assert direction_of("some_new_metric") == "lower"
+
+
+def test_adherence_is_measured_only_when_a_backend_is_asked_for(tmp_path):
+    """It loads a 4GB model, so it is opt-in rather than a tax on every image
+    run. Without the flag, an image case reports no adherence."""
+    import random
+    from PIL import Image
+    p = tmp_path / "a.png"
+    im = Image.new("RGB", (64, 64))
+    im.putdata([(random.randint(0, 255),) * 3 for _ in range(64 * 64)])
+    im.save(p)
+    case = Case(id="i", modality="image", prompt="a fox", params={})
+    assert "adherence" not in score(case, p).metrics
+
+
+def test_an_unknown_adherence_backend_is_rejected(tmp_path):
+    from PIL import Image
+    import random
+    p = tmp_path / "a.png"
+    im = Image.new("RGB", (64, 64))
+    im.putdata([(random.randint(0, 255),) * 3 for _ in range(64 * 64)])
+    im.save(p)
+    case = Case(id="i", modality="image", prompt="a fox", params={})
+    with pytest.raises(ValueError, match="pickscore"):
+        score(case, p, adherence="vibes")
