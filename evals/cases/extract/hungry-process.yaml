@@ -1,0 +1,10 @@
+# The question a person actually asks when the fans spin up. Two plausible
+# wrong answers are present: the highest PID, and the one whose name contains
+# "server".
+id: hungry-process
+modality: extract
+prompt: |
+  Which process is using the most memory? Reply with its PID only.
+context_file: ps-output.txt
+assert:
+  equals: "27104"

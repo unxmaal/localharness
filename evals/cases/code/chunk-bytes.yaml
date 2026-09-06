@@ -1,0 +1,17 @@
+# The last chunk is the whole test. Every model writes the loop; the ones that
+# get it wrong either drop the remainder or emit an empty final chunk.
+id: chunk-bytes
+modality: code
+prompt: |
+  Write a Python function `chunks(data, size)` that splits a bytes object into
+  a list of consecutive slices of `size` bytes, the last one shorter if the
+  data does not divide evenly. Raise ValueError if size is not positive.
+  Return only the function.
+assert:
+  checks:
+    - "chunks(b'abcdefg', 3) == [b'abc', b'def', b'g']"
+    - "chunks(b'abcdef', 3) == [b'abc', b'def']"
+    - "chunks(b'', 3) == []"
+    - "chunks(b'ab', 5) == [b'ab']"
+    - "raises(chunks, b'abc', 0, exc=ValueError)"
+    - "raises(chunks, b'abc', -1, exc=ValueError)"

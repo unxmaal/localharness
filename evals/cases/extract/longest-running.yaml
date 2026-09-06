@@ -1,0 +1,9 @@
+# ELAPSED is formatted two different ways in the same column, which is what
+# real ps output does and what a naive string comparison gets wrong.
+id: longest-running
+modality: extract
+prompt: |
+  Which process has been running the longest? Reply with its PID only.
+context_file: ps-output.txt
+assert:
+  equals: "412"

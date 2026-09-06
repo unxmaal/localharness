@@ -1,0 +1,16 @@
+# A decorator, which is a different shape of problem from a function, and the
+# one place a model has to reason about *when* code runs rather than what it
+# returns. No sleeping: the delay is computed, not taken.
+id: retry-backoff
+modality: code
+prompt: |
+  Write a Python function `retry(fn, attempts=3)` that calls `fn()` and, if it
+  raises, calls it again up to `attempts` times total. Return the first
+  successful result. If every attempt raises, re-raise the LAST exception. Do
+  not sleep. Return only the function.
+assert:
+  checks:
+    - "retry(lambda: 42) == 42"
+    - "(lambda c=iter([1,2]): retry(lambda: next(c)))() == 1"
+    - "raises(retry, (lambda: (_ for _ in ()).throw(ValueError('x'))), exc=ValueError)"
+    - "(lambda box=[0]: (retry(lambda: (box.__setitem__(0, box[0]+1), (_ for _ in ()).throw(RuntimeError()) if box[0] < 3 else 'ok')[1]) if True else None))() == 'ok'"

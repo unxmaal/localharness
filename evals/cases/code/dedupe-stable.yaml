@@ -1,0 +1,15 @@
+# Order preservation is the part that gets dropped: set() is the obvious answer
+# and it is wrong. A single check on membership would not see it.
+id: dedupe-stable
+modality: code
+prompt: |
+  Write a Python function `dedupe(items)` returning a list with duplicates
+  removed, keeping the FIRST occurrence of each and preserving the original
+  order. Items may be unhashable. Return only the function.
+assert:
+  checks:
+    - "dedupe([3,1,3,2,1]) == [3,1,2]"
+    - "dedupe([]) == []"
+    - "dedupe(['a','a','a']) == ['a']"
+    - "dedupe([[1],[2],[1]]) == [[1],[2]]"
+    - "dedupe(list(range(100))) == list(range(100))"

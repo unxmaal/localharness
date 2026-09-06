@@ -18,6 +18,10 @@ locally. That is the whole goal, and `lh` is the product:
     lh say   "the tests all passed"
     lh hear  --seconds 5
 
+Two lanes exist in the eval suite but not yet as CLI verbs: `code`, which runs
+the generated code against assertions, and `extract`, which hands a log or grep
+output to a small fast model instead of spending a large one's context on it.
+
 An earlier version of this plan opened by saying the product was intelligent
 routing between local and cloud models. It is not, and the phases that followed
 from that premise put cloud routing, opencode integration and a ComfyUI lane
@@ -142,7 +146,9 @@ mlx-lm 0.31.3, mflux 0.19.1.
 
 | Lane | State |
 |---|---|
-| Text (svg, web) | mlx_lm behind the gateway. Working. |
+| Text (svg, web) | mlx_lm behind the gateway. Working; needs 7B+ to be much good. |
+| Code | mlx_lm behind the gateway. The eval RUNS the generated code. |
+| Extract | The delegate-to-a-small-model lane: a log in, one fact out. |
 | Image | mflux. `flux2-klein-4b` at ~19s per 512² warm. Working. |
 | Video | antirez/h3.c. 512×512×22 frames in 40.5 min, 9.48 GiB peak, zero swap. Working, and Studio-gated by time not memory. |
 | Speech out | Kokoro-82M via mlx-audio on :8890. 0.4s generation, 12-13× realtime. |

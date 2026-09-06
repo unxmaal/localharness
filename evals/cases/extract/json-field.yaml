@@ -1,0 +1,15 @@
+# Structured input, and the value wanted is nested under a key that also
+# appears at the top level. Reaching for the first match is the failure.
+id: json-field
+modality: extract
+prompt: |
+  What is the peak memory in KB for the candidate that took longest? Reply
+  with the number only.
+context: |
+  {"summary": {"peak_kb": 0},
+   "rows": [
+     {"candidate": "mflux/flux2-klein-4b-q8", "seconds": 19.37, "peak_kb": 11953664},
+     {"candidate": "mflux/z-image-turbo-q8",  "seconds": 42.64, "peak_kb": 14365696}
+   ]}
+assert:
+  equals: "14365696"

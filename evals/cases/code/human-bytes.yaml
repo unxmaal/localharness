@@ -1,0 +1,16 @@
+# Boundary arithmetic plus formatting. 1023 vs 1024 is where it breaks, and
+# getting the units right is a second, independent way to fail.
+id: human-bytes
+modality: code
+prompt: |
+  Write a Python function `human_bytes(n)` formatting a byte count with binary
+  units: 0-1023 as "N B", then KiB, MiB, GiB, TiB. Show one decimal place for
+  everything above bytes, e.g. 1536 -> "1.5 KiB". Return only the function.
+assert:
+  checks:
+    - "human_bytes(0) == '0 B'"
+    - "human_bytes(1023) == '1023 B'"
+    - "human_bytes(1024) == '1.0 KiB'"
+    - "human_bytes(1536) == '1.5 KiB'"
+    - "human_bytes(1048576) == '1.0 MiB'"
+    - "human_bytes(1099511627776) == '1.0 TiB'"

@@ -1,0 +1,17 @@
+# A Python traceback: the interesting frame is neither the first nor the last,
+# and the exception name is a distractor that reads like an answer.
+id: stack-trace
+modality: extract
+prompt: |
+  Which file and line raised the error? Reply as path:line and nothing else.
+context: |
+  Traceback (most recent call last):
+    File "evals/run.py", line 132, in main
+      report(summarize(results))
+    File "evals/core.py", line 214, in summarize
+      "median_s": round(statistics.median(times), 3),
+    File "harness/checks/render.py", line 88, in ink
+      return round(sum(histogram[:250]) / total, 4)
+  ZeroDivisionError: division by zero
+assert:
+  equals: "harness/checks/render.py:88"

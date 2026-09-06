@@ -32,17 +32,63 @@ human squints at anything.
 | modality | what it checks |
 |---|---|
 | svg | parses, has an xmlns, draws N shapes, **and rasterizes to something visible** |
-| web | parses, has a body, is self-contained, no external URLs |
+| web | parses, has a body, is self-contained, no external URLs, **and renders something** |
 | image | decodes, is the size requested, is more than one colour, **OCR of rendered text** |
 | video | demuxes, right size and length, frames are not uniform, **something moves** |
+| code | **the code is executed** and every assertion in the case must pass |
+| extract | the answer contains, excludes, or exactly equals what it should |
 | tts | the audio is real, and transcribes back to what was asked for |
 | stt | *not yet: ranking it needs reference audio with a human transcript* |
 
 The rasterization and motion checks exist because the structural ones are
 blind to a whole class of failure. Well-formed SVG can draw nothing — white on
 white, a shape outside the viewBox — and it passed every check here until
-rsvg-convert was added. A valid MP4 of the right length in which nothing moves
-plays perfectly and is not a video.
+rsvg-convert was added. A page can parse, have a body, be perfectly
+self-contained and paint a white rectangle. A valid MP4 of the right length in
+which nothing moves plays perfectly and is not a video.
+
+### code: this lane executes what the model wrote
+
+A syntax check is nearly worthless for code — an off-by-one, a reversed
+comparison and a forgotten edge case are all valid Python — so the generated
+code is **run**, in a subprocess, with a timeout, in a scratch working
+directory. That is the whole of the sandbox: no seccomp, no container, no
+filesystem restriction beyond the cwd. Fine for your own local models against
+your own cases; not fine for running an eval suite someone else wrote. Read
+cases before you run them.
+
+    id: slugify
+    modality: code
+    prompt: Write a Python function `slugify(text)` that ...
+    assert:
+      checks:
+        - "slugify('Hello, World!') == 'hello-world'"
+        - "raises(slugify, None, exc=TypeError)"
+
+Each check is one expression evaluated against the generated module. `raises()`
+is provided because "it raises ValueError on bad input" has no readable form as
+a bare expression; it re-raises anything that is *not* the expected exception,
+so a NameError in the generated code cannot pass as correct error handling.
+
+### extract: the small, fast lane
+
+Hand a log, a diff or grep output to a 0.5B instead of spending a large model's
+context on it. The material lives in `context:` (or `context_file:`, resolved
+beside the case) separately from the instruction, and it is sent **first**: a
+small model that reads forty lines and then the question does better than one
+that reads the question, works through the material, and has to remember what
+it was looking for.
+
+    id: exit-code
+    modality: extract
+    prompt: What exit status did the process end with? Reply with the number only.
+    context_file: build-failure.log
+    assert:
+      equals: "137"
+
+`equals` is the narrowest and most useful shape: an answer the caller can use
+without parsing. A model that replies "The exit status was 137." has failed at
+the thing this lane exists for.
 
 **The quality axis** is what orders two candidates that both pass. Checkers
 publish numbers alongside the verdict:
@@ -54,6 +100,7 @@ publish numbers alongside the verdict:
 | `ink` | svg | higher | fraction of the canvas actually marked |
 | `motion` | video | higher | mean change between consecutive frames |
 | `adherence` | image | higher | how well the picture matches the prompt |
+| `code_pass` | code | higher | fraction of a case's assertions that ran green |
 
 **Direction is declared, not assumed.** Every metric started out as an error
 rate, so "lower is better" got baked into both the ranking and the worst-case
@@ -99,12 +146,19 @@ that is a live risk here, not a theoretical one: a 0.5B model that never closes
 its tags runs to the token limit every time, so it is both the worst and,
 without a pass rate beside it, the slowest-looking.
 
+**When a graded metric and the pass rate disagree, the report says so.** On the
+code lane a 7B wrote 75.6% correct code against a 1.5B's 52.8% while failing
+*more* cases outright, because a case with six strict checks dies on a single
+miss. Both numbers are true and neither is the answer alone.
+
 ## --repeat
 
 One sample per prompt ranks noise. Diffusion varies enormously with the seed and
 a language model at temperature 0.2 is not deterministic either. `--repeat 3`
-runs each stochastic case with three seeds and reports them as separate rows;
-tts is skipped, since Kokoro at a fixed voice and speed is deterministic.
+runs each stochastic case with three seeds and reports them as separate rows.
+`tts` is skipped because Kokoro at a fixed voice and speed is deterministic,
+and `extract` because the answer is one token and the whole point of the lane
+is that it is cheap — three samples of "137" buys nothing.
 
 It earned itself on its first run: a 1.5B passed `icon-gear` on one seed and
 failed it on two others.

@@ -1,0 +1,17 @@
+# A diff, and the question is about the effect rather than the text. The
+# answer is not a line that appears in the material.
+id: config-diff
+modality: extract
+prompt: |
+  In one short sentence: what behaviour does this change?
+context: |
+  --- a/scripts/serve-gateway.sh
+  +++ b/scripts/serve-gateway.sh
+  @@ -21,4 +21,4 @@
+   exec uv run --python 3.12 --with "$LITELLM_PIN" \
+     litellm --config gateway/config.yaml \
+  -  --host "${GATEWAY_HOST:-127.0.0.1}" --port "${GATEWAY_PORT:-4000}"
+  +  --host "${GATEWAY_HOST:-0.0.0.0}" --port "${GATEWAY_PORT:-4000}"
+assert:
+  must_contain: ["0.0.0.0"]
+  must_not_contain: ["port 4000 changed"]

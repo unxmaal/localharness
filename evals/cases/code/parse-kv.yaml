@@ -1,0 +1,17 @@
+# Real input is messy: blank lines, comments, whitespace, values containing the
+# separator. A model that writes `line.split('=')` fails the last one.
+id: parse-kv
+modality: code
+prompt: |
+  Write a Python function `parse_kv(text)` that reads simple KEY=VALUE config
+  lines into a dict. Skip blank lines and lines whose first non-space character
+  is '#'. Strip whitespace around keys and values. A value may itself contain
+  '=' and must be kept whole. Return only the function.
+assert:
+  checks:
+    - "parse_kv('A=1\\nB=2') == {'A': '1', 'B': '2'}"
+    - "parse_kv('  A = 1  ') == {'A': '1'}"
+    - "parse_kv('# comment\\nA=1') == {'A': '1'}"
+    - "parse_kv('\\n\\nA=1\\n\\n') == {'A': '1'}"
+    - "parse_kv('URL=http://x/?a=1&b=2') == {'URL': 'http://x/?a=1&b=2'}"
+    - "parse_kv('') == {}"

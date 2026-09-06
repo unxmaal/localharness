@@ -1,0 +1,7 @@
+  PID  %CPU  %MEM      RSS STAT ELAPSED COMMAND
+  412   0.1   0.4   131072 S    04:12:33 /usr/libexec/secinitd
+ 1177   0.0   0.2    65536 S    04:12:31 /usr/sbin/distnoted agent
+26392   0.3  10.1  3305472 S       41:02 python -m mlx_lm.server --host 0.0.0.0 --port 8081
+27104  98.7  36.2 11862016 R       19:47 mflux-generate-flux2 --model flux2-klein-4b --steps 20
+27455   0.2   1.1   360448 S       18:03 litellm --config gateway/config.yaml --port 4000
+28901   0.0   0.1    32768 S       00:14 /bin/zsh -l
