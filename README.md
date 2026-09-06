@@ -56,6 +56,33 @@ Read `PLAN.md` for why it is shaped this way. `docs/validation-log.md` holds the
 evidence behind every claim in it, including conclusions that were wrong and how
 they were caught.
 
+## Serve it to another machine
+
+    ./scripts/serve-mcp.sh          # MCP on 0.0.0.0:8899, house LAN, no auth
+
+Exposes `svg`, `web`, `code` and `image` over MCP, so another machine's agent
+can use this one's GPU. On the client:
+
+    claude mcp add --transport http localharness http://styx.local:8899/mcp
+
+Every tool shells out to `lh`, so `lh` must be installed. That is the point:
+the CLI, the eval suite and the MCP server all run identical commands, which is
+how the thing being measured stays the thing that ships.
+
+`image` is **queued**, because it holds 11.4 GiB and mlx_lm swaps models per
+request through a single queue. It returns a job id immediately; `job_status`
+carries the queue position, what the machine is currently busy with, and the
+artifact path once it is done. Artifacts stay here, under `~/localharness-out`.
+
+`video` and the speech verbs are deliberately not exposed. Video needs job
+semantics past a queue, and speech over the LAN was ruled out; both stay
+reachable locally through `lh`.
+
+DNS-rebinding protection is left ON with an allowlist rather than disabled. "No
+LAN auth" is a decision about who can reach the port; rebinding does not need
+the port reachable from outside, only for someone here to open a web page. Add
+hosts with `MCP_ALLOW`.
+
 ## Develop
 
     make check     # shellcheck + bash -n + unit tests, no services needed
