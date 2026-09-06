@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Asserts the six behaviours the architecture depends on. Run after any
+# Asserts the behaviours the architecture depends on. Run after any
 # mlx-lm or litellm upgrade. Non-zero exit means the seam broke.
 set -uo pipefail
 G="http://127.0.0.1:${GATEWAY_PORT:-4000}"
@@ -60,5 +60,41 @@ curl -sf "$G/v1/messages" -H 'Content-Type: application/json' \
   -H 'x-api-key: sk-x' -H 'anthropic-version: 2023-06-01' \
   -d '{"model":"local-mid","max_tokens":80,"messages":[{"role":"user","content":"Weather in Paris? Use the tool."}],"tools":[{"name":"get_weather","input_schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}]}' \
   | grep -q '"type": *"tool_use"' && ok "anthropic tool calling" || no "anthropic tool calling"
+
+# ---- audio ------------------------------------------------------------------
+#
+# Half the goal, and until now nothing guarded it the way the text seam is
+# guarded. Both round trips are sub-second, so there is no reason to skip them.
+#
+# The status code is NOT sufficient: mlx_audio answers 200 with an EMPTY BODY
+# when misaki is missing, and it answers 200 then closes mid-stream when the
+# requested voice is not in the local cache. Assert on the bytes.
+A="http://127.0.0.1:${TTS_PORT:-8890}/v1"
+WAV="$(mktemp -t smoke-tts).wav"
+trap 'rm -f "$WAV"' EXIT
+
+if curl -sf --max-time 60 "$A/audio/speech" -H 'Content-Type: application/json' \
+     -d "{\"model\":\"mlx-community/Kokoro-82M-bf16\",\"input\":\"the gateway is up\",\"voice\":\"${TTS_VOICE:-bm_george}\",\"response_format\":\"wav\"}" \
+     -o "$WAV" 2>/dev/null; then
+  # 8000 bytes is a fifth of a second at 16k mono. A bare 44-byte WAV header
+  # passes `test -s` and plays as silence.
+  BYTES=$(wc -c < "$WAV" | tr -d ' ')
+  if [ "$BYTES" -ge 8000 ]; then
+    ok "tts speech ($BYTES bytes)"
+  else
+    no "tts speech returned $BYTES bytes; check the server log for an ImportError or a missing voice"
+  fi
+else
+  no "tts speech"
+fi
+
+if [ -s "$WAV" ]; then
+  curl -sf --max-time 60 "$A/audio/transcriptions" \
+    -F "file=@$WAV" -F "model=mlx-community/parakeet-tdt-0.6b-v2" \
+    | grep -qi 'gateway' && ok "stt transcription round trip" \
+    || no "stt transcription round trip"
+else
+  no "stt transcription round trip (no audio to transcribe)"
+fi
 
 exit $FAIL

@@ -1,9 +1,17 @@
 # localharness
 
-Local LLM serving and evaluation on Apple Silicon.
+Local media generation and voice on Apple Silicon, in a command line.
 
-Read `PLAN.md` first. `docs/validation-log.md` holds the evidence behind every
-claim in it, including one conclusion that was wrong and how it was caught.
+    lh image "a red fox in falling snow" --width 768
+    lh video "a fox running" --seconds 2
+    lh svg   "a settings gear icon"
+    lh web   "a landing page for a coffee roaster"
+    lh say   "the tests all passed"
+    lh hear  --seconds 5
+
+Read `PLAN.md` for why it is shaped this way. `docs/validation-log.md` holds the
+evidence behind every claim in it, including conclusions that were wrong and how
+they were caught.
 
 ## Develop
 
@@ -19,7 +27,18 @@ mutations were run and which two survived, and why.
 
     ./scripts/serve-mlx.sh       # inference engine on :8081
     ./scripts/serve-gateway.sh   # gateway on :4000, the only address clients use
+    ./scripts/serve-tts.sh       # Kokoro TTS + Parakeet STT on :8890
     ./scripts/smoke.sh           # assert the seam still holds
+
+## Compare candidates
+
+    uv run python -m evals.run --modality image --out .logs/img \
+      --candidates mflux:flux2-klein-4b,mflux:z-image-turbo
+
+A candidate is a gateway alias for text, or an engine spec for anything that
+runs as a process, or `tts:<model>,voice=<name>` for speech. The suite reports a
+pass rate, which separates working from broken, and quality metrics, which are
+what actually rank two candidates that both work.
 
 `smoke.sh` is the regression guard. Run it after any `mlx-lm` or `litellm` upgrade.
 It exits non-zero if the architecture's assumptions broke.

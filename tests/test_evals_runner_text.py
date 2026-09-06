@@ -41,9 +41,9 @@ def test_runs_a_case_and_scores_it():
 @respx.mock
 def test_sends_the_candidate_as_the_model():
     route = respx.post(ENDPOINT).mock(return_value=reply(SVG))
-    CompletionRunner(GATEWAY, "local-summarize").run(case())
+    CompletionRunner(GATEWAY, "local-large").run(case())
     import json
-    assert json.loads(route.calls.last.request.content)["model"] == "local-summarize"
+    assert json.loads(route.calls.last.request.content)["model"] == "local-large"
 
 
 @respx.mock

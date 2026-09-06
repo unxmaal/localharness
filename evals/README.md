@@ -5,7 +5,7 @@ this machine use? That is the antidote to re-architecting every time a better
 method turns up on GitHub.
 
     make evals                                    # default candidates
-    make evals CANDIDATES=local-mid,local-summarize
+    make evals CANDIDATES=local-mid,local-large
     uv run python -m evals.run --modality svg --candidates a,b --out /tmp/x
 
 ## Why these metrics

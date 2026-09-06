@@ -10,11 +10,14 @@ model_list:
       api_base: http://127.0.0.1:8081/v1
       api_key: not-needed
 
-  # Summarizer for the voice layer. Qwen2.5-1.5B mangles technical claims when
-  # condensing ("plateaus" came out as "scales superlinearly", the opposite of
-  # the source). Anything that speaks in Claude's voice needs a model that keeps
-  # facts straight.
-  - model_name: local-summarize
+  # The largest text model that is comfortable here. Named for its size rather
+  # than a role: it was called local-summarize for a voice-layer summarizer that
+  # no longer exists, and an alias named after a deleted job is a trap.
+  #
+  # Size is load-bearing for anything that restates a claim. Qwen2.5-1.5B
+  # mangles technical statements when condensing -- "plateaus" came out as
+  # "scales superlinearly", the exact opposite of the source.
+  - model_name: local-large
     litellm_params:
       model: openai/mlx-community/Qwen2.5-7B-Instruct-4bit
       api_base: http://127.0.0.1:8081/v1
