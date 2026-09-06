@@ -2,8 +2,11 @@
 # Asserts the behaviours the architecture depends on. Run after any
 # mlx-lm or litellm upgrade. Non-zero exit means the seam broke.
 set -uo pipefail
-G="http://127.0.0.1:${GATEWAY_PORT:-4000}"
-E="http://127.0.0.1:${MLX_PORT:-8081}"
+# SMOKE_HOST so this can be run against another machine: when the Studio serves
+# and the mini is a client, the seam to check is the Studio's.
+H="${SMOKE_HOST:-127.0.0.1}"
+G="http://$H:${GATEWAY_PORT:-4000}"
+E="http://$H:${MLX_PORT:-8081}"
 FAIL=0
 ok(){ printf 'PASS  %s\n' "$1"; }
 no(){ printf 'FAIL  %s\n' "$1"; FAIL=1; }
@@ -69,7 +72,7 @@ curl -sf "$G/v1/messages" -H 'Content-Type: application/json' \
 # The status code is NOT sufficient: mlx_audio answers 200 with an EMPTY BODY
 # when misaki is missing, and it answers 200 then closes mid-stream when the
 # requested voice is not in the local cache. Assert on the bytes.
-A="http://127.0.0.1:${TTS_PORT:-8890}/v1"
+A="http://$H:${TTS_PORT:-8890}/v1"
 WAV="$(mktemp -t smoke-tts).wav"
 trap 'rm -f "$WAV"' EXIT
 

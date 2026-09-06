@@ -87,3 +87,74 @@ def test_check_treats_an_unavailable_rasterizer_as_a_skip_not_a_failure():
     assert r.ok
     assert r.warnings
     assert r.metrics == {}
+
+
+# ---- HTML, via headless Chrome ---------------------------------------------
+
+html_only = pytest.mark.skipif(render.chrome_path() is None,
+                               reason="needs Google Chrome or Chromium")
+
+PAGE = ("<!doctype html><html><head><title>t</title><style>"
+        "body{background:#fff;color:#111;font:48px system-ui;margin:40px}"
+        "</style></head><body><h1>Coffee Roaster</h1>"
+        "<p>Beans since 1994.</p></body></html>")
+BLANK_PAGE = ("<!doctype html><html><head><title>t</title><style>"
+              "body{background:#fff;color:#fff}</style></head>"
+              "<body><h1>Invisible</h1></body></html>")
+EMPTY_PAGE = "<!doctype html><html><head><title>t</title></head><body></body></html>"
+
+
+@html_only
+def test_rasterizes_a_page_to_a_png(tmp_path):
+    out = render.rasterize_html(PAGE, tmp_path / "p.png", width=800)
+    from PIL import Image
+    with Image.open(out) as im:
+        assert im.size[0] == 800
+
+
+@html_only
+def test_a_page_with_visible_text_has_ink():
+    assert render.ink_html(PAGE) > 0.001
+
+
+@html_only
+def test_white_on_white_renders_blank():
+    """The same failure SVG has: valid markup, real content, nothing visible."""
+    assert render.ink_html(BLANK_PAGE) == 0.0
+
+
+@html_only
+def test_an_empty_body_renders_blank():
+    assert render.ink_html(EMPTY_PAGE) == 0.0
+
+
+@html_only
+def test_check_html_passes_a_real_page():
+    r = render.check_html(PAGE)
+    assert r.ok, r.reason
+    assert r.metrics["ink"] > 0
+
+
+@html_only
+def test_check_html_fails_a_page_that_renders_nothing():
+    r = render.check_html(BLANK_PAGE)
+    assert not r.ok
+    assert "blank" in r.reason.lower()
+
+
+def test_check_html_without_chrome_warns_and_passes(monkeypatch):
+    """A missing browser must not fail every candidate at once."""
+    monkeypatch.setattr(render, "chrome_path", lambda: None)
+    r = render.check_html(PAGE)
+    assert r.ok
+    assert r.warnings and "chrome" in r.warnings[0].lower()
+    assert r.metrics == {}
+
+
+@html_only
+def test_the_page_is_loaded_from_a_file_never_from_a_url(tmp_path):
+    """A generated page that references an external URL must not cause the
+    checker to fetch it. Rendering happens offline, from disk."""
+    argv = render.chrome_argv(tmp_path / "in.html", tmp_path / "out.png", 800)
+    assert any(a.startswith("file://") for a in argv)
+    assert "--disable-gpu" in argv or "--headless" in " ".join(argv)

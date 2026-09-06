@@ -5,6 +5,11 @@
 # Port 8890 is deliberate: voicemode's provider_discovery.py classifies that
 # port as "mlx-audio" and then stops sending it "whisper-1", which is the whole
 # reason the old stt_shim existed. Native detection replaces 120 lines of proxy.
+# Binds every interface by default. Deliberate: this is a house LAN, the models
+# are local, and the point of the machine is that other machines on it can use
+# the GPU. It is also the shape the M5 Studio needs, with the Studio serving and
+# the mini as a client. There is NO AUTHENTICATION -- set TTS_HOST=127.0.0.1 on an
+# untrusted network.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh
@@ -27,4 +32,5 @@ exec uv run --no-project \
   --with "$MLX_AUDIO_PIN" --with "$UVICORN_PIN" --with "$WEBRTCVAD_PIN" \
   --with "$FASTAPI_PIN" --with "$MULTIPART_PIN" --with "$SETUPTOOLS_PIN" \
   --with "$MISAKI_PIN" \
-  python -m mlx_audio.server --host 127.0.0.1 --port "${TTS_PORT:-8890}"
+  python -m mlx_audio.server \
+  --host "${TTS_HOST:-0.0.0.0}" --port "${TTS_PORT:-8890}"

@@ -125,9 +125,28 @@ def _check_video(artifact, case: Case) -> CheckResult:
     return out
 
 
+def _check_web(artifact, case: Case) -> CheckResult:
+    """Parse it, then render it in a browser.
+
+    Structural first: prose where a page should be must be reported as prose,
+    not as something that failed to paint. Then rasterize, because a page can
+    parse, have a body, be perfectly self-contained, and show a white
+    rectangle.
+    """
+    r = html_check.check(artifact)
+    if not r.ok:
+        return r
+
+    drawn = render_check.check_html(extract(artifact, ("html", "!doctype")))
+    out = CheckResult(drawn.ok, drawn.reason, r.warnings + drawn.warnings,
+                      shape_count=r.shape_count, has_title=r.has_title)
+    out.metrics = drawn.metrics
+    return out
+
+
 CHECKERS = {
     "svg": lambda a, c, **kw: _check_svg(a, c),
-    "web": lambda a, c, **kw: html_check.check(a),
+    "web": lambda a, c, **kw: _check_web(a, c),
     "image": lambda a, c, **kw: _check_image(a, c, kw.get("adherence")),
     "video": lambda a, c, **kw: _check_video(a, c),
     "tts": _check_tts,

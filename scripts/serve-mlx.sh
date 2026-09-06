@@ -6,7 +6,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh
 mkdir -p .logs
+# Binds every interface by default. Deliberate: this is a house LAN, the models
+# are local, and the point of the machine is that other machines on it can use
+# the GPU. It is also the shape the M5 Studio needs, with the Studio serving and
+# the mini as a client. There is NO AUTHENTICATION -- set MLX_HOST=127.0.0.1 on an
+# untrusted network.
 exec uv run mlx_lm.server \
   --model "${BOOT_MODEL:-mlx-community/Qwen2.5-1.5B-Instruct-4bit}" \
-  --host 127.0.0.1 \
+  --host "${MLX_HOST:-0.0.0.0}" \
   --port "${MLX_PORT:-8081}"

@@ -547,3 +547,35 @@ def test_an_unknown_adherence_backend_is_rejected(tmp_path):
     case = Case(id="i", modality="image", prompt="a fox", params={})
     with pytest.raises(ValueError, match="pickscore"):
         score(case, p, adherence="vibes")
+
+
+def test_a_page_that_parses_but_renders_blank_fails():
+    """The same failure SVG had: valid markup, real content, white on white."""
+    from harness.checks import render
+    if render.chrome_path() is None:
+        pytest.skip("needs Chrome")
+    blank = ("<!doctype html><html><head><title>t</title><style>"
+             "body{background:#fff;color:#fff}</style></head>"
+             "<body><h1>Invisible</h1></body></html>")
+    case = Case(id="p", modality="web", prompt="a page")
+    r = score(case, blank)
+    assert not r.passed
+    assert "blank" in r.detail.lower()
+
+
+def test_a_real_page_reports_its_ink():
+    from harness.checks import render
+    if render.chrome_path() is None:
+        pytest.skip("needs Chrome")
+    page = ("<!doctype html><html><head><title>t</title></head>"
+            "<body><h1>Coffee Roaster</h1><p>Beans since 1994.</p></body></html>")
+    r = score(Case(id="p", modality="web", prompt="a page"), page)
+    assert r.passed, r.detail
+    assert r.metrics["ink"] > 0
+
+
+def test_the_structural_html_check_runs_before_rendering():
+    case = Case(id="p", modality="web", prompt="a page")
+    r = score(case, "I would rather not write a web page.")
+    assert not r.passed
+    assert "blank" not in r.detail.lower()
