@@ -228,3 +228,22 @@ def test_repeats_and_singletons_coexist_in_one_run():
 def test_a_repeat_count_below_one_is_rejected():
     with pytest.raises(SystemExit):
         expand_cases(CASES, 0)
+
+
+def test_cases_no_candidate_can_run_are_reported(capsys):
+    """A case that silently never runs is invisible, which is the same class of
+    problem as a silent pass: the summary looks complete and one lane was
+    never measured. A full-suite run with no video candidate did exactly this.
+    """
+    cases = CASES + [Case(id="clip", modality="video", prompt="x")]
+    unrun = report_unrun(cases, ["local-mid", "mflux:z-image-turbo"])
+    assert "clip" in unrun and "video" in unrun
+
+
+def test_nothing_is_reported_when_every_case_has_a_candidate():
+    assert report_unrun(CASES, ["local-mid", "mflux:z-image-turbo"]) == ""
+
+
+def report_unrun(cases, candidates):
+    from evals.run import unrun_summary
+    return unrun_summary(cases, candidates)

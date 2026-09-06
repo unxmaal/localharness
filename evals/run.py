@@ -151,6 +151,25 @@ def expand_cases(cases: list[Case], repeat: int) -> list[Case]:
     return out
 
 
+def unrun_summary(cases: list[Case], candidates: list[str]) -> str:
+    """Which cases no candidate in this run can execute.
+
+    A case that silently never runs is invisible, and the summary below it
+    looks complete. That is the same class of problem as a silent pass: an
+    entire lane goes unmeasured and nothing says so.
+    """
+    covered = {c.id for candidate in candidates
+               for c in cases_for(candidate, cases)}
+    missed = [c for c in cases if c.id not in covered]
+    if not missed:
+        return ""
+    by_modality: dict[str, list[str]] = {}
+    for case in missed:
+        by_modality.setdefault(case.modality, []).append(case.id)
+    return "; ".join(f"{modality}: {', '.join(ids)}"
+                     for modality, ids in sorted(by_modality.items()))
+
+
 def select_cases(cases: list[Case], modality: str) -> list[Case]:
     if modality != "all" and modality not in MODALITIES:
         raise SystemExit(f"unknown modality '{modality}'; known: "
@@ -187,6 +206,10 @@ def main(argv: list[str] | None = None) -> int:
     outdir = Path(args.out) if args.out else None
     if outdir:
         outdir.mkdir(parents=True, exist_ok=True)
+
+    skipped = unrun_summary(cases, candidates)
+    if skipped:
+        print(f"\nnot run, no candidate for them -- {skipped}", file=sys.stderr)
 
     results = []
     for candidate in candidates:
