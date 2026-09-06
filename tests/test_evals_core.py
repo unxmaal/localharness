@@ -299,3 +299,76 @@ def test_min_shapes_is_not_a_valid_assertion_for_tts(tmp_path):
         "assert": {"min_shapes": 2}}))
     with pytest.raises(ValueError, match="min_shapes"):
         load_cases(tmp_path)
+
+
+# ---- image text assertions -------------------------------------------------
+
+def render_text(path, text):
+    from PIL import Image, ImageDraw, ImageFont
+    im = Image.new("RGB", (512, 512), (250, 250, 250))
+    d = ImageDraw.Draw(im)
+    font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", 96)
+    d.text((40, 200), text, fill=(10, 10, 10), font=font)
+    im.save(path)
+    return path
+
+
+def test_an_image_case_can_assert_the_text_it_should_render(tmp_path):
+    """Until now the suite could not tell OPEN from OPEM: both decode, both are
+    the right size, both have variance."""
+    case = Case(id="sign", modality="image", prompt="a sign reading OPEN",
+                params={"width": 512, "height": 512},
+                assertions={"text": "OPEN"})
+    assert score(case, render_text(tmp_path / "a.png", "OPEN")).passed
+
+
+def test_a_misrendered_word_fails_and_reports_what_was_read(tmp_path):
+    case = Case(id="sign", modality="image", prompt="a sign reading OPEN",
+                params={"width": 512, "height": 512},
+                assertions={"text": "OPEN", "max_cer": 0.0})
+    r = score(case, render_text(tmp_path / "a.png", "OPEM"))
+    assert not r.passed
+    assert "OPEM" in r.detail.upper()
+    assert r.metrics["cer"] > 0
+
+
+def test_the_character_error_rate_reaches_the_row_for_ranking(tmp_path):
+    case = Case(id="sign", modality="image", prompt="a sign reading OPEN",
+                params={"width": 512, "height": 512},
+                assertions={"text": "OPEN"})
+    assert score(case, render_text(tmp_path / "a.png", "OPEN")).metrics["cer"] == 0.0
+
+
+def test_the_pixel_check_runs_first_so_a_blank_image_is_not_an_ocr_failure(tmp_path):
+    """"no text found" for a uniform grey square is a true statement and a
+    useless diagnosis."""
+    from PIL import Image
+    p = tmp_path / "a.png"
+    Image.new("RGB", (512, 512), (128, 128, 128)).save(p)
+    case = Case(id="sign", modality="image", prompt="x",
+                params={"width": 512, "height": 512},
+                assertions={"text": "OPEN"})
+    r = score(case, p)
+    assert not r.passed
+    assert "uniform" in r.detail.lower()
+
+
+def test_an_image_case_with_no_text_assertion_never_runs_ocr(tmp_path):
+    import random
+    from PIL import Image
+    p = tmp_path / "a.png"
+    im = Image.new("RGB", (64, 64))
+    im.putdata([(random.randint(0, 255),) * 3 for _ in range(64 * 64)])
+    im.save(p)
+    case = Case(id="i", modality="image", prompt="a fox", params={})
+    r = score(case, p)
+    assert r.passed
+    assert "cer" not in r.metrics
+
+
+def test_text_is_a_valid_assertion_for_image_cases(tmp_path):
+    (tmp_path / "i.yaml").write_text(yaml.safe_dump({
+        "id": "i", "modality": "image", "prompt": "a sign reading OPEN",
+        "assert": {"text": "OPEN", "max_cer": 0.3}}))
+    c = load_cases(tmp_path)[0]
+    assert c.assertions["text"] == "OPEN"

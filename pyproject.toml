@@ -10,6 +10,7 @@ dependencies = [
     "pillow>=10",
     "jiwer>=4.0.0",
     "num2words>=0.5.14",
+    "pyobjc-framework-vision>=12.2.2",
 ]
 
 [project.scripts]

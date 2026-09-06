@@ -17,6 +17,7 @@ import yaml
 
 from harness.checks import html as html_check
 from harness.checks import image as image_check
+from harness.checks import ocr as ocr_check
 from harness.checks import speech as speech_check
 from harness.checks import svg as svg_check
 from harness.checks.base import CheckResult
@@ -43,7 +44,21 @@ def _check_image(artifact, case: Case) -> CheckResult:
     p = case.params
     expect = (p["width"], p["height"]) if p.get("width") and p.get("height") else None
     r = image_check.check(artifact, expect=expect)
-    return CheckResult(r.ok, r.reason, r.warnings)
+    # Pixels first, always. "no text found" is a true and useless diagnosis for
+    # a uniform grey square, and it would send you looking at the wrong thing.
+    if not r.ok:
+        return CheckResult(r.ok, r.reason, r.warnings)
+
+    expect_text = case.assertions.get("text")
+    if not expect_text:
+        return CheckResult(True, "", r.warnings)
+
+    o = ocr_check.check(artifact, expect=expect_text,
+                        max_cer=case.assertions.get("max_cer",
+                                                    ocr_check.DEFAULT_MAX_CER))
+    out = CheckResult(o.ok, o.reason, r.warnings + o.warnings)
+    out.metrics = o.metrics
+    return out
 
 
 def _check_tts(artifact, case: Case, transcriber=None) -> CheckResult:
@@ -74,6 +89,10 @@ PARAM_KEYS = {"width", "height", "steps", "seed", "guidance", "frames",
 # pass vacuously until the suite can OCR, so it is rejected rather than ignored.
 TEXT_ASSERTIONS = {"min_shapes", "must_contain", "must_not_contain"}
 ASSERTION_KEYS = {"svg": TEXT_ASSERTIONS, "web": TEXT_ASSERTIONS,
+                  # `text` is OCR'd out of the produced image; `max_cer` is how
+                  # wrong the rendering may be. Not must_contain: there is no
+                  # text to search, and that could only ever pass vacuously.
+                  "image": {"text", "max_cer"},
                   "tts": {"max_wer"}}
 
 

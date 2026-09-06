@@ -12,6 +12,9 @@ class CheckResult:
     warnings: list[str] = field(default_factory=list)
     shape_count: int = 0
     has_title: bool = False
+    #: Numbers this check produced alongside its verdict. A pass rate separates
+    #: working from broken; these are what put two working candidates in order.
+    metrics: dict = field(default_factory=dict)
 
 
 _FENCE = re.compile(r"```[a-zA-Z]*\s*\n(.*?)```", re.S)
