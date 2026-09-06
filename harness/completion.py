@@ -43,6 +43,33 @@ SYSTEM = {
 }
 NEUTRAL_SYSTEM = "Answer directly and concisely."
 
+DEFAULT_TEMPERATURE = 0.2
+
+# Sampling, per modality, because the lanes want opposite things.
+#
+# The SVG lane's loudest failure is DEGENERATE REPETITION: the model emits a
+# plausible <path>, and the highest-probability continuation is another one
+# just like it, until the token budget runs out mid-attribute and leaves an
+# unclosed document. `lh svg "a cartoon frog holding a coffee mug"` produced
+# eighty near-identical paths and no frog.
+#
+# A repetition penalty is the standard lever for that. Its value here is NOT
+# yet established: hand-run single samples suggested temperature was the
+# culprit instead, and three-sample repeats contradicted that outright. This
+# repo has a commit called "--repeat: one sample per prompt ranks noise" and
+# an eval suite built for exactly this question, so the honest state is that
+# the knob exists, is measurable, and has not been measured. Compare with:
+#   uv run python -m evals.run --modality svg --repeat 5 --candidates local-large
+# against a run overriding sampling to turn it off.
+#
+# `extract` and `code` are deliberately absent. Extract pulls one fact out of
+# a log and wants to be as close to deterministic as the sampler allows;
+# making it stochastic to fix a drawing problem would be a plain downgrade.
+SAMPLING = {
+    "svg": {"temperature": 0.4, "repetition_penalty": 1.1},
+    "web": {"temperature": 0.4, "repetition_penalty": 1.1},
+}
+
 # Root tags worth recovering, per modality.
 ROOT_TAGS = {"svg": ("svg",), "web": ("html", "!doctype"), "code": ()}
 
@@ -67,16 +94,28 @@ def user_message(prompt: str, context: str = "") -> str:
 
 def complete(prompt: str, model: str, gateway: str = DEFAULT_GATEWAY,
              modality: str = "", context: str = "", timeout: float = 180.0,
-             temperature: float = 0.2, max_tokens: int = 4000) -> str:
-    """Ask `model` for a completion. Returns the raw text, unrecovered."""
+             temperature: float | None = None, max_tokens: int = 4000,
+             sampling: dict | None = None) -> str:
+    """Ask `model` for a completion. Returns the raw text, unrecovered.
+
+    `sampling` overrides the per-modality defaults, so the eval can run the
+    same case with a knob on and off and let the numbers decide.
+    """
+    knobs = dict(SAMPLING.get(modality, {}))
+    if temperature is not None:
+        knobs["temperature"] = temperature
+    if sampling:
+        knobs.update(sampling)
+    knobs.setdefault("temperature", DEFAULT_TEMPERATURE)
+
     payload = {
         "model": model,
-        "temperature": temperature,
         "max_tokens": max_tokens,
         "messages": [
             {"role": "system", "content": SYSTEM.get(modality, NEUTRAL_SYSTEM)},
             {"role": "user", "content": user_message(prompt, context)},
         ],
+        **knobs,
     }
     try:
         r = httpx.post(f"{gateway.rstrip('/')}/v1/chat/completions",

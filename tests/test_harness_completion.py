@@ -4,6 +4,8 @@ The system prompts live here rather than in the eval suite on purpose: if the
 eval steers the model differently from the CLI, it is measuring a product that
 does not ship.
 """
+import json
+
 import httpx
 import pytest
 import respx
@@ -162,3 +164,62 @@ def test_a_case_with_no_context_sends_the_prompt_unchanged():
 def test_code_is_recovered_from_a_fence_but_svg_markup_is_not_mangled():
     assert "def f" in comp.artifact("```python\ndef f():\n    pass\n```", "code")
     assert comp.artifact("<svg><rect/></svg>", "svg").startswith("<svg")
+
+
+# ---- sampling, per modality ------------------------------------------------
+# Degenerate repetition is the SVG lane's loudest failure: the model emits a
+# plausible <path>, and the highest-probability continuation is another one
+# just like it, until the token budget runs out mid-attribute and the document
+# is unclosed. A repetition penalty is the standard lever.
+#
+# It is per-modality because the lanes want opposite things. `extract` pulls
+# one fact out of a log and should be as close to deterministic as the sampler
+# allows; making it stochastic to fix a drawing problem would be a plain
+# downgrade.
+
+def test_svg_and_web_ask_for_a_repetition_penalty():
+    for modality in ("svg", "web"):
+        assert comp.SAMPLING[modality].get("repetition_penalty", 1.0) > 1.0
+
+
+def test_extract_and_code_stay_deterministic():
+    """A fact extractor that samples is a worse fact extractor."""
+    for modality in ("extract", "code"):
+        assert "repetition_penalty" not in comp.SAMPLING.get(modality, {})
+        assert comp.SAMPLING.get(modality, {}).get(
+            "temperature", comp.DEFAULT_TEMPERATURE) <= 0.2
+
+
+@respx.mock
+def test_the_penalty_reaches_the_gateway(tmp_path):
+    route = respx.post(f"{GW}/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json={
+            "choices": [{"message": {"content": "<svg/>"}}]}))
+    comp.complete("a gear", model="local-large", modality="svg")
+    sent = json.loads(route.calls[0].request.read())
+    assert sent["repetition_penalty"] > 1.0
+
+
+@respx.mock
+def test_an_unsteered_modality_sends_no_extra_sampling(tmp_path):
+    route = respx.post(f"{GW}/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json={
+            "choices": [{"message": {"content": "hi"}}]}))
+    comp.complete("hello", model="local-mid")
+    sent = json.loads(route.calls[0].request.read())
+    assert "repetition_penalty" not in sent
+    assert sent["temperature"] == comp.DEFAULT_TEMPERATURE
+
+
+@respx.mock
+def test_a_caller_can_override_the_sampling_to_measure_it(tmp_path):
+    """The eval has to be able to run the same case with and without the
+    penalty, or its value stays an assertion rather than a measurement."""
+    route = respx.post(f"{GW}/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json={
+            "choices": [{"message": {"content": "<svg/>"}}]}))
+    comp.complete("a gear", model="local-large", modality="svg",
+                        sampling={"repetition_penalty": 1.0, "temperature": 0.5})
+    sent = json.loads(route.calls[0].request.read())
+    assert sent["repetition_penalty"] == 1.0
+    assert sent["temperature"] == 0.5
