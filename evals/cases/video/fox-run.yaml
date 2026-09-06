@@ -1,0 +1,13 @@
+# Deliberately small. On this machine 512x512x22 frames is 40.5 minutes, so a
+# case sized for a real comparison would make the suite unrunnable here; the
+# Studio is what changes that. The point of this one is that the video lane is
+# measured at all, and the checks are the same shape as the image lane's.
+id: fox-run
+modality: video
+prompt: A red fox running through falling snow in a quiet forest, side view, photographic.
+params:
+  width: 256
+  height: 256
+  frames: 8
+  steps: 4
+  seed: 42

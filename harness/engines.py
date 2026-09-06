@@ -47,6 +47,8 @@ class Engine:
     timeout: float = 900.0
     #: Whether the child's output should reach the terminal live.
     stream: bool = False
+    #: Directory to run from, for engines that load files relative to cwd.
+    cwd: str | None = None
 
 
 def resolve(spec: str) -> Engine:
@@ -212,10 +214,17 @@ def _h3(spec: str, model: str, options: dict) -> Engine:
             cmd.append("--ssd-streaming")
         return cmd
 
+    # h3 compiles h3_shaders.metal at startup and looks for it RELATIVE TO CWD,
+    # so run from beside the binary. Invoked from anywhere else it dies with
+    # "cannot compile h3_shaders.metal" after loading the tokenizer and half the
+    # text encoder, which reads like a model problem rather than a path one.
+    binary = os.environ.get("H3_BIN", H3_DEFAULT_BIN)
+
     return Engine(name="h3/minimax-h3", spec=spec, argv=argv, modality="video",
                   output_suffix=".mp4",
                   # 512x512x22 frames measured at 40.5 minutes on the M2 Pro.
-                  timeout=6 * 3600.0, stream=True)
+                  timeout=6 * 3600.0, stream=True,
+                  cwd=str(Path(binary).parent))
 
 
 _BUILDERS: dict[str, Callable[[str, str, dict], Engine]] = {

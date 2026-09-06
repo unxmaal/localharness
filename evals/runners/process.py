@@ -33,7 +33,10 @@ class ProcessRunner(BaseRunner):
         # `/` in a model name would otherwise open a directory that does not
         # exist: mflux/z-image-turbo-q8 is one candidate, not a path.
         stem = self.candidate.replace("/", "_")
-        out = self.outdir / f"{stem}--{case.id}{self.engine.output_suffix}"
+        # Absolute: an engine with its own working directory would otherwise
+        # write a relative path inside that directory rather than here.
+        out = (self.outdir / f"{stem}--{case.id}"
+               f"{self.engine.output_suffix}").resolve()
         if out.exists():
             out.unlink()
 
@@ -43,7 +46,8 @@ class ProcessRunner(BaseRunner):
             raise RunnerError(str(exc)) from exc
 
         try:
-            r = proc.run(argv, timeout=self.timeout, stream=self.engine.stream)
+            r = proc.run(argv, timeout=self.timeout, stream=self.engine.stream,
+                         cwd=self.engine.cwd)
         except subprocess.TimeoutExpired as exc:
             raise RunnerError(f"timed out after {self.timeout}s") from exc
         except FileNotFoundError as exc:

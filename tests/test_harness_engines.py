@@ -198,3 +198,32 @@ def test_every_entry_point_in_the_table_actually_exists():
     what catches it going stale on an upgrade."""
     missing = [b for b in set(ENTRY_POINTS.values()) if shutil.which(b) is None]
     assert not missing, f"engines.py names binaries mflux does not ship: {missing}"
+
+
+# ---- working directory -----------------------------------------------------
+
+def test_h3_runs_from_its_own_directory():
+    """h3 compiles h3_shaders.metal at startup and looks for it RELATIVE TO
+    CWD, so invoking it from anywhere else dies with
+
+        h3: cannot compile h3_shaders.metal: ... no such file
+
+    after loading the tokenizer and half the text encoder, which reads like a
+    model problem rather than a path one.
+    """
+    eng = resolve("h3")
+    assert eng.cwd, "h3 must declare a working directory"
+    assert Path(eng.cwd).name == "h3.c"
+
+
+def test_h3_cwd_follows_the_binary_when_it_is_overridden(monkeypatch, tmp_path):
+    binary = tmp_path / "elsewhere" / "h3"
+    binary.parent.mkdir()
+    monkeypatch.setenv("H3_BIN", str(binary))
+    assert resolve("h3").cwd == str(binary.parent)
+
+
+def test_mflux_needs_no_working_directory():
+    """It resolves everything through HF_HOME, so pinning a cwd would only
+    invent a way to break it."""
+    assert resolve("mflux:z-image-turbo").cwd is None

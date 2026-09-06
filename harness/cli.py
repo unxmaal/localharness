@@ -69,7 +69,9 @@ def _generate(spec: str, prompt: str, out: Path, params: dict) -> int:
         return err(str(exc))
 
     out = out or default_output(engine.modality, engine.output_suffix)
-    out = Path(out)
+    # Absolute, because an engine with its own working directory would otherwise
+    # write a relative path inside that directory, silently, where nobody looks.
+    out = Path(out).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists():
         out.unlink()
@@ -80,7 +82,8 @@ def _generate(spec: str, prompt: str, out: Path, params: dict) -> int:
         return err(str(exc))
 
     try:
-        r = proc.run(argv, timeout=engine.timeout, stream=engine.stream)
+        r = proc.run(argv, timeout=engine.timeout, stream=engine.stream,
+                     cwd=engine.cwd)
     except FileNotFoundError as exc:
         return err(f"{exc} is not installed or not on PATH.{INSTALL_HINT.get(spec.split(':')[0], '')}")
     except subprocess.TimeoutExpired:

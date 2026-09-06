@@ -24,7 +24,7 @@ def spy(monkeypatch):
     calls = []
 
     def fake_run(argv, timeout=None, stream=False, cwd=None):
-        calls.append(dict(argv=argv, timeout=timeout, stream=stream))
+        calls.append(dict(argv=argv, timeout=timeout, stream=stream, cwd=cwd))
         # Engines are contractually required to leave a file behind.
         out = _output_of(argv)
         if out:
@@ -315,3 +315,17 @@ def test_hear_records_first_when_given_no_file(monkeypatch, tmp_path, capsys):
 def test_hear_on_a_missing_file_is_a_clean_message(tmp_path, capsys):
     assert cli.main(["hear", str(tmp_path / "nope.wav")]) != 0
     assert "nope.wav" in capsys.readouterr().err
+
+
+def test_an_engine_with_a_working_directory_is_run_from_it(spy, tmp_path):
+    cli.main(["video", "fox", "-o", str(tmp_path / "v.mp4")])
+    assert spy[0]["cwd"], "h3 must not be launched from the caller's cwd"
+
+
+def test_the_output_path_is_absolute_when_the_cwd_changes(spy, tmp_path, monkeypatch):
+    """A relative -o would land inside the engine's own directory, silently,
+    where nobody looks for it."""
+    monkeypatch.chdir(tmp_path)
+    cli.main(["video", "fox", "-o", "clip.mp4"])
+    argv = spy[0]["argv"]
+    assert argv[argv.index("-o") + 1].startswith("/")

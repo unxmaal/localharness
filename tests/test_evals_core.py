@@ -210,10 +210,11 @@ def test_score_fails_a_uniform_image(tmp_path):
 
 
 def test_score_of_a_modality_with_no_checker_is_not_a_silent_pass():
-    """video/tts/stt have no checker yet. Reporting them as passed would put a
-    100% pass rate next to nothing measured."""
-    case = Case(id="v", modality="video", prompt="a fox")
-    r = score(case, "/tmp/nope.mp4")
+    """stt is declarable but not yet judgeable: ranking it needs reference
+    audio with a human transcript. Reporting it as passed would put a 100%
+    pass rate next to nothing measured."""
+    case = Case(id="s", modality="stt", prompt="a fox")
+    r = score(case, "/tmp/nope.wav")
     assert not r.passed
     assert "no checker" in r.detail.lower()
 
@@ -224,7 +225,7 @@ def test_the_cases_that_ship_with_the_suite_actually_load():
     from pathlib import Path
     cases = load_cases(Path(__file__).resolve().parent.parent / "evals" / "cases")
     assert len(cases) >= 8
-    assert {c.modality for c in cases} == {"svg", "web", "image", "tts"}
+    assert {c.modality for c in cases} == {"svg", "web", "image", "tts", "video"}
     assert all(c.prompt.strip() for c in cases)
 
 
@@ -412,3 +413,63 @@ def test_the_structural_check_runs_first(tmp_path):
     r = score(case, "<svg><circle</svg>")
     assert not r.passed
     assert "parse" in r.detail.lower()
+
+
+# ---- video -----------------------------------------------------------------
+
+def make_clip(path, source="testsrc", frames=8, size="128x128"):
+    import subprocess
+    sep = ":" if "=" in source else "="
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+         "-i", f"{source}{sep}size={size}:rate=8", "-frames:v", str(frames),
+         "-pix_fmt", "yuv420p", str(path)], check=True, capture_output=True)
+    return path
+
+
+def needs_ffmpeg():
+    import shutil
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("needs ffmpeg")
+
+
+def test_video_is_scored_through_the_same_entry_point(tmp_path):
+    """It used to have no checker at all, so a video candidate FAILED by
+    construction with 'no checker for modality video'."""
+    needs_ffmpeg()
+    case = Case(id="v", modality="video", prompt="a fox running",
+                params={"width": 128, "height": 128, "frames": 8})
+    assert score(case, make_clip(tmp_path / "v.mp4")).passed
+
+
+def test_a_video_where_nothing_moves_fails(tmp_path):
+    needs_ffmpeg()
+    case = Case(id="v", modality="video", prompt="a fox running",
+                params={"width": 128, "height": 128, "frames": 8})
+    r = score(case, make_clip(tmp_path / "v.mp4", source="color=c=gray"))
+    assert not r.passed
+
+
+def test_the_requested_frame_count_is_read_from_params(tmp_path):
+    needs_ffmpeg()
+    case = Case(id="v", modality="video", prompt="x",
+                params={"width": 128, "height": 128, "frames": 22})
+    r = score(case, make_clip(tmp_path / "v.mp4", frames=8))
+    assert not r.passed
+    assert "22" in r.detail
+
+
+def test_seconds_are_converted_to_frames_at_24fps(tmp_path):
+    """A case may ask for a duration instead; h3 takes either and the checker
+    has to know they mean the same thing."""
+    needs_ffmpeg()
+    case = Case(id="v", modality="video", prompt="x", params={"seconds": 1})
+    r = score(case, make_clip(tmp_path / "v.mp4", frames=8))
+    assert not r.passed
+    assert "24" in r.detail
+
+
+def test_motion_reaches_the_row_for_ranking(tmp_path):
+    needs_ffmpeg()
+    case = Case(id="v", modality="video", prompt="x", params={})
+    assert score(case, make_clip(tmp_path / "v.mp4")).metrics["motion"] > 0

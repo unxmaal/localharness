@@ -19,6 +19,7 @@ from harness.checks import html as html_check
 from harness.checks import image as image_check
 from harness.checks import ocr as ocr_check
 from harness.checks import render as render_check
+from harness.checks import video as video_check
 from harness.checks import speech as speech_check
 from harness.checks import svg as svg_check
 from harness.checks.base import CheckResult, extract
@@ -92,10 +93,28 @@ def _check_svg(artifact, case: Case) -> CheckResult:
     return out
 
 
+#: h3 takes --frames or --seconds and treats a second as 24 frames, so a case
+#: may ask for either and the checker has to know they mean the same thing.
+FPS = 24
+
+
+def _check_video(artifact, case: Case) -> CheckResult:
+    p = case.params
+    expect = (p["width"], p["height"]) if p.get("width") and p.get("height") else None
+    frames = p.get("frames")
+    if frames is None and p.get("seconds"):
+        frames = int(p["seconds"]) * FPS
+    r = video_check.check(artifact, expect=expect, frames=frames)
+    out = CheckResult(r.ok, r.reason, r.warnings)
+    out.metrics = r.metrics
+    return out
+
+
 CHECKERS = {
     "svg": lambda a, c, **kw: _check_svg(a, c),
     "web": lambda a, c, **kw: html_check.check(a),
     "image": lambda a, c, **kw: _check_image(a, c),
+    "video": lambda a, c, **kw: _check_video(a, c),
     "tts": _check_tts,
 }
 # Modalities that may appear in a case file. video/tts/stt are declarable but
