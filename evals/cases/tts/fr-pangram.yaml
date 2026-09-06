@@ -1,0 +1,8 @@
+# The French pangram everyone uses. Accented vowels in every position, which is
+# where a frontend without a French normalizer falls over.
+id: fr-pangram
+modality: tts
+language: fr
+prompt: Portez ce vieux whisky au juge blond qui fume.
+assert:
+  max_wer: 0.15

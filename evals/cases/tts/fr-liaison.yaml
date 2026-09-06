@@ -1,0 +1,10 @@
+# Liaison is the French-specific failure: "les anciens amis" is read as one
+# breath with two consonants that exist only when spoken. A model that reads
+# each word in isolation is intelligible to a human and wrong to a transcriber,
+# which is exactly the difference this lane is for.
+id: fr-liaison
+modality: tts
+language: fr
+prompt: Les anciens amis ont attendu deux heures avant un excellent entretien.
+assert:
+  max_wer: 0.25

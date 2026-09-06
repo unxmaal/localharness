@@ -406,3 +406,85 @@ def test_an_unknown_stt_backend_is_reported_as_a_bad_spec():
     with pytest.raises(SystemExit) as e:
         build_runner("stt:some/model,backend=wisper", "http://gw", None)
     assert "wisper" in str(e.value)
+
+
+# ---- tts cloning options ---------------------------------------------------
+
+def test_a_tts_candidate_takes_a_reference_clip_and_a_lang_code(tmp_path):
+    ref = tmp_path / "fleurs-fr-male-1.wav"
+    ref.write_bytes(b"x")
+    r = build_runner(
+        f"tts:litmudoc/Chatterbox-Multilingual-MLX-v2-Q8,ref_audio={ref},"
+        "lang_code=fr,ear=whisper:fr", "http://gw", tmp_path)
+    assert r.ref_audio == ref
+    assert r.lang_code == "fr"
+    assert r.ear == "whisper:fr"
+    assert r.candidate.endswith("/fleurs-fr-male-1")
+
+
+def test_a_tts_candidate_still_defaults_to_the_server_ear(tmp_path):
+    r = build_runner("tts:mlx-community/Kokoro-82M-bf16,voice=am_adam",
+                     "http://gw", tmp_path)
+    assert r.ear == "server"
+    assert r.ref_audio is None
+
+
+def test_an_unknown_tts_option_is_named_before_the_run(tmp_path):
+    with pytest.raises(SystemExit) as e:
+        build_runner("tts:some/model,language=fr", "http://gw", tmp_path)
+    assert "language" in str(e.value)
+    assert "lang_code" in str(e.value)
+
+
+def test_an_unknown_ear_is_reported_as_a_bad_spec(tmp_path):
+    with pytest.raises(SystemExit) as e:
+        build_runner("tts:some/model,ear=wisper:fr", "http://gw", tmp_path)
+    assert "wisper" in str(e.value)
+
+
+def test_a_reference_clip_that_is_not_there_is_caught_before_the_run(tmp_path):
+    """A cloning run is the slow lane; finding the typo forty cases in is the
+    expensive way."""
+    with pytest.raises(SystemExit) as e:
+        build_runner(f"tts:some/model,ref_audio={tmp_path}/gone.wav",
+                     "http://gw", tmp_path)
+    assert "gone.wav" in str(e.value)
+
+
+# ---- language selection ----------------------------------------------------
+# Handing a French case to an English-only candidate produces a word error rate
+# near 1.0, which is a row that says nothing about the candidate -- the same
+# mistake as handing an SVG case to mflux.
+
+def test_an_english_candidate_does_not_get_french_cases(tmp_path):
+    from evals.run import cases_for
+    cases = [Case(id="en1", modality="tts", prompt="hello"),
+             Case(id="fr1", modality="tts", prompt="bonjour", language="fr")]
+    got = cases_for("tts:mlx-community/Kokoro-82M-bf16,voice=am_adam", cases)
+    assert [c.id for c in got] == ["en1"]
+
+
+def test_a_french_eared_candidate_gets_the_french_cases(tmp_path):
+    from evals.run import cases_for
+    cases = [Case(id="en1", modality="tts", prompt="hello"),
+             Case(id="fr1", modality="tts", prompt="bonjour", language="fr")]
+    got = cases_for("tts:some/model,ear=whisper:fr", cases)
+    assert [c.id for c in got] == ["fr1"]
+
+
+def test_an_stt_candidate_selects_by_its_own_language(tmp_path):
+    from evals.run import cases_for
+    cases = [Case(id="en1", modality="stt", prompt="hello"),
+             Case(id="fr1", modality="stt", prompt="bonjour", language="fr")]
+    fr = "stt:mlx-community/whisper-large-v3-mlx,backend=whisper,language=fr"
+    assert [c.id for c in cases_for(fr, cases)] == ["fr1"]
+    assert [c.id for c in cases_for("stt:some/model", cases)] == ["en1"]
+
+
+def test_language_selection_leaves_the_other_lanes_alone(tmp_path):
+    """Only speech candidates have an ear. An image model has no language and
+    must not lose its cases to this filter."""
+    from evals.run import cases_for
+    cases = [Case(id="fox", modality="image", prompt="a fox",
+                  params={"width": 64, "height": 64})]
+    assert [c.id for c in cases_for("mflux:z-image-turbo", cases)] == ["fox"]

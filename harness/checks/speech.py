@@ -58,24 +58,36 @@ class SpeechResult:
                 "wer_errors": self.errors, "wer_words": self.words}
 
 
-def normalize(text: str) -> str:
+def normalize(text: str, language: str = "en") -> str:
     """Strip everything that would measure transcription style, not speech.
 
     Parakeet emits no reliable punctuation and inconsistent casing, and it
     spells numbers out: "MLX 200" comes back as "mlx two hundred". Counting
     those as errors ranks models on how they write, not on what they heard.
+
+    The expansion has to happen in the language being spoken. French 92 is
+    "quatre-vingt-douze" -- four words for two digits -- so expanding it with
+    the English table turns a correct reading into four errors and reports it
+    as the TTS model failing.
     """
-    text = _DIGITS.sub(lambda m: num2words(int(m.group())), text)
+    try:
+        text = _DIGITS.sub(
+            lambda m: num2words(int(m.group()), lang=language), text)
+    except NotImplementedError as exc:
+        # Silently leaving the digits alone would score a correct reading as
+        # wrong, which is the failure this function exists to prevent.
+        raise ValueError(
+            f"cannot normalize numbers for language {language!r}: {exc}") from exc
     text = _PUNCT.sub(" ", text.lower())
     return " ".join(text.split())
 
 
-def wer(reference: str, hypothesis: str) -> float:
+def wer(reference: str, hypothesis: str, language: str = "en") -> float:
     """Word error rate, after normalization. 0.0 is perfect."""
-    ref = normalize(reference)
+    ref = normalize(reference, language)
     if not ref:
         raise ValueError("cannot score against an empty reference")
-    hyp = normalize(hypothesis)
+    hyp = normalize(hypothesis, language)
     if not hyp:
         # jiwer treats an empty hypothesis as every word deleted, which is 1.0;
         # spelling it out keeps the edge case from depending on jiwer's version.
@@ -83,17 +95,18 @@ def wer(reference: str, hypothesis: str) -> float:
     return jiwer.wer(ref, hyp)
 
 
-def wer_counts(reference: str, hypothesis: str) -> tuple[int, int]:
+def wer_counts(reference: str, hypothesis: str,
+               language: str = "en") -> tuple[int, int]:
     """(errors, reference words) after the same normalization wer() uses.
 
     Needed for a corpus rate: total errors over total words, rather than a mean
     of per-utterance rates in which a two-word clip outweighs a long one.
     """
-    ref = normalize(reference)
+    ref = normalize(reference, language)
     if not ref:
         raise ValueError("cannot score against an empty reference")
     words = len(ref.split())
-    hyp = normalize(hypothesis)
+    hyp = normalize(hypothesis, language)
     if not hyp:
         return words, words
     out = jiwer.process_words(ref, hyp)
@@ -101,7 +114,7 @@ def wer_counts(reference: str, hypothesis: str) -> tuple[int, int]:
 
 
 def check(path: str | Path, reference: str, max_wer: float | None = None,
-          transcriber=None) -> SpeechResult:
+          transcriber=None, language: str = "en") -> SpeechResult:
     """Transcribe the audio at `path` and compare it to `reference`.
 
     `max_wer` is optional: with no limit the check measures without judging,
@@ -125,8 +138,8 @@ def check(path: str | Path, reference: str, max_wer: float | None = None,
         # error: that is a broken instrument, not a bad model.
         return SpeechResult(False, f"could not transcribe: {exc}")
 
-    rate = wer(reference, transcript)
-    errors, words = wer_counts(reference, transcript)
+    rate = wer(reference, transcript, language)
+    errors, words = wer_counts(reference, transcript, language)
     if max_wer is not None and rate > max_wer:
         return SpeechResult(
             False,

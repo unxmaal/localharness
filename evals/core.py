@@ -39,6 +39,10 @@ class Case:
     context: str = ""
     #: Input audio for a transcription case, resolved beside the case file.
     audio: Path | None = None
+    #: Which language the speech is in. Selection uses it: an English-only
+    #: candidate handed a French case scores near 1.0 word error rate, which
+    #: is a row about the wrong instrument rather than about the candidate.
+    language: str = "en"
     #: Generation knobs handed to the engine (width, steps, seed...).
     params: dict = field(default_factory=dict)
     #: Checks applied to whatever came back.
@@ -107,7 +111,8 @@ def _check_tts(artifact, case: Case, transcriber=None) -> CheckResult:
     """The sentence that was asked for IS the reference transcript."""
     return speech_check.check(artifact, reference=case.prompt,
                               max_wer=case.assertions.get("max_wer"),
-                              transcriber=transcriber)
+                              transcriber=transcriber,
+                              language=case.language)
 
 
 def _check_stt(artifact, case: Case) -> CheckResult:
@@ -117,8 +122,9 @@ def _check_stt(artifact, case: Case) -> CheckResult:
     so the word error rate is the STT model's alone. The tts round trip is
     joint with whatever reads it back and cannot separate the two.
     """
-    rate = speech_check.wer(case.prompt, artifact)
-    errors, words = speech_check.wer_counts(case.prompt, artifact)
+    rate = speech_check.wer(case.prompt, artifact, case.language)
+    errors, words = speech_check.wer_counts(case.prompt, artifact,
+                                            case.language)
     limit = case.assertions.get("max_wer")
     out = CheckResult(limit is None or rate <= limit, "")
     out.metrics = {"wer": round(rate, 4),
@@ -294,7 +300,8 @@ def load_cases(directory: str | Path) -> list[Case]:
                         ASSERTION_KEYS.get(modality, set()))
         cases.append(Case(id=raw["id"], modality=modality, prompt=raw["prompt"],
                           context=context, audio=audio, params=params,
-                          assertions=assertions, source=path))
+                          assertions=assertions, source=path,
+                          language=raw.get("language") or "en"))
     return cases
 
 

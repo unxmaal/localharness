@@ -40,7 +40,7 @@ ALL_MODALITIES = sorted(MODALITIES)
 
 
 PROCESS_ENGINES = ("mflux", "h3")
-TTS_OPTIONS = {"voice"}
+TTS_OPTIONS = {"voice", "ref_audio", "lang_code", "ear"}
 STT_OPTIONS = {"backend", "language"}
 
 
@@ -68,6 +68,38 @@ def modality_of(candidate: str) -> str | None:
     return None
 
 
+def language_of(candidate: str) -> str | None:
+    """The language a speech candidate can be measured in, or None for the
+    lanes that have no language at all.
+
+    For tts it is the EAR's language, not the model's: a French sentence can
+    only be scored by a transcriber that speaks French, so the two are the same
+    constraint rather than two settings that happen to agree.
+    """
+    kind = kind_of(candidate)
+    if kind not in ("tts", "stt"):
+        return None
+    options = _options_of(candidate)
+    if kind == "stt":
+        return options.get("language") or "en"
+    _, _, language = options.get("ear", "server").partition(":")
+    return language.strip() or "en"
+
+
+def _options_of(candidate: str) -> dict:
+    """The key=value tail of a candidate spec, or {} if it does not parse.
+
+    Selection must not raise: a bad spec is reported by build_runner, with the
+    full message, rather than here as a filtering accident.
+    """
+    _, _, rest = candidate.partition(":")
+    _, _, optstr = rest.partition(",")
+    try:
+        return parse_options(optstr, candidate)
+    except ValueError:
+        return {}
+
+
 def engine_for(candidate: str) -> Engine | None:
     try:
         return resolve(candidate)
@@ -91,9 +123,21 @@ def _speech_runner(candidate: str, outdir: Path | None) -> SpeechRunner:
                          "tts:mlx-community/Kokoro-82M-bf16,voice=am_adam")
     if outdir is None:
         raise SystemExit(f"{candidate} writes audio; pass --out")
-    # Only Kokoro has a voice table; a candidate may legitimately name none.
-    return SpeechRunner(model=model, outdir=outdir,
-                        voice=options.get("voice", ""))
+    ref = options.get("ref_audio", "")
+    if ref and not Path(ref).exists():
+        # Cloning is the slow lane. Finding the typo forty cases in is the
+        # expensive way to find it.
+        raise SystemExit(f"{candidate}: no reference audio at {ref}")
+    try:
+        # Only Kokoro has a voice table; a candidate may legitimately name none.
+        return SpeechRunner(model=model, outdir=outdir,
+                            voice=options.get("voice", ""),
+                            ref_audio=ref or None,
+                            lang_code=options.get("lang_code", ""),
+                            ear=options.get("ear", "server"))
+    except ValueError as exc:
+        # A bad ear is a bad candidate string, not a traceback.
+        raise SystemExit(f"{candidate}: {exc}") from exc
 
 
 def _transcription_runner(candidate: str) -> TranscriptionRunner:
@@ -147,7 +191,11 @@ def cases_for(candidate: str, cases: list[Case]) -> list[Case]:
     modality = modality_of(candidate)
     if modality is None:
         return [c for c in cases if c.modality in TEXT_MODALITIES]
-    return [c for c in cases if c.modality == modality]
+    picked = [c for c in cases if c.modality == modality]
+    language = language_of(candidate)
+    if language is not None:
+        picked = [c for c in picked if c.language == language]
+    return picked
 
 
 # Modalities whose output varies run to run. Diffusion varies enormously with

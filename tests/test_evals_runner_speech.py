@@ -124,3 +124,90 @@ def test_a_candidate_with_no_voice_is_named_for_the_model_alone(tmp_path):
     r = runner(tmp_path, voice="")
     assert r.candidate == "Kokoro-82M-bf16"
     assert not r.candidate.endswith("/")
+
+
+# ---- speaking a language the resident ear cannot hear ----------------------
+# The joint measurement has a hidden requirement: the transcriber has to speak
+# the same language as the candidate. Parakeet is English-only, so scoring
+# French through it reports a word error rate near 1.0 for every candidate and
+# ranks them all as equally broken.
+
+class FakeWhisper:
+    def __init__(self, text="Bonjour, la passerelle est en marche."):
+        self.text = text
+        self.calls = []
+
+    def transcribe(self, path, **kw):
+        self.calls.append((path, kw))
+        return {"text": self.text}
+
+
+@pytest.fixture
+def fake_whisper(monkeypatch):
+    from harness import audio
+    fake = FakeWhisper()
+    monkeypatch.setattr(audio, "_whisper_module", lambda: fake)
+    return fake
+
+
+def french_case():
+    return case(id="fr-greeting",
+                prompt="Bonjour, la passerelle est en marche.",
+                assertions={"max_wer": 0.2})
+
+
+@respx.mock
+def test_the_ear_can_be_whisper_pinned_to_a_language(tmp_path, fake_whisper):
+    respx.post(f"{BASE}/audio/speech").mock(
+        return_value=httpx.Response(200, content=wav()))
+    r = runner(tmp_path, ear="whisper:fr").run(french_case())
+    assert r.passed, r.detail
+    assert r.metrics["wer"] == 0.0
+    assert fake_whisper.calls[0][1]["language"] == "fr"
+
+
+@respx.mock
+def test_the_default_ear_is_still_the_server(tmp_path):
+    assert runner(tmp_path).ear == "server"
+
+
+def test_an_unknown_ear_is_refused_when_the_runner_is_built(tmp_path):
+    with pytest.raises(ValueError):
+        runner(tmp_path, ear="wisper:fr")
+
+
+@respx.mock
+def test_a_reference_clip_is_sent_for_cloning(tmp_path):
+    import json
+    ref = tmp_path / "ref.wav"
+    ref.write_bytes(wav())
+    route = respx.post(f"{BASE}/audio/speech").mock(
+        return_value=httpx.Response(200, content=wav()))
+    respx.post(f"{BASE}/audio/transcriptions").mock(
+        return_value=httpx.Response(200, json={"text": french_case().prompt}))
+    runner(tmp_path, voice="", ref_audio=ref, lang_code="fr").run(french_case())
+    sent = json.loads(route.calls[0].request.read())
+    assert sent["ref_audio"] == str(ref)
+    assert sent["lang_code"] == "fr"
+
+
+@respx.mock
+def test_the_reference_clip_is_part_of_the_candidate_name(tmp_path):
+    """The same weights cloning two different speakers are two products, the
+    same way Kokoro at two voices is."""
+    ref = tmp_path / "fleurs-fr-male-1.wav"
+    ref.write_bytes(wav())
+    name = runner(tmp_path, voice="", model="litmudoc/Chatterbox-x",
+                  ref_audio=ref).candidate
+    assert "fleurs-fr-male-1" in name
+    assert "Chatterbox-x" in name
+
+
+@respx.mock
+def test_a_missing_reference_clip_is_a_failed_row_not_an_exception(tmp_path):
+    respx.post(f"{BASE}/audio/speech").mock(
+        return_value=httpx.Response(200, content=wav()))
+    r = runner(tmp_path, voice="",
+               ref_audio=tmp_path / "gone.wav").run(french_case())
+    assert not r.passed
+    assert "gone.wav" in r.detail

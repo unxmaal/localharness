@@ -832,3 +832,23 @@ def test_the_worst_row_is_still_the_worst_row():
             Result("long", "m", True, 0.1, 0, "",
                    metrics={"wer": 0.0, "wer_errors": 0, "wer_words": 38})]
     assert summarize(rows)["m"]["metrics_worst"]["wer"] == 0.5
+
+
+# ---- case language ---------------------------------------------------------
+
+def test_a_case_declares_its_language_and_defaults_to_english(tmp_path):
+    (tmp_path / "a.yaml").write_text(
+        "id: en\nmodality: tts\nprompt: hello there\n")
+    (tmp_path / "b.yaml").write_text(
+        "id: fr\nmodality: tts\nprompt: bonjour\nlanguage: fr\n")
+    by_id = {c.id: c for c in load_cases(tmp_path)}
+    assert by_id["en"].language == "en"
+    assert by_id["fr"].language == "fr"
+
+
+def test_a_french_case_is_scored_with_french_number_words(tmp_path):
+    """The case knows its language; the checker has to be told."""
+    from evals.core import score
+    r = score(Case(id="n", modality="stt", prompt="92 jetons", language="fr"),
+              "quatre-vingt-douze jetons")
+    assert r.metrics["wer"] == 0.0

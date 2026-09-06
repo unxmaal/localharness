@@ -1,0 +1,9 @@
+# French numbers are their own hazard: 92 is "quatre-vingt-douze", four words
+# for two digits. The checker expands digits in the reference with num2words,
+# which is language-aware, so a model that reads it correctly costs nothing.
+id: fr-numbers-and-units
+modality: tts
+language: fr
+prompt: Le modèle a produit 42 jetons par seconde en utilisant 9 gigaoctets de mémoire.
+assert:
+  max_wer: 0.25

@@ -1,0 +1,11 @@
+# Length is its own failure mode: segment boundaries are where a TTS model drops
+# or repeats words, and a short sentence never reaches one.
+id: fr-long-clause
+modality: tts
+language: fr
+prompt: >-
+  Avant de lancer le téléchargement, arrêtez les conteneurs et toute autre
+  application qui occupe la mémoire, car le modèle est plus gros que cette
+  machine et les poids sont lus depuis le disque pendant l'exécution.
+assert:
+  max_wer: 0.25

@@ -152,3 +152,48 @@ def test_the_check_publishes_the_counts_for_aggregation(tmp_path):
                      transcriber=lambda p: "the quick brown box")
     assert r.metrics["wer_errors"] == 1
     assert r.metrics["wer_words"] == 4
+
+
+# ---- normalizing a language that is not English ----------------------------
+# The digit expansion exists so "200" scored against "two hundred" is not an
+# error. In French 92 is "quatre-vingt-douze" -- four words for two digits --
+# so expanding with the English table turns a correct reading into four errors
+# and reports it as the TTS model failing.
+
+def test_digits_expand_in_the_language_being_spoken():
+    # The hyphen goes the way every other punctuation mark does, and it goes
+    # from both sides: the transcriber writes "quatre-vingt-douze" too.
+    assert speech.normalize("42 jetons", language="fr") == "quarante deux jetons"
+    assert speech.normalize("42 tokens") == "forty two tokens"
+
+
+def test_a_correct_french_number_reading_is_not_an_error():
+    assert speech.wer("Le modèle a produit 92 jetons.",
+                      "Le modèle a produit quatre-vingt-douze jetons.",
+                      language="fr") == 0.0
+
+
+def test_scoring_french_with_the_english_table_would_have_been_wrong():
+    """The bug this guards: same pair, default language, several errors."""
+    assert speech.wer("Le modèle a produit 92 jetons.",
+                      "Le modèle a produit quatre-vingt-douze jetons.") > 0.0
+
+
+def test_wer_counts_uses_the_same_language(tmp_path):
+    errors, words = speech.wer_counts(
+        "92 jetons", "quatre-vingt-douze jetons", language="fr")
+    assert errors == 0
+
+
+def test_an_unsupported_language_says_so_rather_than_scoring_nonsense():
+    with pytest.raises(ValueError) as e:
+        speech.normalize("42", language="xx")
+    assert "xx" in str(e.value)
+
+
+def test_check_passes_the_language_through(tmp_path):
+    clip = tmp_path / "a.wav"
+    clip.write_bytes(b"x" * 9000)
+    r = speech.check(clip, reference="92 jetons", language="fr",
+                     transcriber=lambda p: "quatre-vingt-douze jetons")
+    assert r.ok and r.wer == 0.0

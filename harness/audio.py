@@ -55,8 +55,20 @@ class AudioError(RuntimeError):
 def speak(text: str, out: str | Path, voice: str = DEFAULT_VOICE,
           speed: float = 1.0, model: str = DEFAULT_TTS_MODEL,
           base_url: str = DEFAULT_BASE_URL,
-          timeout: float = 120.0) -> Path:
-    """Synthesize `text` to a WAV at `out`. Returns the path."""
+          timeout: float = 120.0,
+          ref_audio: str | Path | None = None,
+          lang_code: str = "") -> Path:
+    """Synthesize `text` to a WAV at `out`. Returns the path.
+
+    `ref_audio` clones a voice from a reference clip, which is how Chatterbox
+    works and what Kokoro's fixed voice table cannot do.
+
+    `lang_code` is spelled exactly that way on purpose. mlx_audio names the
+    field lang_code and defaults it to "a", Kokoro's American English. A field
+    called `language` is accepted by the HTTP layer, ignored, and the request
+    then fails as "Unsupported language code 'a'" -- naming a code the caller
+    never sent, which sends you looking in the wrong place.
+    """
     out = Path(out)
     payload = {"model": model, "input": text,
                "speed": speed, "response_format": "wav"}
@@ -64,6 +76,15 @@ def speak(text: str, out: str | Path, voice: str = DEFAULT_VOICE,
     # not is a request for a voice named empty string.
     if voice:
         payload["voice"] = voice
+    if lang_code:
+        payload["lang_code"] = lang_code
+    if ref_audio is not None:
+        ref_audio = Path(ref_audio)
+        if not ref_audio.exists():
+            # The server reports a missing reference as a generation failure,
+            # which sends you to its log rather than to the typo in the path.
+            raise AudioError(f"no reference audio at {ref_audio}")
+        payload["ref_audio"] = str(ref_audio)
     try:
         r = httpx.post(f"{base_url.rstrip('/')}/audio/speech", json=payload,
                        timeout=timeout)

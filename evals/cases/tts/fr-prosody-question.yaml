@@ -1,0 +1,9 @@
+# A question and a statement should produce the same words. If intonation costs
+# words, the model is failing on something the transcript can see. French
+# inversion puts the verb first, which is a different prosodic contour again.
+id: fr-prosody-question
+modality: tts
+language: fr
+prompt: Voulez-vous que je lance la suite de tests maintenant, ou faut-il attendre la fin de la vidéo?
+assert:
+  max_wer: 0.25

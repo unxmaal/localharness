@@ -327,3 +327,55 @@ def test_the_transcriber_carries_a_label_for_the_results_table(tmp_path):
                            language="fr")
     assert "whisper-large-v3-mlx" in fn.label
     assert "fr" in fn.label
+
+
+# ---- voice cloning and non-English speech ---------------------------------
+# Chatterbox clones a voice from a reference clip. Three things have to be
+# right and each fails differently; the one this code can prevent is the field
+# name -- mlx_audio calls it lang_code, defaults it to "a" (Kokoro American
+# English), and silently ignores a field called `language` before failing as
+# "Unsupported language code 'a'", naming a code the caller never sent.
+
+@respx.mock
+def test_speak_sends_a_reference_clip_for_cloning(tmp_path):
+    import json
+    ref = tmp_path / "ref.wav"
+    ref.write_bytes(wav_bytes())
+    route = respx.post(f"{BASE}/audio/speech").mock(
+        return_value=httpx.Response(200, content=wav_bytes()))
+    audio.speak("bonjour", out=tmp_path / "a.wav", base_url=BASE, voice="",
+                ref_audio=ref)
+    sent = json.loads(route.calls[0].request.read())
+    assert sent["ref_audio"] == str(ref)
+
+
+@respx.mock
+def test_speak_sends_lang_code_never_language(tmp_path):
+    """The field is lang_code. `language` is accepted by the HTTP layer and
+    then ignored, so the request fails claiming an unsupported code 'a'."""
+    import json
+    route = respx.post(f"{BASE}/audio/speech").mock(
+        return_value=httpx.Response(200, content=wav_bytes()))
+    audio.speak("bonjour", out=tmp_path / "a.wav", base_url=BASE, voice="",
+                lang_code="fr")
+    sent = json.loads(route.calls[0].request.read())
+    assert sent["lang_code"] == "fr"
+    assert "language" not in sent
+
+
+@respx.mock
+def test_no_lang_code_is_omitted_rather_than_sent_blank(tmp_path):
+    import json
+    route = respx.post(f"{BASE}/audio/speech").mock(
+        return_value=httpx.Response(200, content=wav_bytes()))
+    audio.speak("hi", out=tmp_path / "a.wav", base_url=BASE)
+    assert "lang_code" not in json.loads(route.calls[0].request.read())
+
+
+def test_a_missing_reference_clip_fails_before_the_request(tmp_path):
+    """Otherwise the server reports it as a generation failure, which sends you
+    to the wrong log."""
+    with pytest.raises(audio.AudioError) as e:
+        audio.speak("hi", out=tmp_path / "a.wav", base_url=BASE,
+                    ref_audio=tmp_path / "nope.wav")
+    assert "nope.wav" in str(e.value)
