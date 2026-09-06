@@ -4,60 +4,119 @@ Answers one question cheaply: given several candidates for a job, which should
 this machine use? That is the antidote to re-architecting every time a better
 method turns up on GitHub.
 
-    make evals                                    # default candidates
-    make evals CANDIDATES=local-mid,local-large
-    uv run python -m evals.run --modality svg --candidates a,b --out /tmp/x
+    make evals                                       # default candidates
+    make evals MODALITY=svg CANDIDATES=local-mid,local-large
+    uv run python -m evals.run --modality image --repeat 3 --out .logs/img \
+      --candidates mflux:flux2-klein-4b,mflux:z-image-turbo
 
-## Why these metrics
+## What a candidate is
 
-Pass rate comes first, and it is **objective**: does the SVG parse, does it draw
-anything, does the HTML render a body, is the page self-contained. A model that
-emits prose instead of markup has failed regardless of taste, and no human has
-to squint at anything to know it.
-
-Latency is reported as a **median**, because one cold model load should not
-decide which candidate looks fastest. Total time is reported alongside it, and
-the gap between them is informative: a first run had a 1.5B beating a 7B on
-median while losing badly on total, because its failures rambled to the token
-limit.
-
-Fenced and chatty output is **recovered before judging**. Punishing a model for
-wrapping its SVG in ```svg measures prompt compliance, not SVG ability.
-
-## Modality coverage
-
-| modality | runner | candidates |
+| form | example | runner |
 |---|---|---|
-| svg | text, via the gateway | any gateway alias |
-| web | text, via the gateway | any gateway alias |
-| image | not built | mflux (2310 stars, MLX-native, FLUX.2 klein 4B) |
-| video | not built | h3.c (already measured by hand: 3 clips, 9.5-11.6 GiB peak) |
-| tts | not built | Kokoro on mlx-audio (measured: 12-13x realtime) |
-| stt | not built | Parakeet on mlx-audio (measured: 0.1s), whisper.cpp |
+| gateway alias | `local-large` | HTTP to the gateway |
+| engine spec | `mflux:z-image-turbo,quantize=4` | subprocess, measured |
+| speech | `tts:mlx-community/Kokoro-82M-bf16,voice=bm_george` | HTTP to mlx-audio |
 
-The text runner exists because SVG and web generation are language-model jobs,
-so the gateway alias IS the candidate and swapping it costs a string. The other
-four need runners that measure a subprocess: wall time, peak RSS, and whether
-the output file is a valid artifact.
+A candidate is only handed cases of a modality it can run. Giving mflux an SVG
+case produces a failure row that says nothing about mflux.
+
+Quantization and voice are part of the candidate NAME. `z-image-turbo` at q4 and
+at q8 have different speed and memory, and sharing a row makes the comparison
+meaningless.
+
+## Two different measurements, kept apart
+
+**The competence gate** separates working from broken, and it is objective. No
+human squints at anything.
+
+| modality | what it checks |
+|---|---|
+| svg | parses, has an xmlns, draws N shapes, **and rasterizes to something visible** |
+| web | parses, has a body, is self-contained, no external URLs |
+| image | decodes, is the size requested, is more than one colour, **OCR of rendered text** |
+| video | demuxes, right size and length, frames are not uniform, **something moves** |
+| tts | the audio is real, and transcribes back to what was asked for |
+| stt | *not yet: ranking it needs reference audio with a human transcript* |
+
+The rasterization and motion checks exist because the structural ones are
+blind to a whole class of failure. Well-formed SVG can draw nothing — white on
+white, a shape outside the viewBox — and it passed every check here until
+rsvg-convert was added. A valid MP4 of the right length in which nothing moves
+plays perfectly and is not a video.
+
+**The quality axis** is what orders two candidates that both pass. Checkers
+publish numbers alongside the verdict:
+
+| metric | modality | meaning |
+|---|---|---|
+| `wer` | tts | word error rate, speaking then transcribing |
+| `cer` | image | character error rate of text OCR'd out of the picture |
+| `ink` | svg | fraction of the canvas actually marked |
+| `motion` | video | mean change between consecutive frames |
+
+Missing, and the reason the image lane still cannot be ranked: **prompt
+adherence**. Neither `ink` nor `cer` separated FLUX.2 klein from Z-Image Turbo;
+both scored a clean 0.000. PickScore or HPSv2 would, and both need torch plus a
+~4 GB checkpoint in a repo that is otherwise MLX-only. That is a dependency
+decision, not a detail.
+
+## How the numbers are aggregated
+
+**Latency takes a median**, so one cold model load cannot decide which candidate
+looks fastest. Cold starts here are not subtle: z-image-turbo's first case ran
+239s against a 43s warm steady state.
+
+**A quality metric takes a mean**, and the difference is not cosmetic. Most
+cases score a clean 0.0 and the entire signal is in the few that do not. The
+first voice comparison medianed 0.000 for two voices that were not equal — one
+had four cases at zero and one at 0.154. `metrics_worst` keeps that outlier
+visible.
+
+Candidates are ranked on pass rate, then metrics, then latency. Sorting on
+latency first is how a faster-but-worse candidate reaches the top line — and
+that is a live risk here, not a theoretical one: a 0.5B model that never closes
+its tags runs to the token limit every time, so it is both the worst and,
+without a pass rate beside it, the slowest-looking.
+
+## --repeat
+
+One sample per prompt ranks noise. Diffusion varies enormously with the seed and
+a language model at temperature 0.2 is not deterministic either. `--repeat 3`
+runs each stochastic case with three seeds and reports them as separate rows;
+tts is skipped, since Kokoro at a fixed voice and speed is deterministic.
+
+It earned itself on its first run: a 1.5B passed `icon-gear` on one seed and
+failed it on two others.
 
 ## Adding a case
 
-Drop a YAML file under `cases/<modality>/`:
+Drop a YAML file under `cases/<modality>/`. `params:` are generation knobs handed
+to the engine; `assert:` are checks. Unknown keys in either block are rejected at
+load, so `widht: 512` costs nothing rather than generating at the default size
+and passing.
 
-    id: icon-gear
-    modality: svg
-    prompt: |
-      Draw a settings gear icon...
+    id: text-render
+    modality: image
+    prompt: A wooden shop sign with the word "OPEN" carved into it.
+    params:
+      width: 512
+      height: 512
+      seed: 42
     assert:
-      min_shapes: 2
-      must_not_contain: ["data:image"]
+      text: OPEN
 
-Assertions are deliberately blunt: `min_shapes`, `must_contain`,
-`must_not_contain`. Anything subtler is a judgement call, and judgement calls
-belong to you rather than to a regex.
+Assertions are deliberately blunt. Anything subtler is a judgement call, and
+judgement calls belong to you rather than to a regex.
 
 ## Sequencing
 
 Runs are grouped by candidate, never interleaved. `mlx_lm.server` hot-swaps
 models per request, so alternating aliases pays a model load on every case and
-measures disk throughput instead of the model.
+measures disk throughput instead of the model. It also serializes through one
+queue, so any concurrent client — a stray curl, a voice request — inserts a full
+model load into your timings. Measurement isolation is assumed, not enforced.
+
+## Fenced output is recovered before judging
+
+Punishing a model for wrapping its SVG in a code fence measures prompt
+compliance, not SVG ability.

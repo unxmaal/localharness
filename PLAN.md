@@ -199,26 +199,32 @@ h3.c. Fallback only.
 
 ## 5. What is next, in order
 
-1. **Rank the image candidates on something.** The quality axis exists now and
-   OCR covers text rendering, but prompt adherence does not: PickScore or HPSv2
-   is a ViT-H forward pass and runs on MPS. Also k=3 seeds, since one sample per
-   prompt ranks noise, and a blind contact sheet for pairwise judgement where a
-   metric will not do.
-2. **Rasterize SVG and HTML** (resvg, Playwright) so pixel checks apply to them
-   too. Today an SVG that parses but draws nothing visible passes.
-3. **Rank STT properly.** The current speech metric is joint: it scores a TTS
-   model and the STT model reading it together and cannot separate them. Holding
-   one fixed still orders the other, which is what the tts eval does, but
+1. **Prompt adherence, and it needs a decision.** This is the one axis that
+   would let the suite rank two image models. Neither `ink` nor OCR separated
+   FLUX.2 klein from Z-Image Turbo — both scored a clean 0.000 — so "does the
+   picture match the words" is what is missing. PickScore and HPSv2 both do it
+   well, and both are torch models with a ~4 GB checkpoint, in a repo that is
+   otherwise MLX-only and on a machine with 32 GB. **Not taken unilaterally:**
+   it roughly doubles the dependency footprint to add one metric. The
+   alternatives are an MLX CLIP port (Apple's `mlx-examples/clip` is a
+   reference implementation, not a package, so this means carrying ~400 lines
+   of someone else's model code) or a blind contact sheet, which is a person
+   rather than a metric and is genuinely fine for a two-way choice.
+2. **Rank STT on its own.** The speech metric is joint: it scores a TTS model
+   and the STT model reading it together and cannot separate them. Holding one
+   side fixed still orders the other, which is what the tts eval does, but
    ranking STT itself needs reference audio with a human transcript — ~200
-   utterances of LibriSpeech test-clean. Candidates worth the comparison, all
-   served by mlx_audio: Canary-Qwen 2.5B leads Open ASR on accuracy, Parakeet on
-   speed at ~30×.
-4. **More voices than the five cached.** Chatterbox and Qwen3-TTS against
+   utterances of LibriSpeech test-clean. Candidates, all served by mlx_audio:
+   Canary-Qwen 2.5B leads Open ASR on accuracy, Parakeet on speed at ~30×.
+3. **More voices than the five cached.** Chatterbox and Qwen3-TTS against
    Kokoro. Deferred and not to be restarted unprompted: a male French-accented
    voice, which needs a Chatterbox clone and a reference clip.
-5. **Pin the services.** They are unpinned `uv run --with` invocations with no
-   lockfile and no launchd. Nothing guards audio or image the way `smoke.sh`
-   guards text.
+4. **Rasterize HTML.** SVG is done with rsvg-convert, which was already
+   installed. HTML needs a browser engine — Playwright is the obvious one and a
+   much larger dependency — and the checks that matter most for a page
+   (self-containment, no external URLs) are structural anyway. Low priority.
+5. **launchd units.** The services are pinned now (`scripts/versions.sh`) but
+   still started by hand.
 
 ## 6. Traps this repo exists to remember
 
