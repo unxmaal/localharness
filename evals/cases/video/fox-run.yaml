@@ -8,6 +8,6 @@ prompt: A red fox running through falling snow in a quiet forest, side view, pho
 params:
   width: 256
   height: 256
-  frames: 8
+  frames: 22          # h3 clamps anything smaller up to this
   steps: 4
   seed: 42

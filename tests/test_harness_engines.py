@@ -227,3 +227,40 @@ def test_mflux_needs_no_working_directory():
     """It resolves everything through HF_HOME, so pinning a cwd would only
     invent a way to break it."""
     assert resolve("mflux:z-image-turbo").cwd is None
+
+
+# ---- h3 frame floor --------------------------------------------------------
+
+def test_h3_rejects_a_frame_count_below_its_floor():
+    """h3 CLAMPS to 22 rather than refusing: ask for 8 and you get 22, twelve
+    minutes later, and the eval case that asked for 8 then fails its own
+    assertion. Saying so up front is the same principle as rejecting a bad
+    engine spec before the run.
+
+    The floor is h3.c:861, `if (h3_align_frame_count(params->frames) < 22)`.
+    """
+    with pytest.raises(ValueError) as e:
+        argv("h3", frames=8)
+    assert "22" in str(e.value) and "8" in str(e.value)
+
+
+def test_h3_rejects_a_frame_count_below_its_hard_minimum():
+    """h3.c:514 refuses fewer than 5 outright."""
+    with pytest.raises(ValueError):
+        argv("h3", frames=2)
+
+
+def test_h3_accepts_its_floor():
+    _, a = argv("h3", frames=22)
+    assert a[a.index("--frames") + 1] == "22"
+
+
+def test_h3_seconds_below_a_second_is_rejected_for_the_same_reason():
+    """--seconds 0 is 0 frames at 24fps, well under the floor."""
+    with pytest.raises(ValueError):
+        argv("h3", seconds=0)
+
+
+def test_h3_one_second_is_above_the_floor():
+    _, a = argv("h3", seconds=1)
+    assert a[a.index("--seconds") + 1] == "1"

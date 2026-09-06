@@ -187,6 +187,12 @@ def _mflux(spec: str, model: str, options: dict) -> Engine:
 # ---- h3 (antirez/h3.c, MiniMax-H3 video) ----------------------------------
 
 _H3_OPTIONS = {"steps", "layers", "reuse", "width", "height", "ssd_streaming"}
+# h3 CLAMPS a small request up to 22 rather than refusing it (h3.c:861,
+# `if (h3_align_frame_count(params->frames) < 22)`), so asking for 8 gets you 22
+# twelve minutes later and an eval case that asked for 8 fails its own
+# assertion. Below 5 it refuses outright (h3.c:514). Say so before the run.
+H3_MIN_FRAMES = 22
+H3_FPS = 24
 H3_DEFAULT_BIN = str(Path.home() / "projects/github/antirez/h3.c/h3")
 H3_DEFAULT_MODEL_DIR = "/Volumes/Models/MiniMax-H3"
 
@@ -199,6 +205,17 @@ def _h3(spec: str, model: str, options: dict) -> Engine:
         p = {**defaults, **{k: v for k, v in params.items() if v is not None}}
         if p.get("frames") is not None and p.get("seconds") is not None:
             raise ValueError("h3: pass --frames or --seconds, not both")
+
+        requested = p.get("frames")
+        if requested is None and p.get("seconds") is not None:
+            requested = int(p["seconds"]) * H3_FPS
+        if requested is not None and int(requested) < H3_MIN_FRAMES:
+            raise ValueError(
+                f"h3: minimum output is {H3_MIN_FRAMES} frames "
+                f"({H3_MIN_FRAMES / H3_FPS:.2f}s at {H3_FPS}fps), asked for "
+                f"{requested}. h3 clamps up to {H3_MIN_FRAMES} silently rather "
+                f"than refusing, so the extra frames arrive anyway -- along "
+                f"with a result that does not match what was requested.")
 
         # Read at call time, not import time, so a test or a different volume
         # can point this somewhere else without reloading the module.

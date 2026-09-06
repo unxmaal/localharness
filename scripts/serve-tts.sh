@@ -8,6 +8,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh
+source scripts/versions.sh
 mkdir -p .logs
 # mlx-audio does not declare its server dependencies, so mlx_audio.server dies
 # with ModuleNotFoundError on a clean install. The full set, read off the import
@@ -23,7 +24,7 @@ mkdir -p .logs
 # not install setuptools into venvs on py3.12+, and setuptools >=81 removed
 # pkg_resources outright. Unpinned resolves to 84.x and fails the same way.
 exec uv run --no-project \
-  --with mlx-audio --with uvicorn --with webrtcvad \
-  --with fastapi --with python-multipart --with 'setuptools>=70,<81' \
-  --with 'misaki[en]' \
+  --with "$MLX_AUDIO_PIN" --with "$UVICORN_PIN" --with "$WEBRTCVAD_PIN" \
+  --with "$FASTAPI_PIN" --with "$MULTIPART_PIN" --with "$SETUPTOOLS_PIN" \
+  --with "$MISAKI_PIN" \
   python -m mlx_audio.server --host 127.0.0.1 --port "${TTS_PORT:-8890}"

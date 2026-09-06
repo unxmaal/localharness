@@ -3,6 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh
+source scripts/versions.sh
 mkdir -p .logs
 
 # Opt out of LiteLLM's Responses API adapter. Without it, POST /v1/messages is
@@ -18,6 +19,6 @@ export LITELLM_USE_CHAT_COMPLETIONS_URL_FOR_ANTHROPIC_MESSAGES=1
 # listens on every interface with no authentication and anyone on the LAN can
 # drive the GPU and trigger model loads. Every doc in this repo said
 # "127.0.0.1:4000"; lsof said "*:4000".
-exec uv run --python 3.12 --with 'litellm[proxy]' \
+exec uv run --python 3.12 --with "$LITELLM_PIN" \
   litellm --config gateway/config.yaml \
   --host "${GATEWAY_HOST:-127.0.0.1}" --port "${GATEWAY_PORT:-4000}"
