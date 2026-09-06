@@ -1,7 +1,8 @@
 id: fox-snow
 modality: image
-prompt: A red fox walking through falling snow in a quiet forest, late afternoon light, shallow depth of field, photographic.
-assert:
+prompt: A red fox walking through falling snow in a quiet forest, late afternoon light, shallow depth
+  of field, photographic.
+params:
   width: 512
   height: 512
   seed: 42

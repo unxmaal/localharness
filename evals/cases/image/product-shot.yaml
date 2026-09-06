@@ -1,7 +1,8 @@
 id: product-shot
 modality: image
-prompt: Studio product photograph of a matte black desktop computer on a white seamless background, soft key light from the left, sharp focus.
-assert:
+prompt: Studio product photograph of a matte black desktop computer on a white seamless background, soft
+  key light from the left, sharp focus.
+params:
   width: 512
   height: 512
   seed: 42

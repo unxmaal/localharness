@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from evals.checks import image as image_check
+from harness.checks import image as image_check
 
 
 def png(width, height, pixel=(200, 30, 30), noise=False):

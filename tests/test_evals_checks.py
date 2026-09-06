@@ -8,8 +8,8 @@ before anyone argues about aesthetics.
 """
 import pytest
 
-from evals.checks import html as html_check
-from evals.checks import svg as svg_check
+from harness.checks import html as html_check
+from harness.checks import svg as svg_check
 
 GOOD_SVG = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
   <circle cx="12" cy="12" r="10" fill="#e63946"/>

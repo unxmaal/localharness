@@ -1,7 +1,8 @@
 id: text-render
 modality: image
-prompt: A wooden shop sign hanging on a brick wall with the word "OPEN" carved into it in clean serif letters.
-assert:
+prompt: A wooden shop sign hanging on a brick wall with the word "OPEN" carved into it in clean serif
+  letters.
+params:
   width: 512
   height: 512
   seed: 42

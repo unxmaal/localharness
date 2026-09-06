@@ -1,10 +1,17 @@
 """Run the eval suite and print a comparison.
 
-    uv run python -m evals.run --modality svg --candidates local-mid,local-summarize
+    uv run python -m evals.run --modality svg --candidates local-mid,local-small
+    uv run python -m evals.run --modality image --out .logs/img \
+        --candidates mflux:flux2-klein-4b,mflux:z-image-turbo
+
+A candidate is either a gateway alias (text modalities) or an engine spec
+(anything that runs as a process). Which one it is decides the runner, and a
+candidate is only handed the cases it can actually run: giving mflux an SVG
+case produces a failure row that says nothing about mflux.
 
 Sequenced by candidate, never interleaved: mlx_lm.server hot-swaps models per
-request, so alternating between two aliases pays a model load on every single
-case and measures disk speed instead of the model.
+request, so alternating between two aliases pays a model load on every case and
+measures disk speed instead of the model.
 """
 from __future__ import annotations
 
@@ -14,65 +21,90 @@ import sys
 import time
 from pathlib import Path
 
-from evals.core import load_cases, summarize
+from harness.engines import Engine, resolve
+
+from evals.core import MODALITIES, Case, load_cases, summarize
 from evals.environment import capture
-from evals.runners.process import ProcessRunner, mflux_engine
-from evals.runners.text import TextRunner
+from evals.runners.process import ProcessRunner
+from evals.runners.text import CompletionRunner
 
 ROOT = Path(__file__).resolve().parent
 TEXT_MODALITIES = {"svg", "web"}
+ALL_MODALITIES = sorted(MODALITIES)
 
 
-def build_runner(modality: str, candidate: str, gateway: str, outdir: Path):
-    """A candidate is a gateway alias for text, and an engine spec for image.
+def engine_for(candidate: str) -> Engine | None:
+    try:
+        return resolve(candidate)
+    except ValueError:
+        return None
 
-    Image candidates are written `mflux:<model>[:steps]`, matching mflux's own
-    `mflux-generate-<model>` entry points, so adding one is a string rather than
-    a code change.
-    """
-    if modality in TEXT_MODALITIES:
-        return TextRunner(gateway, candidate)
-    if candidate.startswith("mflux:"):
-        parts = candidate.split(":")
-        spec = parts[1]
-        steps = int(parts[2]) if len(parts) > 2 else None
-        return ProcessRunner(mflux_engine(spec, steps=steps),
-                           outdir or Path(".logs/images"))
-    raise SystemExit(f"unknown candidate '{candidate}' for modality {modality}")
+
+def build_runner(candidate: str, gateway: str, outdir: Path | None):
+    head = candidate.split(":", 1)[0].split(",", 1)[0]
+    if head not in ("mflux", "h3"):
+        return CompletionRunner(gateway, candidate)
+    try:
+        engine = resolve(candidate)
+    except ValueError as exc:
+        # Before anything runs: a typo must not cost a forty-minute generation.
+        raise SystemExit(str(exc)) from exc
+    if outdir is None:
+        raise SystemExit(
+            f"{candidate} writes files; pass --out to say where they go")
+    return ProcessRunner(engine, outdir)
+
+
+def cases_for(candidate: str, cases: list[Case]) -> list[Case]:
+    """The cases this candidate can actually run."""
+    engine = engine_for(candidate)
+    if engine is None:
+        return [c for c in cases if c.modality in TEXT_MODALITIES]
+    return [c for c in cases if c.modality == engine.modality]
+
+
+def select_cases(cases: list[Case], modality: str) -> list[Case]:
+    if modality != "all" and modality not in MODALITIES:
+        raise SystemExit(f"unknown modality '{modality}'; known: "
+                         f"{', '.join(ALL_MODALITIES)}")
+    chosen = cases if modality == "all" else [c for c in cases
+                                              if c.modality == modality]
+    if not chosen:
+        raise SystemExit(f"no cases for modality '{modality}'")
+    return chosen
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="evals.run")
     ap.add_argument("--modality", required=True,
-                    help="svg, web, or 'all' for every text modality")
+                    help=f"one of {', '.join(ALL_MODALITIES)}, or 'all'")
     ap.add_argument("--candidates", required=True,
-                    help="comma-separated gateway aliases")
+                    help="comma-separated gateway aliases and/or engine specs")
     ap.add_argument("--gateway", default="http://127.0.0.1:4000")
     ap.add_argument("--cases", default=str(ROOT / "cases"))
     ap.add_argument("--out", default=None,
                     help="write artifacts and results.json here")
     args = ap.parse_args(argv)
 
-    if args.modality == "all":
-        wanted = set(TEXT_MODALITIES)
-    else:
-        wanted = {args.modality}
-    cases = [c for c in load_cases(args.cases) if c.modality in wanted]
-    if not cases:
-        print(f"no cases for modality {args.modality}", file=sys.stderr)
-        return 2
-
-    candidates = [c.strip() for c in args.candidates.split(",") if c.strip()]
+    cases = select_cases(load_cases(args.cases), args.modality)
+    # An engine spec contains commas, which are also the candidate separator.
+    # Split on commas that start a new candidate, i.e. those followed by a
+    # known engine prefix or by something with no '=' in it.
+    candidates = split_candidates(args.candidates)
     outdir = Path(args.out) if args.out else None
     if outdir:
         outdir.mkdir(parents=True, exist_ok=True)
 
     results = []
     for candidate in candidates:
-        runner = build_runner(next(iter(wanted)) if len(wanted) == 1
-                              else "svg", candidate, args.gateway, outdir)
-        print(f"\n── {candidate}", flush=True)
-        for case in cases:
+        mine = cases_for(candidate, cases)
+        if not mine:
+            print(f"\n── {candidate}: no cases of a modality it can run, skipped",
+                  file=sys.stderr)
+            continue
+        runner = build_runner(candidate, args.gateway, outdir)
+        print(f"\n── {runner.candidate}", flush=True)
+        for case in mine:
             r = runner.run(case)
             results.append(r)
             mark = "pass" if r.passed else "FAIL"
@@ -82,33 +114,61 @@ def main(argv: list[str] | None = None) -> int:
                   flush=True)
             if outdir and r.artifact and case.modality in TEXT_MODALITIES:
                 ext = "svg" if case.modality == "svg" else "html"
-                (outdir / f"{candidate.replace('/', '_')}--{case.id}.{ext}"
+                (outdir / f"{runner.candidate.replace('/', '_')}--{case.id}.{ext}"
                  ).write_text(r.artifact)
 
-    summary = summarize(results)
-    print("\n" + "=" * 66)
-    print(f"{'candidate':26} {'pass':>7} {'rate':>6} {'median':>8} "
+    if not results:
+        raise SystemExit("nothing ran: no candidate matched any case")
+
+    report(summarize(results))
+    if outdir:
+        (outdir / "results.json").write_text(json.dumps(
+            {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
+             "environment": capture(),
+             "summary": summarize(results),
+             "rows": [vars(r) for r in results]}, indent=2))
+        print(f"\nartifacts + results.json in {outdir}")
+    return 0
+
+
+def split_candidates(raw: str) -> list[str]:
+    """Split a candidate list on commas, keeping engine options attached.
+
+    `mflux:z-image-turbo,quantize=4,local-mid` is two candidates, not three:
+    a chunk containing '=' belongs to the candidate before it.
+    """
+    out: list[str] = []
+    for chunk in raw.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if "=" in chunk and out:
+            out[-1] += f",{chunk}"
+        else:
+            out.append(chunk)
+    return out
+
+
+def report(summary: dict) -> None:
+    print("\n" + "=" * 72)
+    print(f"{'candidate':30} {'pass':>7} {'rate':>6} {'median':>8} "
           f"{'total':>8} {'peak':>9}")
     for name, s in sorted(summary.items(),
                           key=lambda kv: (-kv[1]["pass_rate"],
                                           kv[1]["median_s"])):
         peak = f"{s['peak_kb'] / 1024 / 1024:.1f}GiB" if s["peak_kb"] else "-"
-        print(f"{name:26} {s['passed']:>3}/{s['total']:<3} "
+        print(f"{name:30} {s['passed']:>3}/{s['total']:<3} "
               f"{s['pass_rate']:>6.0%} {s['median_s']:>7.2f}s "
               f"{s['total_s']:>7.1f}s {peak:>9}")
     for name, s in summary.items():
         for f in s["failures"]:
             print(f"  {name}: {f}")
-
-    if outdir:
-        (outdir / "results.json").write_text(json.dumps(
-            {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
-             "environment": capture(),
-             "summary": summary,
-             "rows": [vars(r) for r in results]}, indent=2))
-        print(f"\nartifacts + results.json in {outdir}")
-
-    return 0
+    # The suite separates working from broken. It does not rank two candidates
+    # that both work, and saying so beats letting a median latency next to a
+    # 100% pass rate look like a verdict.
+    if len([s for s in summary.values() if s["pass_rate"] == 1.0]) > 1:
+        print("\nNote: more than one candidate passed everything. These checks "
+              "are a competence gate, not a quality ranking.")
 
 
 if __name__ == "__main__":

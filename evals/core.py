@@ -15,13 +15,10 @@ from pathlib import Path
 
 import yaml
 
-from evals.checks import html as html_check
-from evals.checks import svg as svg_check
-
-# Modalities the harness knows how to judge. Anything else is a typo, and a
-# typo should cost nothing rather than showing up after a 40-minute run.
-CHECKERS = {"svg": svg_check.check, "web": html_check.check}
-MODALITIES = set(CHECKERS) | {"image", "video", "tts", "stt"}
+from harness.checks import html as html_check
+from harness.checks import image as image_check
+from harness.checks import svg as svg_check
+from harness.checks.base import CheckResult
 
 
 @dataclass(frozen=True)
@@ -29,8 +26,49 @@ class Case:
     id: str
     modality: str
     prompt: str
+    #: Generation knobs handed to the engine (width, steps, seed...).
+    params: dict = field(default_factory=dict)
+    #: Checks applied to whatever came back.
     assertions: dict = field(default_factory=dict)
     source: Path | None = None
+
+
+def _check_text(artifact, case: Case, checker) -> CheckResult:
+    return checker(artifact)
+
+
+def _check_image(artifact, case: Case) -> CheckResult:
+    """Honouring the requested size IS the check, so it reads from params.
+
+    Width and height used to live under `assert:` and do both jobs at once,
+    which meant the engine was reading the assertion block.
+    """
+    p = case.params
+    expect = (p["width"], p["height"]) if p.get("width") and p.get("height") else None
+    r = image_check.check(artifact, expect=expect)
+    return CheckResult(r.ok, r.reason, r.warnings)
+
+
+# One entry point per modality, so two candidates are always judged by the same
+# ruler. Images were scored inside their runner and therefore lost every shared
+# assertion; that fork is what this dict closes.
+CHECKERS = {
+    "svg": lambda a, c: _check_text(a, c, svg_check.check),
+    "web": lambda a, c: _check_text(a, c, html_check.check),
+    "image": _check_image,
+}
+# Modalities that may appear in a case file. video/tts/stt are declarable but
+# not yet judgeable; score() says so rather than passing them.
+MODALITIES = set(CHECKERS) | {"video", "tts", "stt"}
+
+# Generation knobs any engine might accept. Validated at load so `widht: 512`
+# costs nothing instead of silently generating at the default size and passing.
+PARAM_KEYS = {"width", "height", "steps", "seed", "guidance", "frames",
+              "seconds", "voice", "speed", "layers", "reuse", "ssd_streaming"}
+# Assertions that need text to search. Declaring one on an image case can only
+# pass vacuously until the suite can OCR, so it is rejected rather than ignored.
+TEXT_ASSERTIONS = {"min_shapes", "must_contain", "must_not_contain"}
+ASSERTION_KEYS = {"svg": TEXT_ASSERTIONS, "web": TEXT_ASSERTIONS}
 
 
 @dataclass
@@ -61,25 +99,49 @@ def load_cases(directory: str | Path) -> list[Case]:
             raise ValueError(
                 f"{path.name}: unknown modality '{modality}' "
                 f"(known: {', '.join(sorted(MODALITIES))})")
+        params = raw.get("params") or {}
+        assertions = raw.get("assert") or {}
+        _reject_unknown(path, "params", set(params), PARAM_KEYS)
+        _reject_unknown(path, "assert", set(assertions),
+                        ASSERTION_KEYS.get(modality, set()))
         cases.append(Case(id=raw["id"], modality=modality, prompt=raw["prompt"],
-                          assertions=raw.get("assert") or {}, source=path))
+                          params=params, assertions=assertions, source=path))
     return cases
 
 
-def score(case: Case, artifact: str) -> Result:
-    """Judge an artifact against its case. Mechanical, so it is comparable."""
+def _reject_unknown(path: Path, block: str, given: set, allowed: set) -> None:
+    unknown = given - allowed
+    if unknown:
+        raise ValueError(
+            f"{path.name}: unknown key(s) in '{block}': "
+            f"{', '.join(sorted(unknown))}"
+            + (f" (allowed: {', '.join(sorted(allowed))})" if allowed
+               else f" ('{block}' takes nothing for modality {path.parent.name})"))
+
+
+def score(case: Case, artifact) -> Result:
+    """Judge an artifact against its case. Mechanical, so it is comparable.
+
+    `artifact` is the completion text for a text modality and the path to the
+    produced file for a binary one.
+    """
     checker = CHECKERS.get(case.modality)
     if checker is None:
-        # Binary modalities (image/video/audio) are scored by their runner,
-        # which knows how to look at the file it produced.
-        return Result(case.id, "", True, 0.0, 0, "")
+        # Not a pass. A modality with nothing measuring it would otherwise show
+        # a 100% pass rate, which is the most misleading number the suite could
+        # print.
+        return Result(case.id, "", False, 0.0, 0,
+                      f"no checker for modality '{case.modality}'")
 
-    r = checker(artifact)
+    r = checker(artifact, case)
     if not r.ok:
         return Result(case.id, "", False, 0.0, 0, r.reason,
                       warnings=r.warnings)
 
     a = case.assertions
+    if not a:
+        return Result(case.id, "", True, 0.0, 0, "", warnings=r.warnings)
+
     min_shapes = a.get("min_shapes")
     if min_shapes is not None and r.shape_count < min_shapes:
         return Result(case.id, "", False, 0.0, 0,

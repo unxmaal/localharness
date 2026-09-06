@@ -125,3 +125,104 @@ def test_summary_is_json_serializable():
 
 def test_summary_of_nothing_is_empty_not_a_crash():
     assert summarize([]) == {}
+
+
+# ---- params vs assertions --------------------------------------------------
+#
+# `params:` are generation knobs handed to the engine. `assert:` are checks.
+# Width lived under `assert:` and was doing both jobs, which meant the engine
+# read the assertion block and the checker read generation settings.
+
+def test_params_are_loaded_separately_from_assertions(tmp_path):
+    (tmp_path / "i.yaml").write_text(yaml.safe_dump({
+        "id": "i", "modality": "image", "prompt": "a fox",
+        "params": {"width": 512, "height": 512, "seed": 42}}))
+    c = load_cases(tmp_path)[0]
+    assert c.params == {"width": 512, "height": 512, "seed": 42}
+    assert c.assertions == {}
+
+
+def test_a_case_with_neither_block_is_fine(tmp_path):
+    (tmp_path / "i.yaml").write_text(yaml.safe_dump({
+        "id": "i", "modality": "image", "prompt": "a fox"}))
+    c = load_cases(tmp_path)[0]
+    assert c.params == {} and c.assertions == {}
+
+
+def test_a_misspelled_param_is_caught_at_load_not_after_the_run(tmp_path):
+    """`widht: 512` used to be accepted silently and generate at the default
+    size, and the case would pass."""
+    (tmp_path / "i.yaml").write_text(yaml.safe_dump({
+        "id": "i", "modality": "image", "prompt": "a fox",
+        "params": {"widht": 512}}))
+    with pytest.raises(ValueError, match="widht"):
+        load_cases(tmp_path)
+
+
+def test_a_misspelled_assertion_is_caught_at_load(tmp_path):
+    write_case(tmp_path, "x", **{"assert": {"must_contian": ["circle"]}})
+    with pytest.raises(ValueError, match="must_contian"):
+        load_cases(tmp_path)
+
+
+def test_a_text_assertion_on_an_image_case_is_rejected_rather_than_ignored(tmp_path):
+    """There is no text to search, so this can only ever pass vacuously. Until
+    the suite can OCR, saying so is better than a silent pass."""
+    (tmp_path / "i.yaml").write_text(yaml.safe_dump({
+        "id": "i", "modality": "image", "prompt": "a sign reading OPEN",
+        "assert": {"must_contain": ["OPEN"]}}))
+    with pytest.raises(ValueError, match="must_contain"):
+        load_cases(tmp_path)
+
+
+# ---- unified scoring -------------------------------------------------------
+
+def test_score_judges_images_through_the_same_entry_point(tmp_path):
+    """score() was bypassed for images, so the two modalities were judged by
+    two rulers and image cases silently lost every shared assertion."""
+    import random
+    from PIL import Image
+    png = tmp_path / "a.png"
+    im = Image.new("RGB", (64, 64))
+    im.putdata([(random.randint(0, 255),) * 3 for _ in range(64 * 64)])
+    im.save(png)
+    case = Case(id="i", modality="image", prompt="a fox",
+                params={"width": 64, "height": 64})
+    assert score(case, png).passed
+
+
+def test_score_fails_an_image_at_the_wrong_size(tmp_path):
+    from PIL import Image
+    png = tmp_path / "a.png"
+    Image.new("RGB", (64, 64), (1, 2, 3)).save(png)
+    case = Case(id="i", modality="image", prompt="a fox",
+                params={"width": 512, "height": 512})
+    r = score(case, png)
+    assert not r.passed and "512" in r.detail
+
+
+def test_score_fails_a_uniform_image(tmp_path):
+    from PIL import Image
+    png = tmp_path / "a.png"
+    Image.new("RGB", (64, 64), (128, 128, 128)).save(png)
+    case = Case(id="i", modality="image", prompt="a fox", params={})
+    assert not score(case, png).passed
+
+
+def test_score_of_a_modality_with_no_checker_is_not_a_silent_pass():
+    """video/tts/stt have no checker yet. Reporting them as passed would put a
+    100% pass rate next to nothing measured."""
+    case = Case(id="v", modality="video", prompt="a fox")
+    r = score(case, "/tmp/nope.mp4")
+    assert not r.passed
+    assert "no checker" in r.detail.lower()
+
+
+def test_the_cases_that_ship_with_the_suite_actually_load():
+    """Load-time validation is only worth having if the shipped cases pass it.
+    Nothing else in the tests reads the real cases directory."""
+    from pathlib import Path
+    cases = load_cases(Path(__file__).resolve().parent.parent / "evals" / "cases")
+    assert len(cases) >= 8
+    assert {c.modality for c in cases} == {"svg", "web", "image"}
+    assert all(c.prompt.strip() for c in cases)
