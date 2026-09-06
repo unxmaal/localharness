@@ -28,7 +28,7 @@ import sys
 import time
 from pathlib import Path
 
-from harness import audio, completion, proc
+from harness import audio, completion, env, proc
 from harness.checks import html as html_check
 from harness.checks import image as image_check
 from harness.checks import svg as svg_check
@@ -347,6 +347,14 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     ap = build_parser()
     a = ap.parse_args(argv)
+    # Before anything spawns mflux or h3. Installed on PATH this runs with
+    # nothing sourced, and an unset HF_HOME sends huggingface_hub to
+    # ~/.cache/huggingface to re-download weights that are already on the
+    # volume. Silently, and onto the disk this machine has least of.
+    if env.apply() is None:
+        print(f"warning: no weights location with {env.HF_MIN_FREE_GB}GB free "
+              f"(tried {', '.join(env.HF_CANDIDATES)}); set HF_HOME",
+              file=sys.stderr)
     if not getattr(a, "func", None):
         ap.print_help(sys.stderr)
         return 2

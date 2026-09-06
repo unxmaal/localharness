@@ -2,6 +2,26 @@
 
 Local media generation and voice on Apple Silicon, in a command line.
 
+## Install
+
+    uv tool install --python 3.12 --editable .
+
+That puts `lh` on PATH via `~/.local/bin`, in its own venv under
+`~/.local/share/uv/tools/localharness`. It never touches the system Python:
+this machine's `python3` is pyenv 3.9.4 and cannot import anything installed
+here. `--python 3.12` is not optional -- `uv tool install` picks an interpreter
+silently, and mflux once installed against 3.9 where every entry point died on
+`int | None`. `--editable` so the checkout stays the source of truth.
+
+`lh` finds the weights on its own (`harness/env.py`), by the same free-space
+rule `scripts/env.sh` uses for the services. It has to: installed on PATH it
+runs with nothing sourced, and an unset `HF_HOME` sends huggingface_hub to
+`~/.cache/huggingface` to re-download what is already on the volume.
+
+The install carries no torch. `mlx-whisper` requires it unconditionally, so the
+multilingual ear lives in the `whisper` dependency group and only the eval suite
+pulls it: 370MB installed rather than 1.1GB.
+
     lh image "a red fox in falling snow" --width 768
     lh video "a fox running" --seconds 2
     lh svg   "a settings gear icon"

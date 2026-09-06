@@ -411,7 +411,6 @@ dependencies = [
     { name = "httpx" },
     { name = "jiwer" },
     { name = "mlx-lm" },
-    { name = "mlx-whisper" },
     { name = "num2words" },
     { name = "pillow" },
     { name = "pyobjc-framework-vision" },
@@ -432,13 +431,15 @@ metrics = [
     { name = "torch" },
     { name = "transformers" },
 ]
+whisper = [
+    { name = "mlx-whisper" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "jiwer", specifier = ">=4.0.0" },
     { name = "mlx-lm", specifier = ">=0.31.3" },
-    { name = "mlx-whisper", specifier = ">=0.4.3" },
     { name = "num2words", specifier = ">=0.5.14" },
     { name = "pillow", specifier = ">=10" },
     { name = "pyobjc-framework-vision", specifier = ">=12.2.2" },
@@ -459,6 +460,7 @@ metrics = [
     { name = "torch", specifier = ">=2.4" },
     { name = "transformers", specifier = ">=4.44" },
 ]
+whisper = [{ name = "mlx-whisper", specifier = ">=0.4.3" }]
 
 [[package]]
 name = "markdown-it-py"

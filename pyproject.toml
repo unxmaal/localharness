@@ -11,7 +11,6 @@ dependencies = [
     "jiwer>=4.0.0",
     "num2words>=0.5.14",
     "pyobjc-framework-vision>=12.2.2",
-    "mlx-whisper>=0.4.3",
 ]
 
 [project.scripts]
@@ -33,6 +32,17 @@ metrics = [
     "torch>=2.4",
     "transformers>=4.44",
     "open_clip_torch>=2.24",
+]
+
+# The multilingual ear. A separate group because mlx-whisper requires torch
+# UNCONDITIONALLY -- not as an extra -- which puts 528MB into an otherwise
+# MLX-only install for a scoring instrument the CLI never calls. `lh hear` uses
+# the audio server; only the eval suite reaches for whisper:
+#   uv run --group whisper python -m evals.run --modality stt \
+#     --candidates 'stt:mlx-community/whisper-large-v3-mlx,backend=whisper,language=fr'
+# harness.audio imports it lazily, so the fast tests pass without this group.
+whisper = [
+    "mlx-whisper>=0.4.3",
 ]
 
 dev = [
