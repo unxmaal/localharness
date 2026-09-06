@@ -99,3 +99,32 @@ def test_the_default_tolerance_allows_a_little_ocr_noise(tmp_path):
     """Vision is not perfect on synthetic renders either, so a threshold of
     exactly zero would measure the OCR rather than the generator."""
     assert 0 < ocr.DEFAULT_MAX_CER < 0.5
+
+
+# ---- normalization ---------------------------------------------------------
+#
+# Found by a real comparison: Z-Image Turbo rendered a shop sign reading
+# "OPEN." with a period, which is a perfectly good sign. Scored against "OPEN"
+# that is one character in four, and it showed up in a summary as the only
+# quality difference between two image models. It was punctuation.
+
+def test_trailing_punctuation_is_not_a_rendering_error(tmp_path):
+    r = ocr.check(render(tmp_path / "a.png", "OPEN."), expect="OPEN")
+    assert r.ok
+    assert r.cer == 0.0
+
+
+def test_surrounding_quotes_are_not_a_rendering_error(tmp_path):
+    r = ocr.check(render(tmp_path / "a.png", '"OPEN"'), expect="OPEN")
+    assert r.ok and r.cer == 0.0
+
+
+def test_internal_punctuation_still_counts(tmp_path):
+    """Stripping the edges must not turn into ignoring punctuation. A sign
+    reading OP-EN is not the word that was asked for."""
+    assert ocr.cer("open", "op-en") > 0
+
+
+def test_a_genuinely_wrong_word_is_still_wrong(tmp_path):
+    r = ocr.check(render(tmp_path / "a.png", "OPEM"), expect="OPEN", max_cer=0.0)
+    assert not r.ok

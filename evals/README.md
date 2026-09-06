@@ -47,18 +47,39 @@ plays perfectly and is not a video.
 **The quality axis** is what orders two candidates that both pass. Checkers
 publish numbers alongside the verdict:
 
-| metric | modality | meaning |
-|---|---|---|
-| `wer` | tts | word error rate, speaking then transcribing |
-| `cer` | image | character error rate of text OCR'd out of the picture |
-| `ink` | svg | fraction of the canvas actually marked |
-| `motion` | video | mean change between consecutive frames |
+| metric | modality | direction | meaning |
+|---|---|---|---|
+| `wer` | tts | lower | word error rate, speaking then transcribing |
+| `cer` | image | lower | character error rate of text OCR'd out of the picture |
+| `ink` | svg | higher | fraction of the canvas actually marked |
+| `motion` | video | higher | mean change between consecutive frames |
+| `adherence` | image | higher | how well the picture matches the prompt |
 
-Missing, and the reason the image lane still cannot be ranked: **prompt
-adherence**. Neither `ink` nor `cer` separated FLUX.2 klein from Z-Image Turbo;
-both scored a clean 0.000. PickScore or HPSv2 would, and both need torch plus a
-~4 GB checkpoint in a repo that is otherwise MLX-only. That is a dependency
-decision, not a detail.
+**Direction is declared, not assumed.** Every metric started out as an error
+rate, so "lower is better" got baked into both the ranking and the worst-case
+column — and `ink` and `motion` silently inverted both the moment they arrived.
+`METRIC_DIRECTION` in `evals/core.py` is the registry; a metric that does not
+appear there warns rather than guessing quietly.
+
+### Prompt adherence
+
+    uv sync --group metrics
+    uv run --group metrics python -m evals.run --modality image \
+      --adherence pickscore --repeat 4 --candidates a,b
+
+Opt-in, because it loads a multi-GB preference model. Two backends, since the
+literature disagrees about which is better:
+
+- `pickscore` — `yuvalkirstain/PickScore_v1`, a CLIP-H fine-tune on 500k human
+  preference pairs from Pick-a-Pic.
+- `hpsv2` — `xswu/HPSv2`, a CLIP-H fine-tune on HPD v2.
+
+**Scores are comparable between candidates on one backend, never between
+backends**: different heads, different scales.
+
+Treat the number as evidence, not as a verdict. These are models of *aggregate*
+human preference, with known biases — toward saturation and contrast among
+others — and they can disagree with the person whose images they are.
 
 ## How the numbers are aggregated
 

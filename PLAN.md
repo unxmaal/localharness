@@ -180,9 +180,30 @@ FFprobe required.
 
 ### Decisions taken
 
-**`flux2-klein-4b` is the image engine.** Both candidates passed every objective
-check; the choice was made by eye. That is the suite's central limitation and
-the reason section 5 exists.
+**`flux2-klein-4b` is the image engine,** and the suite now supports that choice
+rather than deferring to taste. Over 4 seeds x 3 cases with PickScore:
+
+| | pass | median | peak | adherence | cer |
+|---|---|---|---|---|---|
+| flux2-klein-4b-q8 | 12/12 | **19.37s** | **11.4 GiB** | 23.975 | 0.000 |
+| z-image-turbo-q8 | 12/12 | 42.64s | 13.7 GiB | 24.121 | 0.000 |
+
+**Prompt adherence does not separate them.** Paired by case and seed the
+difference is +0.146 in Z-Image's favour with a standard deviation of 0.490
+across 12 pairs — t = 1.03, a 95% interval of -0.14 to +0.43, and a 7-5 split of
+individual pairs. Between-case variance (a fox at ~22.5, a shop sign at ~26)
+dwarfs it. Two backends agree: HPSv2 put Z-Image ahead by a similarly
+meaningless 0.6.
+
+Neither does text rendering, once the checker stopped being wrong about it. The
+one apparent difference was Z-Image writing `OPEN.` with a period on one seed,
+scored as one character in four. That is a good sign, not a bad render; the OCR
+check now strips punctuation at the edges of a string but never inside it, and
+both models are 4/4.
+
+What actually separates them is **2.2x on speed and 2.3 GiB on memory**, both to
+flux2. There is no tradeoff to weigh, which is why this agrees with the choice
+originally made by eye.
 
 **`bm_george` is the default voice.** Male, as asked for, and the best-scoring
 male voice on the tts eval: 0.000 mean word error rate over five cases against

@@ -15,9 +15,18 @@ tenth of a second.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from pathlib import Path
 
 import jiwer
+
+# Punctuation and whitespace at the EDGES of a recognized string. A shop sign
+# reading "OPEN." with a period is a perfectly good sign, and quotes around a
+# word are a design choice; scoring either against "OPEN" is one character in
+# four, which showed up in a real comparison as the only quality difference
+# between two image models. Only the edges: OP-EN is not the word that was
+# asked for, and stripping the middle would hide that.
+_EDGE = re.compile(r"^[^\w]+|[^\w]+$")
 
 # Vision is not perfect on synthetic renders either. A threshold of exactly
 # zero would measure the OCR rather than the generator under test.
@@ -64,12 +73,20 @@ def read(path: str | Path) -> list[str]:
     return out
 
 
+def normalize(text: str) -> str:
+    """Lowercase, and drop punctuation at the edges but never in the middle."""
+    return _EDGE.sub("", text.strip().lower())
+
+
 def cer(expected: str, got: str) -> float:
-    """Character error rate, case-insensitive. 0.0 is a perfect render."""
-    expected = expected.strip().lower()
+    """Character error rate, case-insensitive, edge punctuation ignored.
+
+    0.0 is a perfect render.
+    """
+    expected = normalize(expected)
     if not expected:
         raise ValueError("cannot score against empty expected text")
-    got = got.strip().lower()
+    got = normalize(got)
     if not got:
         return 1.0
     return min(1.0, jiwer.cer(expected, got))
