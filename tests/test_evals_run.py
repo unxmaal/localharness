@@ -170,3 +170,61 @@ def test_the_worst_case_is_shown_next_to_the_average(capsys):
     report(s)
     out = capsys.readouterr().out
     assert "0.2" in out and "0.4" in out
+
+
+# ---- repeats ---------------------------------------------------------------
+#
+# One sample per prompt ranks noise. Diffusion output varies enormously with
+# the seed, and a language model at temperature 0.2 is not deterministic
+# either, so a single run decides a comparison on luck.
+
+from evals.run import expand_cases  # noqa: E402
+
+
+def test_without_repeats_the_cases_are_untouched():
+    got = expand_cases(CASES, 1)
+    assert [c.id for c in got] == ["a", "b", "c"]
+    assert got[0] is CASES[0]
+
+
+def test_repeats_produce_distinctly_named_rows():
+    got = expand_cases([CASES[2]], 3)
+    assert [c.id for c in got] == ["c#1", "c#2", "c#3"]
+
+
+def test_each_repeat_gets_a_different_seed():
+    got = expand_cases([Case(id="c", modality="image", prompt="x",
+                             params={"seed": 42})], 3)
+    seeds = [c.params["seed"] for c in got]
+    assert len(set(seeds)) == 3
+    assert seeds[0] == 42, "the case's own seed should still be one of them"
+
+
+def test_a_case_with_no_seed_still_gets_distinct_ones():
+    got = expand_cases([Case(id="c", modality="image", prompt="x")], 3)
+    assert len({c.params["seed"] for c in got}) == 3
+
+
+def test_repeating_does_not_mutate_the_original_case():
+    original = Case(id="c", modality="image", prompt="x", params={"seed": 42})
+    expand_cases([original], 3)
+    assert original.params == {"seed": 42}
+
+
+def test_deterministic_modalities_are_not_repeated():
+    """Kokoro at a fixed voice and speed produces the same bytes every time.
+    Repeating it burns time to average three identical numbers."""
+    got = expand_cases([Case(id="t", modality="tts", prompt="hello")], 3)
+    assert [c.id for c in got] == ["t"]
+
+
+def test_repeats_and_singletons_coexist_in_one_run():
+    cases = [Case(id="img", modality="image", prompt="x"),
+             Case(id="say", modality="tts", prompt="x")]
+    got = expand_cases(cases, 2)
+    assert [c.id for c in got] == ["img#1", "img#2", "say"]
+
+
+def test_a_repeat_count_below_one_is_rejected():
+    with pytest.raises(SystemExit):
+        expand_cases(CASES, 0)

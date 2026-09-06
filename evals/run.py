@@ -24,6 +24,8 @@ from pathlib import Path
 from harness import audio
 from harness.engines import Engine, parse_options, resolve
 
+from dataclasses import replace
+
 from evals.core import MODALITIES, Case, load_cases, summarize
 from evals.environment import capture
 from evals.runners.process import ProcessRunner
@@ -115,6 +117,40 @@ def cases_for(candidate: str, cases: list[Case]) -> list[Case]:
     return [c for c in cases if c.modality == modality]
 
 
+# Modalities whose output varies run to run. Diffusion varies enormously with
+# the seed and a language model at temperature 0.2 is not deterministic either;
+# Kokoro at a fixed voice and speed produces the same bytes every time, so
+# repeating it burns time averaging three identical numbers.
+STOCHASTIC_MODALITIES = {"image", "video", "svg", "web"}
+
+
+def expand_cases(cases: list[Case], repeat: int) -> list[Case]:
+    """Turn each stochastic case into `repeat` cases with different seeds.
+
+    One sample per prompt ranks noise. A single generation decides a comparison
+    on luck, and the whole point of the suite is that the comparison means
+    something.
+    """
+    if repeat < 1:
+        raise SystemExit(f"--repeat must be at least 1, got {repeat}")
+    if repeat == 1:
+        return cases
+
+    out: list[Case] = []
+    for case in cases:
+        if case.modality not in STOCHASTIC_MODALITIES:
+            out.append(case)
+            continue
+        base = case.params.get("seed", 0)
+        for i in range(repeat):
+            out.append(replace(case, id=f"{case.id}#{i + 1}",
+                               # A copy, never the same dict: Case is frozen but
+                               # its params are not, and mutating them would
+                               # rewrite the case the caller still holds.
+                               params={**case.params, "seed": base + i}))
+    return out
+
+
 def select_cases(cases: list[Case], modality: str) -> list[Case]:
     if modality != "all" and modality not in MODALITIES:
         raise SystemExit(f"unknown modality '{modality}'; known: "
@@ -136,9 +172,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--cases", default=str(ROOT / "cases"))
     ap.add_argument("--out", default=None,
                     help="write artifacts and results.json here")
+    ap.add_argument("--repeat", type=int, default=1,
+                    help="samples per case, each with a different seed. One "
+                         "sample per prompt ranks noise; 3 is the usual "
+                         "minimum for an image comparison you would act on")
     args = ap.parse_args(argv)
 
-    cases = select_cases(load_cases(args.cases), args.modality)
+    cases = expand_cases(select_cases(load_cases(args.cases), args.modality),
+                         args.repeat)
     # An engine spec contains commas, which are also the candidate separator.
     # Split on commas that start a new candidate, i.e. those followed by a
     # known engine prefix or by something with no '=' in it.
