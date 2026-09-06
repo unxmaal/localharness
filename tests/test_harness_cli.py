@@ -329,3 +329,108 @@ def test_the_output_path_is_absolute_when_the_cwd_changes(spy, tmp_path, monkeyp
     cli.main(["video", "fox", "-o", "clip.mp4"])
     argv = spy[0]["argv"]
     assert argv[argv.index("-o") + 1].startswith("/")
+
+
+# ---- code -----------------------------------------------------------------
+# Both of these lanes existed only in the eval suite. The plumbing to reach
+# them -- system prompts, context placement, artifact recovery -- was already
+# shared with the CLI; only the verbs were missing.
+
+@respx.mock
+def test_code_prints_the_recovered_source(capsys):
+    """Stdout by default, because code is something you pipe or read, not an
+    artifact you open in a viewer the way an SVG is."""
+    respx.post(f"{GW}/v1/chat/completions").mock(return_value=completion(
+        "Here you go:\n```python\ndef add(a, b):\n    return a + b\n```"))
+    assert cli.main(["code", "add two numbers"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("def add")
+    assert "Here you go" not in out and "```" not in out
+
+
+@respx.mock
+def test_code_writes_a_file_when_asked(tmp_path):
+    respx.post(f"{GW}/v1/chat/completions").mock(
+        return_value=completion("```python\nx = 1\n```"))
+    dest = tmp_path / "m.py"
+    assert cli.main(["code", "set x", "-o", str(dest)]) == 0
+    assert dest.read_text().strip() == "x = 1"
+
+
+@respx.mock
+def test_code_asks_for_code_and_nothing_else(capsys):
+    """The steering is shared with the eval. If the CLI asked differently, the
+    eval would be ranking a product that does not ship."""
+    import json
+    route = respx.post(f"{GW}/v1/chat/completions").mock(
+        return_value=completion("x = 1"))
+    cli.main(["code", "set x"])
+    sent = json.loads(route.calls[0].request.read())
+    assert sent["messages"][0]["content"] == cli.completion.SYSTEM["code"]
+
+
+# ---- extract ---------------------------------------------------------------
+
+@respx.mock
+def test_extract_answers_from_a_file(tmp_path, capsys):
+    log = tmp_path / "build.log"
+    log.write_text("ok\nok\n3 tests failed\n")
+    respx.post(f"{GW}/v1/chat/completions").mock(return_value=completion("3"))
+    assert cli.main(["extract", "how many tests failed?", "-f", str(log)]) == 0
+    assert capsys.readouterr().out.strip() == "3"
+
+
+@respx.mock
+def test_extract_puts_the_material_before_the_question(tmp_path):
+    """A small model that reads the log and THEN the question does better than
+    one that reads the question and has to remember it through forty lines."""
+    import json
+    log = tmp_path / "build.log"
+    log.write_text("3 tests failed")
+    route = respx.post(f"{GW}/v1/chat/completions").mock(
+        return_value=completion("3"))
+    cli.main(["extract", "how many failed?", "-f", str(log)])
+    body = json.loads(route.calls[0].request.read())["messages"][1]["content"]
+    assert body.index("3 tests failed") < body.index("how many failed?")
+
+
+@respx.mock
+def test_extract_reads_stdin(monkeypatch, capsys):
+    import io
+    monkeypatch.setattr("sys.stdin", io.StringIO("3 tests failed\n"))
+    respx.post(f"{GW}/v1/chat/completions").mock(return_value=completion("3"))
+    assert cli.main(["extract", "how many?"]) == 0
+    assert capsys.readouterr().out.strip() == "3"
+
+
+def test_extract_with_no_material_says_so(monkeypatch, capsys):
+    """Answering a question about a log nobody supplied would invent one."""
+    import io
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    assert cli.main(["extract", "how many?"]) == 1
+    assert "material" in capsys.readouterr().err.lower()
+
+
+@respx.mock
+def test_a_missing_extract_file_is_reported_not_a_traceback(tmp_path, capsys):
+    assert cli.main(["extract", "q", "-f", str(tmp_path / "gone.log")]) == 1
+    assert "gone.log" in capsys.readouterr().err
+
+
+@respx.mock
+def test_not_found_is_passed_through_as_the_answer(tmp_path, capsys):
+    """The system prompt asks for NOT FOUND when the material lacks the answer.
+    That is a successful extraction, not a failure."""
+    log = tmp_path / "a.log"
+    log.write_text("nothing relevant")
+    respx.post(f"{GW}/v1/chat/completions").mock(
+        return_value=completion("NOT FOUND"))
+    assert cli.main(["extract", "how many?", "-f", str(log)]) == 0
+    assert capsys.readouterr().out.strip() == "NOT FOUND"
+
+
+def test_the_extract_default_model_is_the_one_that_actually_answers():
+    """The lane is for delegating cheap work, but the eval ranked local-small
+    at 40% and local-large at 90%. 0.79s is still cheap; being wrong is not."""
+    a = cli.build_parser().parse_args(["extract", "q"])
+    assert a.model == "local-large"

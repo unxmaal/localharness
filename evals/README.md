@@ -15,14 +15,47 @@ method turns up on GitHub.
 |---|---|---|
 | gateway alias | `local-large` | HTTP to the gateway |
 | engine spec | `mflux:z-image-turbo,quantize=4` | subprocess, measured |
-| speech | `tts:mlx-community/Kokoro-82M-bf16,voice=bm_george` | HTTP to mlx-audio |
+| tts | `tts:mlx-community/Kokoro-82M-bf16,voice=bm_george` | HTTP to mlx-audio |
+| tts, cloned | `tts:litmudoc/Chatterbox-Multilingual-MLX-v2-Q8,lang_code=fr,ref_audio=<clip>,ear=whisper:fr` | HTTP to mlx-audio |
+| stt | `stt:mlx-community/whisper-large-v3-mlx,backend=whisper,language=fr` | in-process mlx-whisper |
 
 A candidate is only handed cases of a modality it can run. Giving mflux an SVG
 case produces a failure row that says nothing about mflux.
 
-Quantization and voice are part of the candidate NAME. `z-image-turbo` at q4 and
-at q8 have different speed and memory, and sharing a row makes the comparison
-meaningless.
+Quantization, voice and reference clip are part of the candidate NAME.
+`z-image-turbo` at q4 and at q8 have different speed and memory, and sharing a
+row makes the comparison meaningless. The reference clip turned out to matter
+just as much: three clips from the same corpus, same language, same gender,
+gave 0.122, 0.144 and 0.578 corpus word error rate.
+
+### Language is part of selection
+
+A case declares its `language:` (default `en`), and an English-only candidate is
+not handed French cases — the same rule as not handing mflux an SVG case, for
+the same reason. Parakeet does not speak French, so scoring French through it
+returns a word error rate near 1.0 for every candidate and ranks them all as
+equally broken.
+
+For a **tts** candidate the language comes from the EAR, not from the model:
+`ear=whisper:fr` says both which transcriber reads the audio back and what
+language it is scored in. Those are one constraint rather than two settings
+that happen to agree — a French sentence can only be scored by a transcriber
+that speaks French.
+
+For an **stt** candidate it is the candidate's own `language=` option.
+
+### Two ears
+
+| backend | model | speaks | median |
+|---|---|---|---|
+| `server` (default) | Parakeet, on mlx-audio :8890 | English only | 0.18s |
+| `whisper` | mlx-whisper, in this process | multilingual | 1.14s |
+
+Whisper cannot run on the audio server at all: mlx_audio demands a HuggingFace
+processor and the mlx whisper repos ship `weights.npz` and `config.json`
+without one. Calling `mlx_whisper` directly wants exactly what those repos
+hold. It costs a model load per process rather than per request, which is the
+right trade for an eval and the wrong one for a chat loop.
 
 ## Two different measurements, kept apart
 

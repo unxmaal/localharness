@@ -6,8 +6,17 @@ Local media generation and voice on Apple Silicon, in a command line.
     lh video "a fox running" --seconds 2
     lh svg   "a settings gear icon"
     lh web   "a landing page for a coffee roaster"
+    lh code  "a python function that parses an ISO timestamp"
+    lh extract --file build.log "how many tests failed?"
     lh say   "the tests all passed"
     lh hear  --seconds 5
+
+`code` and `extract` print to stdout, because both produce something you pipe
+or read rather than an artifact you open in a viewer. `extract` reads stdin
+when given no `--file`, so `make test 2>&1 | lh extract "which test failed?"`
+works. It is the lane for handing a cheap question to a small model instead of
+spending a large one's context on a log — though the eval had something to say
+about which model is actually cheap: see `evals/README.md`.
 
 Read `PLAN.md` for why it is shaped this way. `docs/validation-log.md` holds the
 evidence behind every claim in it, including conclusions that were wrong and how

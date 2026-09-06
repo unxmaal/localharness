@@ -4,6 +4,8 @@
     lh video "a fox running" --seconds 2
     lh svg   "a settings gear icon"
     lh web   "a landing page for a coffee roaster"
+    lh code  "a python function that parses an ISO timestamp"
+    lh extract --file build.log "how many tests failed?"
     lh say   "bonjour"
     lh hear  --seconds 5
 
@@ -34,6 +36,16 @@ from harness.engines import resolve
 DEFAULT_IMAGE_ENGINE = "mflux:flux2-klein-4b"
 DEFAULT_VIDEO_ENGINE = "h3"
 DEFAULT_TEXT_MODEL = "local-mid"
+# Both of these are local-large on the eval's evidence rather than on the
+# assumption in their names. extract exists to delegate cheap work, but
+# local-small answered 40% of the lane and local-large 90% -- and 0.79s is
+# still cheap, while being wrong is not. code is the same call for a weaker
+# reason: local-mid passes more cases outright, local-large scores better on
+# the graded fraction, and with nine cases the graded number uses more of the
+# evidence. Re-derive both with:
+#   uv run python -m evals.run --modality extract --candidates local-large,local-mid,local-small
+DEFAULT_EXTRACT_MODEL = "local-large"
+DEFAULT_CODE_MODEL = "local-large"
 OUTDIR = Path("out")
 
 # Named per engine family because the fix differs, and because `uv tool install
@@ -151,6 +163,52 @@ def cmd_web(a) -> int:
     return _text(a, "web", ".html", html_check.check)
 
 
+def _answer(a, modality: str, context: str = "") -> int:
+    """Ask for text and print it. The lanes that answer rather than draw.
+
+    Stdout by default, because both of these produce something you pipe, read
+    or paste. An SVG is an artifact you open in a viewer; a two-token answer to
+    "how many tests failed" is not, and writing it to out/extract-<stamp>.txt
+    would be a worse place to leave it than the terminal.
+    """
+    try:
+        raw = completion.complete(a.prompt, model=a.model, gateway=a.gateway,
+                                  modality=modality, context=context)
+    except completion.CompletionError as exc:
+        return err(str(exc))
+
+    body = completion.artifact(raw, modality)
+    if getattr(a, "output", None):
+        out = Path(a.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(body if body.endswith("\n") else body + "\n")
+        print(f"{out}")
+    else:
+        print(body)
+    return 0
+
+
+def cmd_code(a) -> int:
+    return _answer(a, "code")
+
+
+def cmd_extract(a) -> int:
+    if a.file:
+        source = Path(a.file)
+        if not source.exists():
+            return err(f"no such file: {source}")
+        context = source.read_text()
+    else:
+        # A terminal with nobody piping into it reads as an empty string, which
+        # is the case below rather than a hang.
+        context = sys.stdin.read() if not sys.stdin.isatty() else ""
+    if not context.strip():
+        return err("no material to read: pass --file, or pipe it in. "
+                   "Answering a question about a log nobody supplied would "
+                   "invent one.")
+    return _answer(a, "extract", context=context)
+
+
 def cmd_say(a) -> int:
     text = sys.stdin.read() if a.text == "-" else a.text
     if not text.strip():
@@ -219,6 +277,24 @@ def build_parser() -> argparse.ArgumentParser:
                        help="gateway alias")
         p.add_argument("--gateway", default=completion.DEFAULT_GATEWAY)
         p.set_defaults(func=func)
+
+    c = sub.add_parser("code", help="generate code")
+    c.add_argument("prompt")
+    c.add_argument("-o", "--output", help="write to a file instead of stdout")
+    c.add_argument("-m", "--model", default=DEFAULT_CODE_MODEL,
+                   help="gateway alias")
+    c.add_argument("--gateway", default=completion.DEFAULT_GATEWAY)
+    c.set_defaults(func=cmd_code)
+
+    x = sub.add_parser("extract",
+                       help="answer a question about a file or piped input")
+    x.add_argument("prompt", help="the question")
+    x.add_argument("-f", "--file", help="the material; omit to read stdin")
+    x.add_argument("-o", "--output", help="write to a file instead of stdout")
+    x.add_argument("-m", "--model", default=DEFAULT_EXTRACT_MODEL,
+                   help="gateway alias")
+    x.add_argument("--gateway", default=completion.DEFAULT_GATEWAY)
+    x.set_defaults(func=cmd_extract)
 
     s = sub.add_parser("say", help="speak text aloud")
     s.add_argument("text", help="the text, or - to read stdin")
