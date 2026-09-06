@@ -94,10 +94,10 @@ def test_a_tts_candidate_becomes_a_speech_runner(tmp_path):
     assert r.candidate == "Kokoro-82M-bf16/am_adam"
 
 
-def test_a_tts_candidate_without_a_voice_uses_a_cached_default(tmp_path):
-    from harness import audio
-    r = build_runner("tts:mlx-community/Kokoro-82M-bf16", "http://gw", tmp_path)
-    assert r.voice == audio.DEFAULT_VOICE
+def test_a_tts_candidate_can_name_its_voice(tmp_path):
+    r = build_runner("tts:mlx-community/Kokoro-82M-bf16,voice=bm_george",
+                     "http://gw", tmp_path)
+    assert r.voice == "bm_george"
 
 
 def test_a_tts_candidate_needs_somewhere_to_put_the_audio():
@@ -370,3 +370,9 @@ def test_a_candidate_with_no_metric_is_left_out_of_the_disagreement_note(capsys)
     ])
     report(s)
     assert "disagree" not in capsys.readouterr().out.lower()
+
+
+def test_a_tts_candidate_without_a_voice_asks_for_none(tmp_path):
+    """Defaulting to a Kokoro voice name would send bm_george to Qwen3-TTS."""
+    assert build_runner("tts:mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16",
+                        "http://gw", tmp_path).voice == ""

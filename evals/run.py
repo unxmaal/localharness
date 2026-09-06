@@ -90,8 +90,9 @@ def _speech_runner(candidate: str, outdir: Path | None) -> SpeechRunner:
                          "tts:mlx-community/Kokoro-82M-bf16,voice=am_adam")
     if outdir is None:
         raise SystemExit(f"{candidate} writes audio; pass --out")
+    # Only Kokoro has a voice table; a candidate may legitimately name none.
     return SpeechRunner(model=model, outdir=outdir,
-                        voice=options.get("voice", audio.DEFAULT_VOICE))
+                        voice=options.get("voice", ""))
 
 
 def build_runner(candidate: str, gateway: str, outdir: Path | None,

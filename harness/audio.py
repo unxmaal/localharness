@@ -51,8 +51,12 @@ def speak(text: str, out: str | Path, voice: str = DEFAULT_VOICE,
           timeout: float = 120.0) -> Path:
     """Synthesize `text` to a WAV at `out`. Returns the path."""
     out = Path(out)
-    payload = {"model": model, "input": text, "voice": voice,
+    payload = {"model": model, "input": text,
                "speed": speed, "response_format": "wav"}
+    # Only some models have a voice table. Sending voice="" to one that does
+    # not is a request for a voice named empty string.
+    if voice:
+        payload["voice"] = voice
     try:
         r = httpx.post(f"{base_url.rstrip('/')}/audio/speech", json=payload,
                        timeout=timeout)

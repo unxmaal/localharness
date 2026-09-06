@@ -115,3 +115,12 @@ def test_generation_time_is_measured_not_transcription_time(tmp_path):
     assert r.seconds < 0.4, (
         f"{r.seconds}s includes the transcription, so the column does not "
         "mean what the header says")
+
+
+@respx.mock
+def test_a_candidate_with_no_voice_is_named_for_the_model_alone(tmp_path):
+    """Only Kokoro has a voice table. `Qwen3-TTS-.../` with a trailing slash
+    would be a lie about what varies."""
+    r = runner(tmp_path, voice="")
+    assert r.candidate == "Kokoro-82M-bf16"
+    assert not r.candidate.endswith("/")

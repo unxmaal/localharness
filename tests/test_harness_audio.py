@@ -172,3 +172,15 @@ def test_the_default_voice_is_male():
 
 def test_known_voices_are_offered_so_a_typo_is_recoverable():
     assert "am_adam" in audio.KNOWN_VOICES and "ff_siwis" in audio.KNOWN_VOICES
+
+
+@respx.mock
+def test_an_empty_voice_is_omitted_rather_than_sent_blank(tmp_path):
+    """Kokoro has named voices; Qwen3-TTS and Chatterbox do not. Sending
+    voice="" to a model with no voice table is a request for a voice called
+    empty string."""
+    import json
+    route = respx.post(f"{BASE}/audio/speech").mock(
+        return_value=httpx.Response(200, content=wav_bytes()))
+    audio.speak("hi", out=tmp_path / "a.wav", base_url=BASE, voice="")
+    assert "voice" not in json.loads(route.calls[0].request.read())

@@ -211,9 +211,39 @@ What actually separates them is **2.2x on speed and 2.3 GiB on memory**, both to
 flux2. There is no tradeoff to weigh, which is why this agrees with the choice
 originally made by eye.
 
-**`bm_george` is the default voice.** Male, as asked for, and the best-scoring
-male voice on the tts eval: 0.000 mean word error rate over five cases against
-`am_adam`'s 0.031. Nothing was traded to get it.
+**`bm_george` on Kokoro-82M is the default voice**, and the field has now been
+checked rather than assumed. Male, as asked for, and the best-scoring male
+voice: 0.000 against `am_adam`'s 0.031 over five cases.
+
+| tts candidate | pass | median | wer |
+|---|---|---|---|
+| Kokoro-82M-8bit / bm_george | 5/5 | 0.31s | 0.000 |
+| Kokoro-82M-bf16 / bm_george | 5/5 | 0.32s | 0.000 |
+| Qwen3-TTS-12Hz-0.6B | 5/5 | 2.75s | 0.022 |
+
+Qwen3-TTS is 9x slower and less intelligible; there is nothing to trade for.
+The 8-bit Kokoro is indistinguishable from bf16 on both axes and 3MB smaller,
+which is not a reason to switch either way. **Chatterbox could not be
+measured**: it is a voice-cloning model and refuses to speak without either a
+reference clip or a `conds.safetensors` the mlx-community repo does not ship.
+That is the same blocker as the deferred French-voice thread, not a separate
+one.
+
+**STT is now ranked on its own**, against human transcripts rather than jointly
+with a TTS:
+
+| stt candidate | pass | median | corpus wer |
+|---|---|---|---|
+| parakeet-tdt-1.1b | 40/40 | 0.18s | **0.011** |
+| parakeet-tdt-0.6b-v2 | 40/40 | **0.14s** | 0.013 |
+| whisper-large-v3-turbo | 0/40 | - | - |
+
+40 seeded utterances of LibriSpeech test-clean. Both parakeets land where their
+published numbers say they should, which is the check that the instrument is
+sound. The 1.1b is 15% more accurate and 29% slower — a real tradeoff, and the
+0.6b stays the default because voice latency is felt and 0.2% is not.
+whisper-large-v3-turbo is a packaging failure, not a model result: mlx_audio
+wants a HuggingFace processor the mlx-community repo does not ship.
 
 **Ollama is not the serving path.** It wraps llama.cpp, lags upstream, and hides
 tuning flags. Still installed, with no models. llama.cpp remains a second lane

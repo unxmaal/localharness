@@ -31,7 +31,8 @@ class SpeechRunner(BaseRunner):
         # The voice is part of the candidate: Kokoro at am_adam and at ff_siwis
         # are different products, and sharing a row is the same mistake as
         # sharing one between two quantizations.
-        self.candidate = f"{model.split('/')[-1]}/{voice}"
+        name = model.split("/")[-1]
+        self.candidate = f"{name}/{voice}" if voice else name
         self.outdir = Path(outdir)
         self.outdir.mkdir(parents=True, exist_ok=True)
 
