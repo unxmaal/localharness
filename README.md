@@ -9,7 +9,17 @@ Local media generation and voice on Apple Silicon, in a command line.
     lh code  "a python function that parses an ISO timestamp"
     lh extract --file build.log "how many tests failed?"
     lh say   "the tests all passed"
+    lh say   "the tests all passed" --voice fr-male   # cloned, French accent
+    lh voices
     lh hear  --seconds 5
+
+`lh voices` lists what can be spoken. The `fr-male` presets are cloned rather
+than picked from a table: Kokoro has five fixed voices and no accented English
+among them, while Chatterbox clones from a reference clip and clones ACROSS
+LANGUAGES -- the clip speaks French, the output speaks English, and the accent
+comes with the voice. That is why no accented-English corpus was needed, and
+why a cloned voice is one name standing for three coupled settings (model,
+clip, language code) that fail by naming each other when set separately.
 
 `code` and `extract` print to stdout, because both produce something you pipe
 or read rather than an artifact you open in a viewer. `extract` reads stdin

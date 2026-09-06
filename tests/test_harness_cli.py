@@ -434,3 +434,46 @@ def test_the_extract_default_model_is_the_one_that_actually_answers():
     at 40% and local-large at 90%. 0.79s is still cheap; being wrong is not."""
     a = cli.build_parser().parse_args(["extract", "q"])
     assert a.model == "local-large"
+
+
+# ---- cloned voices from the CLI --------------------------------------------
+
+@respx.mock
+def test_say_speaks_through_a_cloned_voice_preset(tmp_path):
+    import json
+    route = respx.post(f"{AUDIO}/audio/speech").mock(
+        return_value=httpx.Response(200, content=wav_bytes()))
+    dest = tmp_path / "a.wav"
+    assert cli.main(["say", "the tests all passed", "--voice", "fr-male",
+                     "-o", str(dest), "--no-play"]) == 0
+    sent = json.loads(route.calls[0].request.read())
+    assert "Chatterbox" in sent["model"]
+    assert sent["ref_audio"].endswith("fr-male.wav")
+    assert sent["lang_code"] == "en"
+
+
+@respx.mock
+def test_say_still_speaks_through_a_kokoro_voice(tmp_path):
+    import json
+    route = respx.post(f"{AUDIO}/audio/speech").mock(
+        return_value=httpx.Response(200, content=wav_bytes()))
+    assert cli.main(["say", "hi", "--voice", "am_adam",
+                     "-o", str(tmp_path / "a.wav"), "--no-play"]) == 0
+    sent = json.loads(route.calls[0].request.read())
+    assert sent["voice"] == "am_adam"
+    assert "ref_audio" not in sent
+
+
+def test_an_unknown_voice_is_reported_before_the_request(tmp_path, capsys):
+    assert cli.main(["say", "hi", "--voice", "fr_male",
+                     "-o", str(tmp_path / "a.wav"), "--no-play"]) == 1
+    err = capsys.readouterr().err
+    assert "fr_male" in err and "fr-male" in err
+
+
+def test_the_voices_command_lists_what_can_be_spoken(capsys):
+    """Three coupled settings behind one name is only usable if the names are
+    discoverable."""
+    assert cli.main(["voices"]) == 0
+    out = capsys.readouterr().out
+    assert "fr-male" in out and "bm_george" in out

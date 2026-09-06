@@ -13,6 +13,7 @@ Two failure modes are handled explicitly because both look like success:
 from __future__ import annotations
 
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
@@ -40,6 +41,52 @@ KNOWN_VOICES = ("am_adam", "am_onyx", "bm_george", "af_sky", "ff_siwis")
 #   uv run python -m evals.run --modality tts --out .logs/voices --candidates \
 #     'tts:mlx-community/Kokoro-82M-bf16,voice=bm_george,...'
 DEFAULT_VOICE = "bm_george"
+
+# Cloned voices. Kokoro has a fixed table and no French-accented English in it;
+# Chatterbox clones from a reference clip, and it clones ACROSS LANGUAGES -- the
+# reference speaks French, the output speaks English, and the accent comes with
+# the voice. That is what makes a French-accented male voice reachable at all
+# here, and it is why no accented-English corpus had to be sourced.
+#
+# The clips ship in harness/voices/ so a preset works without a mounted volume.
+# See that directory's README for provenance (google/fleurs, CC-BY-4.0) and for
+# why the reference clip is a first-class variable rather than a detail.
+CHATTERBOX_MULTILINGUAL = "litmudoc/Chatterbox-Multilingual-MLX-v2-Q8"
+VOICES_DIR = Path(__file__).resolve().parent / "voices"
+VOICE_PRESETS = {
+    "fr-male": {"model": CHATTERBOX_MULTILINGUAL, "clip": "fr-male.wav",
+                "lang_code": "en"},
+    "fr-male-2": {"model": CHATTERBOX_MULTILINGUAL, "clip": "fr-male-2.wav",
+                  "lang_code": "en"},
+}
+
+
+@dataclass
+class Voice:
+    """Everything the server needs to produce one voice.
+
+    A cloned voice is three coupled settings -- model, reference clip and
+    language code -- and getting any of them wrong fails in a way that names
+    one of the others. Resolving them together is the point.
+    """
+    model: str
+    voice: str = ""
+    ref_audio: str | None = None
+    lang_code: str = ""
+
+
+def resolve_voice(name: str) -> Voice:
+    """A preset name or a Kokoro voice name, resolved to a full Voice."""
+    preset = VOICE_PRESETS.get(name)
+    if preset:
+        return Voice(model=preset["model"],
+                     ref_audio=str(VOICES_DIR / preset["clip"]),
+                     lang_code=preset["lang_code"])
+    if name in KNOWN_VOICES:
+        return Voice(model=DEFAULT_TTS_MODEL, voice=name)
+    raise ValueError(
+        f"unknown voice {name!r}; cloned: {', '.join(sorted(VOICE_PRESETS))}; "
+        f"kokoro: {', '.join(KNOWN_VOICES)}")
 
 # A WAV header is 44 bytes and 8000 bytes is a fifth of a second at 16k mono:
 # below that there is no speech in the file whatever the status code said.
@@ -115,6 +162,15 @@ def speak(text: str, out: str | Path, voice: str = DEFAULT_VOICE,
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(r.content)
     return out
+
+
+def speak_as(voice_name: str, text: str, out: str | Path, speed: float = 1.0,
+             base_url: str = DEFAULT_BASE_URL, timeout: float = 120.0) -> Path:
+    """speak(), but the voice name carries its model and reference clip."""
+    v = resolve_voice(voice_name)
+    return speak(text, out=out, voice=v.voice, speed=speed, model=v.model,
+                 base_url=base_url, timeout=timeout,
+                 ref_audio=v.ref_audio, lang_code=v.lang_code)
 
 
 def transcribe(path: str | Path, model: str = DEFAULT_STT_MODEL,

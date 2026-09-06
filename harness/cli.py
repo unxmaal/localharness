@@ -6,7 +6,8 @@
     lh web   "a landing page for a coffee roaster"
     lh code  "a python function that parses an ISO timestamp"
     lh extract --file build.log "how many tests failed?"
-    lh say   "bonjour"
+    lh say   "bonjour" --voice fr-male
+    lh voices
     lh hear  --seconds 5
 
 Every command is blocking, because on this hardware everything except video
@@ -215,13 +216,34 @@ def cmd_say(a) -> int:
         return err("nothing to say")
     out = Path(a.output or default_output("speech", ".wav"))
     try:
-        audio.speak(text, out=out, voice=a.voice, speed=a.speed,
-                    base_url=a.base_url)
+        # The voice name carries its model, reference clip and language code.
+        # A cloned voice is three coupled settings, and getting one wrong fails
+        # by naming another.
+        audio.speak_as(a.voice, text, out=out, speed=a.speed,
+                       base_url=a.base_url)
+    except ValueError as exc:
+        return err(str(exc))
     except audio.AudioError as exc:
         return err(str(exc))
     if a.play:
         proc.run(audio.play_argv(out))
     print(f"{out}")
+    return 0
+
+
+def cmd_voices(a) -> int:
+    """Three coupled settings behind one name is only usable if the names are
+    discoverable."""
+    print("cloned (a reference clip, so any language, any accent):")
+    for name in sorted(audio.VOICE_PRESETS):
+        v = audio.resolve_voice(name)
+        print(f"  {name:12s} {v.model.split('/')[-1]}"
+              f"  speaks {v.lang_code}  from {Path(v.ref_audio).name}")
+    print("\nkokoro (a fixed table, English unless noted):")
+    for name in audio.KNOWN_VOICES:
+        note = "  French, female" if name == "ff_siwis" else ""
+        star = " (default)" if name == audio.DEFAULT_VOICE else ""
+        print(f"  {name}{star}{note}")
     return 0
 
 
@@ -300,11 +322,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("text", help="the text, or - to read stdin")
     s.add_argument("-o", "--output")
     s.add_argument("--voice", default=audio.DEFAULT_VOICE,
-                   help=f"one of {', '.join(audio.KNOWN_VOICES)}")
+                   help="a cloned preset or a kokoro voice; see `lh voices`")
     s.add_argument("--speed", type=float, default=1.0)
     s.add_argument("--base-url", default=audio.DEFAULT_BASE_URL)
     s.add_argument("--no-play", dest="play", action="store_false", default=True)
     s.set_defaults(func=cmd_say)
+
+    sub.add_parser("voices", help="list the voices that can be spoken"
+                   ).set_defaults(func=cmd_voices)
 
     h = sub.add_parser("hear", help="transcribe a clip, or record and transcribe")
     h.add_argument("file", nargs="?", help="an existing audio file")

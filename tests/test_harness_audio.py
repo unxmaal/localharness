@@ -379,3 +379,58 @@ def test_a_missing_reference_clip_fails_before_the_request(tmp_path):
         audio.speak("hi", out=tmp_path / "a.wav", base_url=BASE,
                     ref_audio=tmp_path / "nope.wav")
     assert "nope.wav" in str(e.value)
+
+
+# ---- cloned voice presets --------------------------------------------------
+# A cloned voice needs a model, a reference clip and a language code that all
+# have to agree. Asking a user to remember three coupled settings to hear a
+# French accent is how a working feature goes unused.
+
+def test_a_preset_names_a_cloned_voice():
+    v = audio.resolve_voice("fr-male")
+    assert v.model != audio.DEFAULT_TTS_MODEL
+    assert v.ref_audio and Path(v.ref_audio).exists()
+    assert v.voice == ""
+
+
+def test_the_preset_speaks_english_in_a_french_voice():
+    """The reference clip is French and the output is English: Chatterbox
+    clones across languages and the accent comes with the voice. Setting
+    lang_code to fr here would produce French, which is a different product."""
+    assert audio.resolve_voice("fr-male").lang_code == "en"
+
+
+def test_a_kokoro_voice_name_still_resolves_to_kokoro():
+    v = audio.resolve_voice("bm_george")
+    assert v.model == audio.DEFAULT_TTS_MODEL
+    assert v.voice == "bm_george"
+    assert v.ref_audio is None
+    assert v.lang_code == ""
+
+
+def test_the_reference_clips_ship_with_the_package():
+    """Otherwise the preset works only on the machine with the volume mounted."""
+    for name in audio.VOICE_PRESETS:
+        assert Path(audio.resolve_voice(name).ref_audio).exists()
+
+
+def test_an_unknown_voice_is_rejected_and_lists_what_exists():
+    with pytest.raises(ValueError) as e:
+        audio.resolve_voice("fr_male")
+    msg = str(e.value)
+    assert "fr_male" in msg
+    assert "fr-male" in msg and "bm_george" in msg
+
+
+@respx.mock
+def test_speaking_through_a_preset_sends_all_three_settings(tmp_path):
+    import json
+    route = respx.post(f"{BASE}/audio/speech").mock(
+        return_value=httpx.Response(200, content=wav_bytes()))
+    audio.speak_as("fr-male", "the tests all passed", out=tmp_path / "a.wav",
+                   base_url=BASE)
+    sent = json.loads(route.calls[0].request.read())
+    assert sent["lang_code"] == "en"
+    assert sent["ref_audio"].endswith("fr-male.wav")
+    assert "voice" not in sent
+    assert "Chatterbox" in sent["model"]
