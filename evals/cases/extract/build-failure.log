@@ -1,0 +1,17 @@
+[14:22:01] Resolving dependencies...
+[14:22:04] Downloaded 84 packages
+[14:22:04] Compiling h3_shaders.metal
+[14:22:09] Compiling h3_dit.c
+[14:22:11] Compiling h3_video_vae.c
+[14:22:14] Compiling h3_text_encoder.c
+[14:22:18] Linking libh3.a
+[14:22:19] Linking h3
+[14:22:19] ld: warning: object file was built for newer macOS version
+[14:22:20] Running tests
+[14:22:31] 1768 checks passed
+[14:22:31] Generating video: 512x512, 22 frames, 20 steps
+[14:24:02] text encoder 50/50
+[14:41:18] denoise 20/20
+[14:52:44] video VAE load 36/36
+[14:53:07] FATAL: cannot allocate 21474836480 bytes: Metal buffer exceeds device maximum
+[14:53:07] exiting with status 137

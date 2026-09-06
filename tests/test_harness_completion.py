@@ -108,3 +108,57 @@ def test_extract_returns_stripped_text_when_no_root_tag_is_present():
 def test_the_svg_and_web_system_prompts_forbid_external_references():
     assert "raster" in comp.SYSTEM["svg"].lower()
     assert "external" in comp.SYSTEM["web"].lower()
+
+
+# ---- context and the two new lanes -----------------------------------------
+
+@respx.mock
+def test_context_is_sent_as_material_separate_from_the_instruction():
+    import json
+    route = respx.post(f"{GW}/v1/chat/completions").mock(return_value=reply("137"))
+    comp.complete("What is the exit code?", model="m", gateway=GW,
+                  modality="extract", context="process exited with 137")
+    msgs = json.loads(route.calls[0].request.read())["messages"]
+    body = msgs[-1]["content"]
+    assert "process exited with 137" in body
+    assert "What is the exit code?" in body
+
+
+@respx.mock
+def test_the_instruction_comes_after_the_material():
+    """A small model that reads a long log and then a question does better than
+    one that reads a question, forgets it, and then reads a log."""
+    import json
+    route = respx.post(f"{GW}/v1/chat/completions").mock(return_value=reply("x"))
+    comp.complete("QUESTION", model="m", gateway=GW, modality="extract",
+                  context="MATERIAL")
+    body = json.loads(route.calls[0].request.read())["messages"][-1]["content"]
+    assert body.index("MATERIAL") < body.index("QUESTION")
+
+
+def test_the_extract_system_prompt_asks_for_the_answer_and_nothing_else():
+    """The whole value of the lane is a short exact answer that can be used
+    without parsing."""
+    text = comp.SYSTEM["extract"].lower()
+    assert "nothing else" in text or "only" in text
+    assert "explain" in text or "prose" in text or "preamble" in text
+
+
+def test_the_code_system_prompt_asks_for_code_only():
+    text = comp.SYSTEM["code"].lower()
+    assert "code" in text
+    assert "fence" in text or "prose" in text or "explanation" in text
+
+
+@respx.mock
+def test_a_case_with_no_context_sends_the_prompt_unchanged():
+    import json
+    route = respx.post(f"{GW}/v1/chat/completions").mock(return_value=reply("x"))
+    comp.complete("draw a gear", model="m", gateway=GW, modality="svg")
+    assert json.loads(route.calls[0].request.read())["messages"][-1]["content"] \
+        == "draw a gear"
+
+
+def test_code_is_recovered_from_a_fence_but_svg_markup_is_not_mangled():
+    assert "def f" in comp.artifact("```python\ndef f():\n    pass\n```", "code")
+    assert comp.artifact("<svg><rect/></svg>", "svg").startswith("<svg")

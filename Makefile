@@ -1,5 +1,5 @@
 # Entry points. `make check` is what CI would run and what to run before a commit.
-.PHONY: check test test-slow lint smoke clean
+.PHONY: check test test-slow lint smoke services clean
 
 check: lint test          ## static checks + unit tests (no services needed)
 
@@ -16,6 +16,9 @@ lint:                     ## shellcheck every script, syntax-check every one
 
 smoke:                    ## end-to-end; REQUIRES the services to be running
 	./scripts/smoke.sh
+
+services:                 ## install launchd units so the services survive a reboot
+	./scripts/launchd.sh install
 
 evals:                    ## compare candidates; REQUIRES the services running
 	uv run python -m evals.run --modality $(MODALITY) \

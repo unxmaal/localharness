@@ -85,6 +85,13 @@ _hf_usable() {
   [ -n "$free" ] || return 1
   [ "$free" -ge "$HF_MIN_FREE_GB" ] || return 1
 
+  # READABILITY, which is not implied by any of the above. A launchd agent gets
+  # "Operation not permitted" on /Volumes: macOS TCC protects removable volumes
+  # and a background job cannot ask for consent. The volume still stats, still
+  # reports free space, and still appears in /Volumes, so every other check here
+  # passes -- and then mlx_lm hangs forever inside os.listdir. Read one entry.
+  _hf_readable "$mp" || return 1
+
   # Writability is checked on the nearest existing ancestor, since the target
   # itself may not exist yet.
   anchor="$cand"
@@ -97,12 +104,24 @@ _hf_usable() {
   return 0
 }
 
+# Can we actually list this directory? See the note in _hf_usable.
+_hf_readable() {
+  ls "$1" >/dev/null 2>&1
+}
+
 _hf_fatal() {
   echo "FATAL: $1" >&2
   echo "       A location needs ${HF_MIN_FREE_GB}GB free (HF_MIN_FREE_GB)." >&2
   echo "       Weights are large: MiniMax-H3 alone is 134GiB, and a 70B at" >&2
   echo "       4-bit is ~40GB. Attach a volume, or lower the threshold if you" >&2
   echo "       know what you are fetching." >&2
+  echo >&2
+  echo "       If the volume IS attached and this still fails, it is probably" >&2
+  echo "       macOS TCC. A launchd agent or other background process gets" >&2
+  echo "       \"Operation not permitted\" on /Volumes even though the volume" >&2
+  echo "       stats fine. Grant Full Disk Access to the program launchd runs" >&2
+  echo "       (System Settings > Privacy & Security > Full Disk Access), or" >&2
+  echo "       start the services from a terminal that already has it." >&2
   return 1 2>/dev/null || exit 1
 }
 

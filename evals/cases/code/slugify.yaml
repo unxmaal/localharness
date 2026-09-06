@@ -1,0 +1,16 @@
+# Bread-and-butter string munging. Every model can nearly do this, and the
+# checks are chosen so that "nearly" is visible: the strip of leading and
+# trailing separators is the part that gets forgotten.
+id: slugify
+modality: code
+prompt: |
+  Write a Python function `slugify(text)` that lowercases the input, replaces
+  every run of non-alphanumeric characters with a single hyphen, and removes
+  any leading or trailing hyphens. Return only the function.
+assert:
+  checks:
+    - "slugify('Hello, World!') == 'hello-world'"
+    - "slugify('  A  B  ') == 'a-b'"
+    - "slugify('already-fine') == 'already-fine'"
+    - "slugify('--Mixed__Case--') == 'mixed-case'"
+    - "slugify('') == ''"

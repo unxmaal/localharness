@@ -225,7 +225,8 @@ def test_the_cases_that_ship_with_the_suite_actually_load():
     from pathlib import Path
     cases = load_cases(Path(__file__).resolve().parent.parent / "evals" / "cases")
     assert len(cases) >= 8
-    assert {c.modality for c in cases} == {"svg", "web", "image", "tts", "video"}
+    assert {c.modality for c in cases} == {
+        "svg", "web", "image", "tts", "video", "code", "extract"}
     assert all(c.prompt.strip() for c in cases)
 
 
@@ -579,3 +580,141 @@ def test_the_structural_html_check_runs_before_rendering():
     r = score(case, "I would rather not write a web page.")
     assert not r.passed
     assert "blank" not in r.detail.lower()
+
+
+# ---- context: input the model works ON, not just a prompt -------------------
+#
+# svg and image cases are instructions with no input. A log-triage case is the
+# opposite: the instruction is one line and the material is forty. Keeping them
+# separate means the prompt stays readable and the material can be swapped.
+
+def test_a_case_can_carry_context(tmp_path):
+    (tmp_path / "c.yaml").write_text(yaml.safe_dump({
+        "id": "c", "modality": "extract", "prompt": "Which line is the error?",
+        "context": "INFO ok\nERROR disk full\nINFO done",
+        "assert": {"must_contain": ["disk full"]}}))
+    c = load_cases(tmp_path)[0]
+    assert "disk full" in c.context
+    assert c.prompt == "Which line is the error?"
+
+
+def test_context_defaults_to_empty(tmp_path):
+    write_case(tmp_path, "x")
+    assert load_cases(tmp_path)[0].context == ""
+
+
+def test_context_can_come_from_a_file_beside_the_case(tmp_path):
+    """A realistic log is hundreds of lines and does not belong inline."""
+    (tmp_path / "build.log").write_text("INFO ok\nFATAL out of memory\n")
+    (tmp_path / "c.yaml").write_text(yaml.safe_dump({
+        "id": "c", "modality": "extract", "prompt": "What failed?",
+        "context_file": "build.log"}))
+    assert "out of memory" in load_cases(tmp_path)[0].context
+
+
+def test_a_missing_context_file_names_the_case(tmp_path):
+    (tmp_path / "c.yaml").write_text(yaml.safe_dump({
+        "id": "c", "modality": "extract", "prompt": "x",
+        "context_file": "nope.log"}))
+    with pytest.raises(ValueError, match="c.yaml"):
+        load_cases(tmp_path)
+
+
+def test_context_and_context_file_together_are_rejected(tmp_path):
+    (tmp_path / "c.yaml").write_text(yaml.safe_dump({
+        "id": "c", "modality": "extract", "prompt": "x",
+        "context": "inline", "context_file": "f.log"}))
+    with pytest.raises(ValueError, match="context"):
+        load_cases(tmp_path)
+
+
+# ---- extract: the small, fast lane -----------------------------------------
+
+def test_extract_is_scored_on_what_it_answered(tmp_path):
+    case = Case(id="e", modality="extract", prompt="Which line failed?",
+                context="INFO ok\nFATAL out of memory",
+                assertions={"must_contain": ["out of memory"]})
+    assert score(case, "The build failed: out of memory.").passed
+
+
+def test_extract_fails_when_the_answer_is_missing_the_fact(tmp_path):
+    case = Case(id="e", modality="extract", prompt="Which line failed?",
+                context="INFO ok\nFATAL out of memory",
+                assertions={"must_contain": ["out of memory"]})
+    r = score(case, "Something went wrong somewhere.")
+    assert not r.passed
+
+
+def test_extract_supports_an_exact_answer(tmp_path):
+    """The narrowest and most useful shape: one token out, nothing else."""
+    case = Case(id="e", modality="extract", prompt="What is the exit code?",
+                context="process exited with 137", assertions={"equals": "137"})
+    assert score(case, "137").passed
+    assert score(case, " 137\n").passed, "surrounding whitespace is not an error"
+    assert not score(case, "The exit code was 137.").passed
+
+
+def test_an_exact_answer_is_case_insensitive():
+    case = Case(id="e", modality="extract", prompt="x", context="y",
+                assertions={"equals": "FATAL"})
+    assert score(case, "fatal").passed
+
+
+def test_extract_publishes_no_metric_of_its_own():
+    """Its quality axis is latency, which every row already carries. Inventing
+    a score here would be decoration."""
+    case = Case(id="e", modality="extract", prompt="x", context="y",
+                assertions={"equals": "z"})
+    assert score(case, "z").metrics == {}
+
+
+# ---- code ------------------------------------------------------------------
+
+SLUGIFY = ('def slugify(text):\n    import re\n'
+           '    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")\n')
+
+
+def code_case(**over):
+    base = dict(id="slugify", modality="code",
+                prompt="Write slugify(text).",
+                assertions={"checks": ["slugify('A B') == 'a-b'"]})
+    base.update(over)
+    return Case(**base)
+
+
+def test_code_is_scored_by_running_it():
+    assert score(code_case(), SLUGIFY).passed
+
+
+def test_code_that_gets_it_wrong_fails_with_the_check_that_broke():
+    r = score(code_case(), 'def slugify(text):\n    return text\n')
+    assert not r.passed
+    assert "a-b" in r.detail
+
+
+def test_the_pass_fraction_reaches_the_row_for_ranking():
+    case = code_case(assertions={"checks": [
+        "slugify('A B') == 'a-b'", "slugify('--x--') == 'x'"]})
+    r = score(case, 'def slugify(text):\n    return text.lower().replace(" ", "-")\n')
+    assert r.metrics["code_pass"] == 0.5
+
+
+def test_code_pass_is_higher_is_better():
+    from evals.core import METRIC_DIRECTION
+    assert METRIC_DIRECTION["code_pass"] == "higher"
+
+
+def test_a_code_case_must_declare_checks(tmp_path):
+    """Without them the case passes every model."""
+    (tmp_path / "c.yaml").write_text(yaml.safe_dump({
+        "id": "c", "modality": "code", "prompt": "Write slugify."}))
+    with pytest.raises(ValueError, match="checks"):
+        load_cases(tmp_path)
+
+
+def test_checks_is_a_valid_assertion_only_for_code(tmp_path):
+    (tmp_path / "c.yaml").write_text(yaml.safe_dump({
+        "id": "c", "modality": "svg", "prompt": "x",
+        "assert": {"checks": ["1 == 1"]}}))
+    with pytest.raises(ValueError, match="checks"):
+        load_cases(tmp_path)

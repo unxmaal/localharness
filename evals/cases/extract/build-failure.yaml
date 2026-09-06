@@ -1,0 +1,10 @@
+# The daily job: forty lines of build output, one line that matters. A warning
+# sits three lines above the real failure, which is what a small model reaches
+# for when it is pattern-matching rather than reading.
+id: build-failure
+modality: extract
+prompt: What was the fatal error? Answer in one short sentence.
+context_file: build-failure.log
+assert:
+  must_contain: ["Metal buffer"]
+  must_not_contain: ["object file was built"]

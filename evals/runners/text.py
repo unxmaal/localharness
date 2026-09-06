@@ -28,6 +28,7 @@ class CompletionRunner(BaseRunner):
             text = completion.complete(case.prompt, model=self.candidate,
                                        gateway=self.gateway,
                                        modality=case.modality,
+                                       context=case.context,
                                        timeout=self.timeout)
         except completion.CompletionError as exc:
             # One dud must never abort a fifty-case run: every failure is a row.

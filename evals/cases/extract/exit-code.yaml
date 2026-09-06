@@ -1,0 +1,9 @@
+# The narrowest possible shape, and the most useful one: an answer the caller
+# can use without parsing. A model that says "The exit status was 137." has
+# failed at the thing this lane exists for.
+id: exit-code
+modality: extract
+prompt: What exit status did the process end with? Reply with the number only.
+context_file: build-failure.log
+assert:
+  equals: "137"

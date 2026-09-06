@@ -1,0 +1,17 @@
+# Parsing with an error path. A model that handles the happy cases and ignores
+# the invalid one is common, and a single check would not see it.
+id: parse-duration
+modality: code
+prompt: |
+  Write a Python function `parse_duration(s)` that turns a string like "1h30m",
+  "45s", "2h" or "90m" into a whole number of seconds. Units are h, m and s and
+  may appear in any combination in that order. Raise ValueError on anything
+  that does not match. Return only the function.
+assert:
+  checks:
+    - "parse_duration('1h30m') == 5400"
+    - "parse_duration('45s') == 45"
+    - "parse_duration('2h') == 7200"
+    - "parse_duration('1h2m3s') == 3723"
+    - "raises(parse_duration, 'banana', exc=ValueError)"
+    - "raises(parse_duration, '', exc=ValueError)"

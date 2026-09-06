@@ -1,0 +1,14 @@
+# grep output, and the question is which hit is the definition rather than a
+# use. Answering with a path is the whole job.
+id: pick-the-file
+modality: extract
+prompt: |
+  Which file defines the function, as opposed to calling it? Reply with the
+  file path only.
+context: |
+  harness/cli.py:118:    checked = image_check.check(out, expect=expect)
+  evals/core.py:64:    r = image_check.check(artifact, expect=expect)
+  harness/checks/image.py:31:def check(path: str | Path, expect: tuple[int, int] | None = None) -> ImageResult:
+  tests/test_evals_checks_image.py:22:    r = image_check.check(png)
+assert:
+  equals: "harness/checks/image.py"

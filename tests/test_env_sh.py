@@ -257,3 +257,34 @@ def test_helper_functions_print_nothing_but_their_answer(scratch):
     for line in p.stdout.splitlines():
         assert "=" not in line.split(":", 1)[1], (
             f"a helper leaked a variable declaration into its output: {line}")
+
+
+# ---- readability, not just existence ---------------------------------------
+#
+# A launchd agent gets "Operation not permitted" on /Volumes/Models: macOS TCC
+# protects removable volumes and a background job has no way to ask for
+# consent. The volume stats fine and appears in /Volumes, so every check this
+# script had said it was usable -- and mlx_lm then hung forever inside
+# os.listdir rather than reporting an error. A wedged server with no message is
+# the worst possible way to learn about a permission.
+
+def test_a_directory_that_cannot_be_listed_is_fatal(scratch, monkeypatch):
+    """Existence and writability are not enough; the guard must actually read
+    it."""
+    text = (REPO / "scripts" / "env.sh").read_text()
+    assert "_hf_readable" in text or "ls " in text or "listing" in text.lower(), (
+        "env.sh never tries to READ the directory it selects")
+
+
+def test_the_fatal_message_explains_the_tcc_case():
+    """Whoever hits this needs to be told what to click, not just that it
+    failed."""
+    text = (REPO / "scripts" / "env.sh").read_text()
+    assert "Full Disk Access" in text
+    assert "launchd" in text.lower() or "background" in text.lower()
+
+
+def test_a_readable_volume_still_passes(scratch):
+    code, home, err = run_env(hf_root=str(scratch / "hf"))
+    assert code == 0, err
+    assert home == str(scratch / "hf")

@@ -17,6 +17,7 @@ from pathlib import Path
 import yaml
 
 from harness.checks import adherence as adherence_check
+from harness.checks import code as code_check
 from harness.checks import html as html_check
 from harness.checks import image as image_check
 from harness.checks import ocr as ocr_check
@@ -32,6 +33,10 @@ class Case:
     id: str
     modality: str
     prompt: str
+    #: Material the model works ON, as opposed to the instruction. A log-triage
+    #: case is one line of instruction and forty of material; keeping them
+    #: apart leaves the prompt readable and the material swappable.
+    context: str = ""
     #: Generation knobs handed to the engine (width, steps, seed...).
     params: dict = field(default_factory=dict)
     #: Checks applied to whatever came back.
@@ -76,6 +81,24 @@ def _check_image(artifact, case: Case, adherence: str | None = None) -> CheckRes
     metrics.update(o.metrics)
     out.metrics = metrics
     return out
+
+
+def _check_code(artifact, case: Case) -> CheckResult:
+    """Runs the generated code. See harness/checks/code.py for what that means."""
+    r = code_check.check(artifact, case.assertions.get("checks") or [])
+    out = CheckResult(r.ok, r.reason, r.warnings)
+    out.metrics = r.metrics
+    return out
+
+
+def _check_extract(artifact, case: Case) -> CheckResult:
+    """The small, fast lane: read a blob, answer one narrow question.
+
+    There is nothing structural to check -- the answer is prose -- so the whole
+    verdict comes from the assertions, which score() applies. This exists so
+    the modality is judged rather than silently passing.
+    """
+    return CheckResult(True, "")
 
 
 def _check_tts(artifact, case: Case, transcriber=None) -> CheckResult:
@@ -149,11 +172,13 @@ CHECKERS = {
     "web": lambda a, c, **kw: _check_web(a, c),
     "image": lambda a, c, **kw: _check_image(a, c, kw.get("adherence")),
     "video": lambda a, c, **kw: _check_video(a, c),
+    "code": lambda a, c, **kw: _check_code(a, c),
+    "extract": lambda a, c, **kw: _check_extract(a, c),
     "tts": _check_tts,
 }
 # Modalities that may appear in a case file. video/tts/stt are declarable but
 # not yet judgeable; score() says so rather than passing them.
-MODALITIES = set(CHECKERS) | {"video", "tts", "stt"}
+MODALITIES = set(CHECKERS) | {"stt"}
 
 # Which way each metric runs. Not optional metadata: every metric was an error
 # rate to begin with, so "lower is better" got baked into both the ranking and
@@ -166,6 +191,7 @@ METRIC_DIRECTION = {
     "ink": "higher",       # fraction of an SVG canvas actually marked
     "motion": "higher",    # change between video frames
     "adherence": "higher",  # how well the picture matches the prompt
+    "code_pass": "higher",  # fraction of a code case's assertions that ran green
 }
 
 
@@ -187,7 +213,12 @@ PARAM_KEYS = {"width", "height", "steps", "seed", "guidance", "frames",
 # Assertions that need text to search. Declaring one on an image case can only
 # pass vacuously until the suite can OCR, so it is rejected rather than ignored.
 TEXT_ASSERTIONS = {"min_shapes", "must_contain", "must_not_contain"}
+#: `equals` is the narrowest and most useful shape for a delegated lookup: one
+#: token out and nothing else, so the answer can be used without parsing.
+EXTRACT_ASSERTIONS = {"must_contain", "must_not_contain", "equals"}
 ASSERTION_KEYS = {"svg": TEXT_ASSERTIONS, "web": TEXT_ASSERTIONS,
+                  "extract": EXTRACT_ASSERTIONS,
+                  "code": {"checks"},
                   # `text` is OCR'd out of the produced image; `max_cer` is how
                   # wrong the rendering may be. Not must_contain: there is no
                   # text to search, and that could only ever pass vacuously.
@@ -227,14 +258,35 @@ def load_cases(directory: str | Path) -> list[Case]:
             raise ValueError(
                 f"{path.name}: unknown modality '{modality}' "
                 f"(known: {', '.join(sorted(MODALITIES))})")
+        context = _load_context(path, raw)
         params = raw.get("params") or {}
         assertions = raw.get("assert") or {}
+        if modality == "code" and not assertions.get("checks"):
+            # A code case with nothing to run passes every model, which is
+            # worse than not having the case at all.
+            raise ValueError(f"{path.name}: a code case needs assert.checks")
         _reject_unknown(path, modality, "params", set(params), PARAM_KEYS)
         _reject_unknown(path, modality, "assert", set(assertions),
                         ASSERTION_KEYS.get(modality, set()))
         cases.append(Case(id=raw["id"], modality=modality, prompt=raw["prompt"],
-                          params=params, assertions=assertions, source=path))
+                          context=context, params=params,
+                          assertions=assertions, source=path))
     return cases
+
+
+def _load_context(path: Path, raw: dict) -> str:
+    """Inline `context:`, or `context_file:` resolved beside the case."""
+    inline, filename = raw.get("context"), raw.get("context_file")
+    if inline and filename:
+        raise ValueError(
+            f"{path.name}: set 'context' or 'context_file', not both")
+    if filename:
+        source = path.parent / filename
+        if not source.exists():
+            raise ValueError(f"{path.name}: context_file '{filename}' not found "
+                             f"beside the case")
+        return source.read_text()
+    return inline or ""
 
 
 def _reject_unknown(path: Path, modality: str, block: str, given: set,
@@ -291,6 +343,12 @@ def score(case: Case, artifact, **checker_kwargs) -> Result:
             return Result(case.id, "", False, 0.0, 0,
                           f"contains forbidden content: {needle}",
                           warnings=r.warnings)
+
+    exact = a.get("equals")
+    if exact is not None and str(artifact).strip().lower() != str(exact).strip().lower():
+        return Result(case.id, "", False, 0.0, 0,
+                      f"expected exactly {exact!r}, got {str(artifact).strip()!r}",
+                      warnings=r.warnings, metrics=metrics)
 
     return Result(case.id, "", True, 0.0, 0, "", warnings=r.warnings,
                   metrics=metrics)

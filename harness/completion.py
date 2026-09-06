@@ -27,11 +27,24 @@ SYSTEM = {
             "prose, no markdown fences. Start with <!doctype html>. The page "
             "must be self-contained: inline all CSS and JS, and do not "
             "reference any external URL."),
+    "code": ("You output working code and nothing else. No prose, no "
+             "explanation, no example usage. A single markdown fence is "
+             "acceptable. Include any imports the code needs. Do not write "
+             "tests; do not print anything."),
+    # The lane exists so a small model can be handed a log or a file listing
+    # instead of spending a large model's context on it. Its value is a short
+    # exact answer that the caller can use without parsing, so the prompt is
+    # blunt about that.
+    "extract": ("You answer with the fact asked for and nothing else. No "
+                "preamble, no explanation, no restating the question, no "
+                "prose around the answer. If the answer is a number, a "
+                "filename or a line, give exactly that. If the material does "
+                "not contain the answer, reply: NOT FOUND"),
 }
 NEUTRAL_SYSTEM = "Answer directly and concisely."
 
 # Root tags worth recovering, per modality.
-ROOT_TAGS = {"svg": ("svg",), "web": ("html", "!doctype")}
+ROOT_TAGS = {"svg": ("svg",), "web": ("html", "!doctype"), "code": ()}
 
 _START_HINT = "is the gateway up? ./scripts/serve-gateway.sh"
 
@@ -40,8 +53,20 @@ class CompletionError(RuntimeError):
     """The gateway did not return usable text."""
 
 
+def user_message(prompt: str, context: str = "") -> str:
+    """The material first, the instruction last.
+
+    A small model that reads a long log and THEN the question does better than
+    one that reads the question, works through forty lines, and has to
+    remember what it was looking for.
+    """
+    if not context:
+        return prompt
+    return f"{context.rstrip()}\n\n---\n\n{prompt}"
+
+
 def complete(prompt: str, model: str, gateway: str = DEFAULT_GATEWAY,
-             modality: str = "", timeout: float = 180.0,
+             modality: str = "", context: str = "", timeout: float = 180.0,
              temperature: float = 0.2, max_tokens: int = 4000) -> str:
     """Ask `model` for a completion. Returns the raw text, unrecovered."""
     payload = {
@@ -50,7 +75,7 @@ def complete(prompt: str, model: str, gateway: str = DEFAULT_GATEWAY,
         "max_tokens": max_tokens,
         "messages": [
             {"role": "system", "content": SYSTEM.get(modality, NEUTRAL_SYSTEM)},
-            {"role": "user", "content": prompt},
+            {"role": "user", "content": user_message(prompt, context)},
         ],
     }
     try:
@@ -80,6 +105,12 @@ def complete(prompt: str, model: str, gateway: str = DEFAULT_GATEWAY,
 
 
 def artifact(text: str, modality: str) -> str:
-    """Recovered artifact for a known modality; the raw text otherwise."""
-    tags = ROOT_TAGS.get(modality)
-    return extract(text, tags) if tags else text.strip()
+    """Recovered artifact for a known modality; the raw text otherwise.
+
+    `code` maps to an empty tag tuple rather than being absent: extract() with
+    no root tags still unwraps a markdown fence, which is exactly what code
+    needs and what a bare .strip() would leave in.
+    """
+    if modality not in ROOT_TAGS:
+        return text.strip()
+    return extract(text, ROOT_TAGS[modality])

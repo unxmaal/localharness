@@ -284,3 +284,34 @@ def test_the_adherence_flag_reaches_the_process_runner(tmp_path):
 def test_adherence_is_off_by_default(tmp_path):
     assert build_runner("mflux:z-image-turbo", "http://gw",
                         tmp_path).score_kwargs() == {}
+
+
+def test_a_disagreement_between_pass_rate_and_a_metric_is_called_out(capsys):
+    """Seen live on the code lane: local-mid passed 50% of cases to
+    local-large's 33%, while local-large wrote 75.6% correct code to
+    local-mid's 52.8%. A case with six strict checks fails outright on one
+    miss, so the binary view punishes the better model. Both numbers are true
+    and the reader has to be told they point different ways."""
+    s = summarize([
+        # Passes 2 of 3, but the one it fails it fails badly.
+        Result("a", "narrow", True, 1.0, 0, "", metrics={"code_pass": 1.0}),
+        Result("b", "narrow", True, 1.0, 0, "", metrics={"code_pass": 1.0}),
+        Result("c", "narrow", False, 1.0, 0, "x", metrics={"code_pass": 0.4}),
+        # Passes 1 of 3, but misses only one check in each of the others.
+        Result("a", "strong", True, 1.0, 0, "", metrics={"code_pass": 1.0}),
+        Result("b", "strong", False, 1.0, 0, "x", metrics={"code_pass": 0.9}),
+        Result("c", "strong", False, 1.0, 0, "x", metrics={"code_pass": 0.9}),
+    ])
+    report(s)
+    out = capsys.readouterr().out
+    assert "disagree" in out.lower()
+    assert "code_pass" in out
+
+
+def test_no_disagreement_note_when_the_orders_agree(capsys):
+    s = summarize([
+        Result("a", "best", True, 1.0, 0, "", metrics={"code_pass": 1.0}),
+        Result("a", "worst", False, 1.0, 0, "x", metrics={"code_pass": 0.2}),
+    ])
+    report(s)
+    assert "disagree" not in capsys.readouterr().out.lower()

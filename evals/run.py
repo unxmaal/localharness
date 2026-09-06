@@ -34,7 +34,7 @@ from evals.runners.speech import SpeechRunner
 from evals.runners.text import CompletionRunner
 
 ROOT = Path(__file__).resolve().parent
-TEXT_MODALITIES = {"svg", "web"}
+TEXT_MODALITIES = {"svg", "web", "code", "extract"}
 ALL_MODALITIES = sorted(MODALITIES)
 
 
@@ -122,8 +122,10 @@ def cases_for(candidate: str, cases: list[Case]) -> list[Case]:
 # Modalities whose output varies run to run. Diffusion varies enormously with
 # the seed and a language model at temperature 0.2 is not deterministic either;
 # Kokoro at a fixed voice and speed produces the same bytes every time, so
-# repeating it burns time averaging three identical numbers.
-STOCHASTIC_MODALITIES = {"image", "video", "svg", "web"}
+# repeating it burns time averaging three identical numbers. `extract` is
+# excluded for a different reason: the answer is one token and the whole point
+# of the lane is that it is cheap, so three samples of "137" buys nothing.
+STOCHASTIC_MODALITIES = {"image", "video", "svg", "web", "code"}
 
 
 def expand_cases(cases: list[Case], repeat: int) -> list[Case]:
@@ -237,7 +239,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {mark}  {r.seconds:6.2f}s  {case.id}{warn}{note}",
                   flush=True)
             if outdir and r.artifact and case.modality in TEXT_MODALITIES:
-                ext = "svg" if case.modality == "svg" else "html"
+                ext = {"svg": "svg", "web": "html", "code": "py"}.get(
+                    case.modality, "txt")
                 (outdir / f"{runner.candidate.replace('/', '_')}--{case.id}.{ext}"
                  ).write_text(r.artifact)
 
@@ -271,6 +274,33 @@ def split_candidates(raw: str) -> list[str]:
         else:
             out.append(chunk)
     return out
+
+
+def _note_ranking_disagreements(summary: dict, metric_names: list) -> None:
+    """Say so when the pass rate and a metric order the candidates differently.
+
+    Seen live on the code lane: one model passed 50% of cases to another's 33%
+    while writing 52.8% correct code to the other's 75.6%. A case with six
+    strict checks fails outright on a single miss, so the binary view punishes
+    the better model. Both numbers are true and neither is the answer on its
+    own, so the reader has to be told they point different ways rather than
+    reading the top line as a verdict.
+    """
+    if len(summary) < 2:
+        return
+    by_rate = [n for n, _ in sorted(summary.items(),
+                                    key=lambda kv: -kv[1]["pass_rate"])]
+    for metric in metric_names:
+        better = (min if direction_of(metric) == "lower" else max)
+        by_metric = [n for n, _ in sorted(
+            summary.items(),
+            key=lambda kv: kv[1]["metrics"].get(metric, 0.0),
+            reverse=direction_of(metric) == "higher")]
+        if by_metric[0] != by_rate[0] and better is not None:
+            print(f"\n  Note: pass rate and {metric} DISAGREE. {by_rate[0]} "
+                  f"passes more cases; {by_metric[0]} scores better on "
+                  f"{metric}. A case fails outright on one missed check, so "
+                  f"the pass rate punishes a strong model that slips once.")
 
 
 def report(summary: dict) -> None:
@@ -324,6 +354,8 @@ def report(summary: dict) -> None:
     for name, s in summary.items():
         for f in s["failures"]:
             print(f"  {name}: {f}")
+
+    _note_ranking_disagreements(summary, metric_names)
 
     # Only worth saying when nothing separates the candidates. With a quality
     # metric in hand the suite CAN rank them, and repeating the disclaimer

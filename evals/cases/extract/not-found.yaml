@@ -1,0 +1,9 @@
+# The case that separates a useful assistant from a confident one. The answer
+# is not in the material, and the correct response is to say so rather than to
+# invent a plausible version number.
+id: not-found
+modality: extract
+prompt: What version of CUDA does this build use? Reply with the version only.
+context_file: build-failure.log
+assert:
+  must_contain: ["NOT FOUND"]
