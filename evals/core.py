@@ -18,9 +18,10 @@ import yaml
 from harness.checks import html as html_check
 from harness.checks import image as image_check
 from harness.checks import ocr as ocr_check
+from harness.checks import render as render_check
 from harness.checks import speech as speech_check
 from harness.checks import svg as svg_check
-from harness.checks.base import CheckResult
+from harness.checks.base import CheckResult, extract
 
 
 @dataclass(frozen=True)
@@ -71,8 +72,28 @@ def _check_tts(artifact, case: Case, transcriber=None) -> CheckResult:
 # One entry point per modality, so two candidates are always judged by the same
 # ruler. Images were scored inside their runner and therefore lost every shared
 # assertion; that fork is what this dict closes.
+def _check_svg(artifact, case: Case) -> CheckResult:
+    """Parse it, then draw it.
+
+    Structural first, because unparseable markup should be reported as
+    unparseable rather than as something that failed to render. Then rasterize,
+    because well-formed SVG that draws nothing visible -- white on white, a
+    shape outside the viewBox, everything behind an opaque rect -- passes every
+    structural check there is.
+    """
+    r = svg_check.check(artifact)
+    if not r.ok:
+        return r
+
+    drawn = render_check.check(extract(artifact, ("svg",)))
+    out = CheckResult(drawn.ok, drawn.reason, r.warnings + drawn.warnings,
+                      shape_count=r.shape_count, has_title=r.has_title)
+    out.metrics = drawn.metrics
+    return out
+
+
 CHECKERS = {
-    "svg": lambda a, c, **kw: svg_check.check(a),
+    "svg": lambda a, c, **kw: _check_svg(a, c),
     "web": lambda a, c, **kw: html_check.check(a),
     "image": lambda a, c, **kw: _check_image(a, c),
     "tts": _check_tts,

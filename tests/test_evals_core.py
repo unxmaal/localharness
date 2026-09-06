@@ -372,3 +372,43 @@ def test_text_is_a_valid_assertion_for_image_cases(tmp_path):
         "assert": {"text": "OPEN", "max_cer": 0.3}}))
     c = load_cases(tmp_path)[0]
     assert c.assertions["text"] == "OPEN"
+
+
+# ---- svg is rasterized as well as parsed -----------------------------------
+
+BLANK_SVG = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+             '<circle cx="12" cy="12" r="10" fill="white"/>'
+             '<rect x="0" y="0" width="4" height="4" fill="white"/></svg>')
+
+
+def test_an_svg_that_parses_but_draws_nothing_visible_fails():
+    """Two shapes, valid markup, an xmlns, a viewBox -- and it renders as an
+    empty rectangle. Every structural check the suite had says it is fine."""
+    import shutil
+    if shutil.which("rsvg-convert") is None:
+        pytest.skip("needs rsvg-convert")
+    case = Case(id="s", modality="svg", prompt="a gear",
+                assertions={"min_shapes": 2})
+    r = score(case, BLANK_SVG)
+    assert not r.passed
+    assert "blank" in r.detail.lower()
+
+
+def test_a_drawn_svg_reports_its_ink_coverage():
+    import shutil
+    if shutil.which("rsvg-convert") is None:
+        pytest.skip("needs rsvg-convert")
+    case = Case(id="s", modality="svg", prompt="a gear",
+                assertions={"min_shapes": 1})
+    r = score(case, GOOD_SVG)
+    assert r.passed
+    assert r.metrics["ink"] > 0
+
+
+def test_the_structural_check_runs_first(tmp_path):
+    """Unparseable markup should be reported as unparseable, not as something
+    that failed to render."""
+    case = Case(id="s", modality="svg", prompt="a gear")
+    r = score(case, "<svg><circle</svg>")
+    assert not r.passed
+    assert "parse" in r.detail.lower()
