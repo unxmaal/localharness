@@ -40,7 +40,7 @@ KNOWN_VOICES = ("am_adam", "am_onyx", "bm_george", "af_sky", "ff_siwis")
 # am_onyx's 0.013. Re-derive with:
 #   uv run python -m evals.run --modality tts --out .logs/voices --candidates \
 #     'tts:mlx-community/Kokoro-82M-bf16,voice=bm_george,...'
-DEFAULT_VOICE = "bm_george"
+DEFAULT_KOKORO_VOICE = "bm_george"
 
 # Cloned voices. Kokoro has a fixed table and no French-accented English in it;
 # Chatterbox clones from a reference clip, and it clones ACROSS LANGUAGES -- the
@@ -59,6 +59,13 @@ VOICE_PRESETS = {
     "fr-male-2": {"model": CHATTERBOX_MULTILINGUAL, "clip": "fr-male-2.wav",
                   "lang_code": "en"},
 }
+
+
+# What `lh say` uses when nobody says otherwise. A cloned preset rather than a
+# Kokoro voice: Eric auditioned three French-accented candidates and kept this
+# one. It costs a Chatterbox load -- seconds rather than the sub-second Kokoro
+# reply -- which is the price of the voice being the one that was wanted.
+DEFAULT_VOICE = "fr-male"
 
 
 @dataclass
@@ -99,7 +106,7 @@ class AudioError(RuntimeError):
     """Anything that stops audio from being produced or understood."""
 
 
-def speak(text: str, out: str | Path, voice: str = DEFAULT_VOICE,
+def speak(text: str, out: str | Path, voice: str = DEFAULT_KOKORO_VOICE,
           speed: float = 1.0, model: str = DEFAULT_TTS_MODEL,
           base_url: str = DEFAULT_BASE_URL,
           timeout: float = 120.0,

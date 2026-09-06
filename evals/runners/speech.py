@@ -33,7 +33,7 @@ def parse_ear(ear: str) -> tuple[str, str]:
 
 class SpeechRunner(BaseRunner):
     def __init__(self, model: str, outdir: str | Path,
-                 voice: str = audio.DEFAULT_VOICE,
+                 voice: str = audio.DEFAULT_KOKORO_VOICE,
                  base_url: str = audio.DEFAULT_BASE_URL,
                  timeout: float = 120.0,
                  ref_audio: str | Path | None = None,

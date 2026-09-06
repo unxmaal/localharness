@@ -234,16 +234,19 @@ def cmd_say(a) -> int:
 def cmd_voices(a) -> int:
     """Three coupled settings behind one name is only usable if the names are
     discoverable."""
+    def star(name):
+        return " (default)" if name == audio.DEFAULT_VOICE else ""
+
     print("cloned (a reference clip, so any language, any accent):")
     for name in sorted(audio.VOICE_PRESETS):
         v = audio.resolve_voice(name)
-        print(f"  {name:12s} {v.model.split('/')[-1]}"
+        print(f"  {name}{star(name)}  {v.model.split('/')[-1]}"
               f"  speaks {v.lang_code}  from {Path(v.ref_audio).name}")
-    print("\nkokoro (a fixed table, English unless noted):")
+    print("\nkokoro (a fixed table, English unless noted; sub-second, "
+          "where a cloned voice takes seconds):")
     for name in audio.KNOWN_VOICES:
         note = "  French, female" if name == "ff_siwis" else ""
-        star = " (default)" if name == audio.DEFAULT_VOICE else ""
-        print(f"  {name}{star}{note}")
+        print(f"  {name}{star(name)}{note}")
     return 0
 
 

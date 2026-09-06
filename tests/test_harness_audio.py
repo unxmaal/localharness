@@ -158,16 +158,26 @@ def test_a_midstream_close_is_not_reported_as_a_server_that_is_down(tmp_path):
     assert "log" in msg.lower()
 
 
-def test_the_default_voice_is_one_that_is_actually_cached():
-    """af_heart is Kokoro's own default and is NOT in this machine's cache, so
-    every `lh say` failed with an opaque mid-stream close."""
-    assert audio.DEFAULT_VOICE in audio.KNOWN_VOICES
+def test_the_default_voice_resolves():
+    """It is a preset now, not a Kokoro table entry, so the check that it is
+    real is that it resolves rather than that it is in KNOWN_VOICES."""
+    v = audio.resolve_voice(audio.DEFAULT_VOICE)
+    assert v.model and Path(v.ref_audio or __file__).exists()
 
 
-def test_the_default_voice_is_male():
-    """A stated preference, and the tts eval says the best-scoring male voice
-    is also the best male voice available, so there is no tradeoff to make."""
-    assert audio.DEFAULT_VOICE.startswith(("am_", "bm_"))
+def test_the_default_voice_is_a_cloned_french_accent():
+    """A stated preference: Eric auditioned three and kept this one."""
+    assert audio.DEFAULT_VOICE in audio.VOICE_PRESETS
+    assert audio.resolve_voice(audio.DEFAULT_VOICE).lang_code == "en"
+
+
+def test_the_raw_kokoro_default_is_still_cached_and_male():
+    """speak() talks to the server directly and its default has to be a name
+    the server's voice table holds. af_heart is Kokoro's own default and is NOT
+    in this machine's cache, so every `lh say` failed with an opaque mid-stream
+    close until this was pinned."""
+    assert audio.DEFAULT_KOKORO_VOICE in audio.KNOWN_VOICES
+    assert audio.DEFAULT_KOKORO_VOICE.startswith(("am_", "bm_"))
 
 
 def test_known_voices_are_offered_so_a_typo_is_recoverable():
