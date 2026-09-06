@@ -60,11 +60,11 @@ def resolve(spec: str) -> Engine:
             f"unknown engine {engine!r}; known engines: "
             f"{', '.join(sorted(_BUILDERS))}. Expected {GRAMMAR}")
 
-    options = _parse_options(optstr, spec)
+    options = parse_options(optstr, spec)
     return _BUILDERS[engine](spec, model, options)
 
 
-def _parse_options(optstr: str, spec: str) -> dict:
+def parse_options(optstr: str, spec: str) -> dict:
     out: dict[str, str] = {}
     for chunk in optstr.split(","):
         chunk = chunk.strip()

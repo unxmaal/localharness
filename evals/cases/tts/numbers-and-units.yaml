@@ -1,0 +1,8 @@
+# Digits and units are where a TTS frontend either has a normalizer or does not.
+# The checker expands digits in the reference, so "200" scored against "two
+# hundred" is not an error; reading it as "two zero zero" is.
+id: numbers-and-units
+modality: tts
+prompt: The model ran at 42 tokens per second and used 9 gigabytes of memory.
+assert:
+  max_wer: 0.2

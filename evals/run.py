@@ -21,16 +21,46 @@ import sys
 import time
 from pathlib import Path
 
-from harness.engines import Engine, resolve
+from harness import audio
+from harness.engines import Engine, parse_options, resolve
 
 from evals.core import MODALITIES, Case, load_cases, summarize
 from evals.environment import capture
 from evals.runners.process import ProcessRunner
+from evals.runners.speech import SpeechRunner
 from evals.runners.text import CompletionRunner
 
 ROOT = Path(__file__).resolve().parent
 TEXT_MODALITIES = {"svg", "web"}
 ALL_MODALITIES = sorted(MODALITIES)
+
+
+PROCESS_ENGINES = ("mflux", "h3")
+TTS_OPTIONS = {"voice"}
+
+
+def kind_of(candidate: str) -> str:
+    """process, tts, or gateway. The prefix decides, so a typo in the rest of
+    the spec is reported as a bad spec rather than silently becoming a model
+    name the gateway has never heard of."""
+    head = candidate.split(":", 1)[0].split(",", 1)[0].strip()
+    if head in PROCESS_ENGINES:
+        return "process"
+    if head == "tts":
+        return "tts"
+    return "gateway"
+
+
+def modality_of(candidate: str) -> str | None:
+    """The one modality this candidate can run, or None for text candidates,
+    which can run all of them."""
+    kind = kind_of(candidate)
+    if kind == "tts":
+        return "tts"
+    if kind == "process":
+        engine = engine_for(candidate)
+        return engine.modality if engine else None
+    return None
 
 
 def engine_for(candidate: str) -> Engine | None:
@@ -40,10 +70,32 @@ def engine_for(candidate: str) -> Engine | None:
         return None
 
 
+def _speech_runner(candidate: str, outdir: Path | None) -> SpeechRunner:
+    _, _, rest = candidate.partition(":")
+    model, _, optstr = rest.partition(",")
+    try:
+        options = parse_options(optstr, candidate)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    unknown = set(options) - TTS_OPTIONS
+    if unknown:
+        raise SystemExit(f"unknown tts option(s) {', '.join(sorted(unknown))}; "
+                         f"allowed: {', '.join(sorted(TTS_OPTIONS))}")
+    if not model:
+        raise SystemExit("a tts candidate needs a model, e.g. "
+                         "tts:mlx-community/Kokoro-82M-bf16,voice=am_adam")
+    if outdir is None:
+        raise SystemExit(f"{candidate} writes audio; pass --out")
+    return SpeechRunner(model=model, outdir=outdir,
+                        voice=options.get("voice", audio.DEFAULT_VOICE))
+
+
 def build_runner(candidate: str, gateway: str, outdir: Path | None):
-    head = candidate.split(":", 1)[0].split(",", 1)[0]
-    if head not in ("mflux", "h3"):
+    kind = kind_of(candidate)
+    if kind == "gateway":
         return CompletionRunner(gateway, candidate)
+    if kind == "tts":
+        return _speech_runner(candidate, outdir)
     try:
         engine = resolve(candidate)
     except ValueError as exc:
@@ -57,10 +109,10 @@ def build_runner(candidate: str, gateway: str, outdir: Path | None):
 
 def cases_for(candidate: str, cases: list[Case]) -> list[Case]:
     """The cases this candidate can actually run."""
-    engine = engine_for(candidate)
-    if engine is None:
+    modality = modality_of(candidate)
+    if modality is None:
         return [c for c in cases if c.modality in TEXT_MODALITIES]
-    return [c for c in cases if c.modality == engine.modality]
+    return [c for c in cases if c.modality == modality]
 
 
 def select_cases(cases: list[Case], modality: str) -> list[Case]:
@@ -150,25 +202,53 @@ def split_candidates(raw: str) -> list[str]:
 
 
 def report(summary: dict) -> None:
-    print("\n" + "=" * 72)
-    print(f"{'candidate':30} {'pass':>7} {'rate':>6} {'median':>8} "
-          f"{'total':>8} {'peak':>9}")
-    for name, s in sorted(summary.items(),
-                          key=lambda kv: (-kv[1]["pass_rate"],
-                                          kv[1]["median_s"])):
+    """Print the comparison, ordered by what actually distinguishes candidates.
+
+    Pass rate first, then the quality metrics, then latency. Sorting on latency
+    before quality is how a faster-but-worse candidate ends up on the top line.
+    """
+    metric_names = sorted({name for s in summary.values()
+                           for name in s.get("metrics", {})})
+
+    def rank(item):
+        _, s = item
+        # Every metric so far is an error rate, so lower is better. A metric
+        # where higher is better would need a direction declared with it.
+        return (-s["pass_rate"],
+                [s["metrics"].get(n, 0.0) for n in metric_names],
+                s["median_s"])
+
+    header = f"{'candidate':30} {'pass':>7} {'rate':>6} {'median':>8} {'peak':>9}"
+    for name in metric_names:
+        header += f" {name:>7} {name + '.max':>11}"
+    print("\n" + "=" * len(header))
+    print(header)
+
+    for name, s in sorted(summary.items(), key=rank):
         peak = f"{s['peak_kb'] / 1024 / 1024:.1f}GiB" if s["peak_kb"] else "-"
-        print(f"{name:30} {s['passed']:>3}/{s['total']:<3} "
-              f"{s['pass_rate']:>6.0%} {s['median_s']:>7.2f}s "
-              f"{s['total_s']:>7.1f}s {peak:>9}")
+        line = (f"{name:30} {s['passed']:>3}/{s['total']:<3} "
+                f"{s['pass_rate']:>6.0%} {s['median_s']:>7.2f}s {peak:>9}")
+        for metric in metric_names:
+            value = s["metrics"].get(metric)
+            worst = s.get("metrics_worst", {}).get(metric)
+            line += (f" {value:>7.3f}" if value is not None else f" {'-':>7}")
+            line += (f" {worst:>11.3f}" if worst is not None else f" {'-':>11}")
+        print(line)
+
     for name, s in summary.items():
         for f in s["failures"]:
             print(f"  {name}: {f}")
-    # The suite separates working from broken. It does not rank two candidates
-    # that both work, and saying so beats letting a median latency next to a
-    # 100% pass rate look like a verdict.
-    if len([s for s in summary.values() if s["pass_rate"] == 1.0]) > 1:
-        print("\nNote: more than one candidate passed everything. These checks "
-              "are a competence gate, not a quality ranking.")
+
+    # Only worth saying when nothing separates the candidates. With a quality
+    # metric in hand the suite CAN rank them, and repeating the disclaimer
+    # would train the reader to skip it.
+    all_pass = [s for s in summary.values() if s["pass_rate"] == 1.0]
+    distinct = len({tuple(sorted(s["metrics"].items()))
+                    for s in summary.values()}) > 1
+    if len(all_pass) > 1 and not distinct:
+        print("\nNote: every candidate passed everything and no metric "
+              "separates them. These checks are a competence gate, not a "
+              "quality ranking.")
 
 
 if __name__ == "__main__":

@@ -45,6 +45,15 @@ class BaseRunner:
         raise NotImplementedError(
             f"{type(self).__name__} must implement generate()")
 
+    def score_kwargs(self) -> dict:
+        """Extra arguments for the checker.
+
+        A checker for a binary artifact may need a model of its own -- speech
+        needs a transcriber -- and it should use the same server the runner
+        was pointed at rather than a module default.
+        """
+        return {}
+
     def run(self, case: Case) -> Result:
         started = time.monotonic()
         try:
@@ -55,7 +64,7 @@ class BaseRunner:
                           exc.peak_kb, exc.detail)
         elapsed = time.monotonic() - started
 
-        row = score(case, artifact)
+        row = score(case, artifact, **self.score_kwargs())
         row.candidate = self.candidate
         row.seconds = round(elapsed, 3)
         row.peak_kb = peak_kb

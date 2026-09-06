@@ -224,5 +224,78 @@ def test_the_cases_that_ship_with_the_suite_actually_load():
     from pathlib import Path
     cases = load_cases(Path(__file__).resolve().parent.parent / "evals" / "cases")
     assert len(cases) >= 8
-    assert {c.modality for c in cases} == {"svg", "web", "image"}
+    assert {c.modality for c in cases} == {"svg", "web", "image", "tts"}
     assert all(c.prompt.strip() for c in cases)
+
+
+# ---- metrics: the quality axis --------------------------------------------
+#
+# A pass rate separates working from broken. It cannot order two candidates
+# that both work, which is exactly the situation the suite kept landing in.
+# Metrics are numbers a checker produces alongside the verdict.
+
+def test_a_result_carries_metrics_from_its_checker(tmp_path):
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(b"x" * 9000)
+    case = Case(id="s", modality="tts", prompt="the quick brown fox",
+                assertions={"max_wer": 0.5})
+    import harness.checks.speech as speech
+    r = score(case, wav, transcriber=lambda p: "the quick brown box")
+    assert r.passed
+    assert r.metrics["wer"] == 0.25
+    assert speech  # the checker used
+
+
+def test_metrics_survive_a_failing_row(tmp_path):
+    """A candidate that fails the threshold still has a number worth seeing."""
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(b"x" * 9000)
+    case = Case(id="s", modality="tts", prompt="the quick brown fox",
+                assertions={"max_wer": 0.1})
+    r = score(case, wav, transcriber=lambda p: "a slow green ox")
+    assert not r.passed
+    assert r.metrics["wer"] >= 1.0
+
+
+def test_a_quality_metric_is_averaged_not_medianed():
+    """Latency takes a median so one cold model load cannot decide the winner.
+    A quality metric is the opposite: most cases score a clean 0.0 and the
+    whole signal is in the few that do not, so a median reports 0.0 for a
+    candidate that failed a case outright."""
+    clean = [Result(str(i), "a", True, 1.0, 0, "", metrics={"wer": 0.0})
+             for i in range(4)]
+    rows = clean + [Result("x", "a", True, 1.0, 0, "", metrics={"wer": 0.5})]
+    assert summarize(rows)["a"]["metrics"]["wer"] == 0.1
+
+
+def test_the_worst_case_of_each_metric_is_kept_so_an_outlier_is_visible():
+    rows = [Result("a", "k", True, 1.0, 0, "", metrics={"wer": 0.0}),
+            Result("b", "k", True, 1.0, 0, "", metrics={"wer": 0.4})]
+    assert summarize(rows)["k"]["metrics_worst"]["wer"] == 0.4
+
+
+def test_a_candidate_with_no_metrics_reports_none_rather_than_zero():
+    """Zero would rank an unmeasured candidate first."""
+    s = summarize([Result("a", "x", True, 1.0, 0, "")])
+    assert s["x"]["metrics"] == {}
+
+
+def test_metrics_are_json_serializable():
+    json.dumps(summarize([Result("a", "x", True, 1.0, 0, "",
+                                 metrics={"wer": 0.1})]))
+
+
+def test_max_wer_is_a_valid_assertion_for_tts(tmp_path):
+    (tmp_path / "t.yaml").write_text(yaml.safe_dump({
+        "id": "t", "modality": "tts", "prompt": "hello there",
+        "assert": {"max_wer": 0.2}, "params": {"speed": 1.0}}))
+    c = load_cases(tmp_path)[0]
+    assert c.assertions["max_wer"] == 0.2
+
+
+def test_min_shapes_is_not_a_valid_assertion_for_tts(tmp_path):
+    (tmp_path / "t.yaml").write_text(yaml.safe_dump({
+        "id": "t", "modality": "tts", "prompt": "hello",
+        "assert": {"min_shapes": 2}}))
+    with pytest.raises(ValueError, match="min_shapes"):
+        load_cases(tmp_path)

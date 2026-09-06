@@ -1,0 +1,5 @@
+id: pangram
+modality: tts
+prompt: The quick brown fox jumps over the lazy dog.
+assert:
+  max_wer: 0.15

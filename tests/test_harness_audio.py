@@ -164,5 +164,11 @@ def test_the_default_voice_is_one_that_is_actually_cached():
     assert audio.DEFAULT_VOICE in audio.KNOWN_VOICES
 
 
+def test_the_default_voice_is_male():
+    """A stated preference, and the tts eval says the best-scoring male voice
+    is also the best male voice available, so there is no tradeoff to make."""
+    assert audio.DEFAULT_VOICE.startswith(("am_", "bm_"))
+
+
 def test_known_voices_are_offered_so_a_typo_is_recoverable():
     assert "am_adam" in audio.KNOWN_VOICES and "ff_siwis" in audio.KNOWN_VOICES

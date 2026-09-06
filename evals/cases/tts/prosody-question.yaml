@@ -1,0 +1,7 @@
+# A question and a statement should produce the same words. If intonation
+# costs words, the model is failing on something the transcript can see.
+id: prosody-question
+modality: tts
+prompt: Would you like me to run the eval suite now, or wait until the video finishes?
+assert:
+  max_wer: 0.2

@@ -1,0 +1,8 @@
+# Acronyms and product names are the daily traffic for this stack: it reads
+# build output aloud. A voice that says "em ell ex" is correct; one that says
+# "mlex" is not, and the transcriber will disagree with both.
+id: technical-terms
+modality: tts
+prompt: The gateway is up on port four thousand and the tests all passed.
+assert:
+  max_wer: 0.2

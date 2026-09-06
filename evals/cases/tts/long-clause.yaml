@@ -1,0 +1,10 @@
+# Length is its own failure mode: segment boundaries are where a TTS model
+# drops or repeats words, and a short sentence never reaches one.
+id: long-clause
+modality: tts
+prompt: >-
+  Before you start the download, stop the containers and any other application
+  holding memory, because the checkpoint is larger than this machine has and the
+  weights are streamed from the solid state drive while it runs.
+assert:
+  max_wer: 0.2
