@@ -22,6 +22,13 @@ DEFAULT_TTS_MODEL = "mlx-community/Kokoro-82M-bf16"
 # A HuggingFace repo id, never "whisper-1": mlx_audio rejects the OpenAI model
 # name outright. This is why port 8890 matters to voicemode's provider probe.
 DEFAULT_STT_MODEL = "mlx-community/parakeet-tdt-0.6b-v2"
+# Parakeet is English-only and there is no way around that: it hears French as
+# English words that rhyme. Whisper is the multilingual ear, and it has to be
+# called in-process because mlx_audio's server cannot load it -- the mlx repos
+# ship weights.npz and config.json but no preprocessor_config.json, which the
+# server demands. mlx_whisper wants exactly what those repos hold.
+DEFAULT_WHISPER_MODEL = "mlx-community/whisper-large-v3-mlx"
+STT_BACKENDS = ("server", "whisper")
 # Kokoro's own default is af_heart, which is NOT in this machine's cache: only
 # these five voice packs were pulled, and HF_HUB_OFFLINE=1 stops the server
 # fetching a sixth. Asking for an absent voice fails as a mid-stream close with
@@ -137,3 +144,91 @@ def record_argv(out: str | Path, seconds: float) -> list[str]:
 def play_argv(path: str | Path) -> list[str]:
     """afplay ships with macOS, so this one needs no PATH hedging."""
     return ["/usr/bin/afplay", str(path)]
+
+
+# ---------------------------------------------------------------------------
+# The local whisper backend
+# ---------------------------------------------------------------------------
+
+def _whisper_module():
+    """Imported here, not at module scope, for two reasons: `lh say` should not
+    pay numba's import cost to speak a sentence, and a test needs somewhere to
+    hang a stub."""
+    import mlx_whisper
+    return mlx_whisper
+
+
+def transcribe_whisper(path: str | Path,
+                       model: str = DEFAULT_WHISPER_MODEL,
+                       language: str = "") -> str:
+    """Transcribe in-process with mlx_whisper. Returns the text, stripped.
+
+    Bypasses the audio server entirely, so it costs a model load per process
+    rather than per request. That is the right trade for an eval, which runs
+    one process over a whole corpus, and the wrong one for a chat loop.
+
+    `language` pins the decode. Whisper auto-detects when it is empty, which is
+    fine on a paragraph and unreliable on a five-second clip -- and a French
+    corpus scored as English produces a WER near 1.0 that looks like a bad TTS
+    model rather than a misconfigured ear.
+    """
+    path = Path(path)
+    if not path.exists():
+        # A three gigabyte load is a slow way to learn the path was wrong.
+        raise AudioError(f"no audio file at {path}")
+
+    try:
+        whisper = _whisper_module()
+    except ImportError as exc:
+        raise AudioError(
+            f"the whisper backend needs the mlx-whisper package: {exc} "
+            "(uv add mlx-whisper)") from exc
+
+    kwargs = {"path_or_hf_repo": model}
+    # Not the same as omitting it: mlx_whisper would take "" as a language code.
+    if language:
+        kwargs["language"] = language
+    try:
+        result = whisper.transcribe(str(path), **kwargs)
+    except Exception as exc:
+        # Everything downstream catches AudioError to tell a broken instrument
+        # apart from a candidate that scored 100% error. A raw traceback here
+        # would abort the run instead of recording a row.
+        raise AudioError(f"whisper failed on {path.name}: {exc}") from exc
+
+    text = result.get("text") if isinstance(result, dict) else None
+    if text is None:
+        raise AudioError(f"whisper returned no text: {result!r}")
+    return text.strip()
+
+
+def transcriber(backend: str = "server", model: str = "", language: str = "",
+                base_url: str = DEFAULT_BASE_URL, timeout: float = 120.0):
+    """Build the callable that reads audio back, as `check()` wants it.
+
+    The backend is part of the measurement, not an implementation detail: a WER
+    from Parakeet and a WER from Whisper are not the same number, so the
+    returned function carries a `label` saying which ear produced it.
+    """
+    if backend not in STT_BACKENDS:
+        raise ValueError(
+            f"unknown stt backend {backend!r}; "
+            f"expected one of {', '.join(STT_BACKENDS)}")
+
+    if backend == "whisper":
+        model = model or DEFAULT_WHISPER_MODEL
+
+        def _run(path):
+            return transcribe_whisper(path, model=model, language=language)
+    else:
+        model = model or DEFAULT_STT_MODEL
+
+        def _run(path):
+            return transcribe(path, model=model, base_url=base_url,
+                              timeout=timeout)
+
+    _run.backend = backend
+    _run.model = model
+    label = f"{backend}:{model.split('/')[-1]}"
+    _run.label = f"{label}/{language}" if language else label
+    return _run

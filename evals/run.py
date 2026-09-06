@@ -41,6 +41,7 @@ ALL_MODALITIES = sorted(MODALITIES)
 
 PROCESS_ENGINES = ("mflux", "h3")
 TTS_OPTIONS = {"voice"}
+STT_OPTIONS = {"backend", "language"}
 
 
 def kind_of(candidate: str) -> str:
@@ -95,6 +96,32 @@ def _speech_runner(candidate: str, outdir: Path | None) -> SpeechRunner:
                         voice=options.get("voice", ""))
 
 
+def _transcription_runner(candidate: str) -> TranscriptionRunner:
+    _, _, rest = candidate.partition(":")
+    model, _, optstr = rest.partition(",")
+    model = model.strip()
+    try:
+        options = parse_options(optstr, candidate)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    unknown = set(options) - STT_OPTIONS
+    if unknown:
+        raise SystemExit(f"unknown stt option(s) {', '.join(sorted(unknown))}; "
+                         f"allowed: {', '.join(sorted(STT_OPTIONS))}")
+    if not model:
+        raise SystemExit("an stt candidate needs a model, e.g. "
+                         "stt:mlx-community/parakeet-tdt-0.6b-v2")
+    try:
+        return TranscriptionRunner(
+            model=model,
+            backend=options.get("backend", "server"),
+            language=options.get("language", ""))
+    except ValueError as exc:
+        # A bad backend is a bad candidate string, and gets the same treatment
+        # as a bad engine spec: named before the corpus runs, not a traceback.
+        raise SystemExit(f"{candidate}: {exc}") from exc
+
+
 def build_runner(candidate: str, gateway: str, outdir: Path | None,
                  adherence: str | None = None):
     kind = kind_of(candidate)
@@ -103,11 +130,7 @@ def build_runner(candidate: str, gateway: str, outdir: Path | None,
     if kind == "tts":
         return _speech_runner(candidate, outdir)
     if kind == "stt":
-        model = candidate.partition(":")[2].strip()
-        if not model:
-            raise SystemExit("an stt candidate needs a model, e.g. "
-                             "stt:mlx-community/parakeet-tdt-0.6b-v2")
-        return TranscriptionRunner(model=model)
+        return _transcription_runner(candidate)
     try:
         engine = resolve(candidate)
     except ValueError as exc:

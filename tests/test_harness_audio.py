@@ -184,3 +184,146 @@ def test_an_empty_voice_is_omitted_rather_than_sent_blank(tmp_path):
         return_value=httpx.Response(200, content=wav_bytes()))
     audio.speak("hi", out=tmp_path / "a.wav", base_url=BASE, voice="")
     assert "voice" not in json.loads(route.calls[0].request.read())
+
+
+# ---- the local whisper backend --------------------------------------------
+# Parakeet is English-only: it hears cloned French as "Monjour passed in March",
+# which measures nothing. Both multilingual candidates fail THROUGH mlx_audio's
+# server -- whisper repos ship no preprocessor_config.json, and Voxtral rejects
+# the word_timestamps argument the server passes unconditionally -- so this
+# backend bypasses the server and calls mlx_whisper in-process.
+
+class FakeWhisper:
+    """Stands in for the mlx_whisper module. Records what it was asked."""
+
+    def __init__(self, text=" bonjour le monde "):
+        self.text = text
+        self.calls = []
+
+    def transcribe(self, path, **kw):
+        self.calls.append((path, kw))
+        return {"text": self.text, "language": kw.get("language") or "en"}
+
+
+@pytest.fixture
+def fake_whisper(monkeypatch):
+    fake = FakeWhisper()
+    monkeypatch.setattr(audio, "_whisper_module", lambda: fake)
+    return fake
+
+
+def test_whisper_transcribe_returns_the_stripped_text(tmp_path, fake_whisper):
+    clip = tmp_path / "c.wav"
+    clip.write_bytes(wav_bytes())
+    assert audio.transcribe_whisper(clip) == "bonjour le monde"
+
+
+def test_whisper_passes_the_repo_as_a_path_or_hf_repo(tmp_path, fake_whisper):
+    """mlx_whisper takes the repo under its own keyword, not `model`. Getting
+    this wrong silently transcribes with tiny, whose French is unusable."""
+    clip = tmp_path / "c.wav"
+    clip.write_bytes(wav_bytes())
+    audio.transcribe_whisper(clip, model="mlx-community/whisper-large-v3-mlx")
+    _, kw = fake_whisper.calls[0]
+    assert kw["path_or_hf_repo"] == "mlx-community/whisper-large-v3-mlx"
+
+
+def test_whisper_pins_the_language_when_one_is_given(tmp_path, fake_whisper):
+    """Auto-detection on a short clip picks the wrong language often enough to
+    poison a corpus rate; a French eval knows it is French."""
+    clip = tmp_path / "c.wav"
+    clip.write_bytes(wav_bytes())
+    audio.transcribe_whisper(clip, language="fr")
+    assert fake_whisper.calls[0][1]["language"] == "fr"
+
+
+def test_whisper_omits_the_language_when_none_is_given(tmp_path, fake_whisper):
+    """Passing language="" is not the same as not passing one: mlx_whisper
+    would take the empty string as a language code."""
+    clip = tmp_path / "c.wav"
+    clip.write_bytes(wav_bytes())
+    audio.transcribe_whisper(clip, language="")
+    assert "language" not in fake_whisper.calls[0][1]
+
+
+def test_whisper_on_a_missing_file_fails_before_loading_the_model(tmp_path):
+    """A 3GB load is a slow way to find out the path was wrong."""
+    with pytest.raises(audio.AudioError) as e:
+        audio.transcribe_whisper(tmp_path / "nope.wav")
+    assert "nope.wav" in str(e.value)
+
+
+def test_whisper_names_the_package_when_it_is_not_installed(tmp_path,
+                                                            monkeypatch):
+    def boom():
+        raise ImportError("No module named 'mlx_whisper'")
+    monkeypatch.setattr(audio, "_whisper_module", boom)
+    clip = tmp_path / "c.wav"
+    clip.write_bytes(wav_bytes())
+    with pytest.raises(audio.AudioError) as e:
+        audio.transcribe_whisper(clip)
+    assert "mlx-whisper" in str(e.value)
+
+
+def test_a_whisper_failure_is_an_audio_error_not_a_raw_traceback(tmp_path,
+                                                                 monkeypatch):
+    """Every other transcription failure arrives as AudioError, and the checker
+    catches exactly that to record 'broken instrument' rather than 100% error."""
+    class Boom:
+        def transcribe(self, *a, **kw):
+            raise RuntimeError("weights not found")
+    monkeypatch.setattr(audio, "_whisper_module", lambda: Boom())
+    clip = tmp_path / "c.wav"
+    clip.write_bytes(wav_bytes())
+    with pytest.raises(audio.AudioError) as e:
+        audio.transcribe_whisper(clip)
+    assert "weights not found" in str(e.value)
+
+
+def test_the_default_whisper_model_is_multilingual():
+    """The whole reason this backend exists. tiny.en or any .en repo cannot
+    score French however fast it is."""
+    assert not audio.DEFAULT_WHISPER_MODEL.endswith(".en")
+    assert "/" in audio.DEFAULT_WHISPER_MODEL
+
+
+# ---- picking a backend ----------------------------------------------------
+
+def test_transcriber_defaults_to_the_server_backend(tmp_path):
+    fn = audio.transcriber()
+    assert fn.backend == "server"
+
+
+def test_transcriber_whisper_backend_calls_whisper(tmp_path, fake_whisper):
+    clip = tmp_path / "c.wav"
+    clip.write_bytes(wav_bytes())
+    fn = audio.transcriber(backend="whisper", language="fr")
+    assert fn(clip) == "bonjour le monde"
+    assert fake_whisper.calls[0][1]["language"] == "fr"
+
+
+@respx.mock
+def test_transcriber_server_backend_calls_the_server(tmp_path):
+    clip = tmp_path / "c.wav"
+    clip.write_bytes(wav_bytes())
+    respx.post(f"{BASE}/audio/transcriptions").mock(
+        return_value=httpx.Response(200, json={"text": "hello"}))
+    fn = audio.transcriber(backend="server", base_url=BASE)
+    assert fn(clip) == "hello"
+
+
+def test_an_unknown_backend_is_rejected_by_name():
+    with pytest.raises(ValueError) as e:
+        audio.transcriber(backend="wisper")
+    assert "wisper" in str(e.value)
+    assert "whisper" in str(e.value)
+
+
+def test_the_transcriber_carries_a_label_for_the_results_table(tmp_path):
+    """Two rows scored by different ears are not comparable, so the report has
+    to be able to say which one read them back."""
+    fn = audio.transcriber(backend="whisper",
+                           model="mlx-community/whisper-large-v3-mlx",
+                           language="fr")
+    assert "whisper-large-v3-mlx" in fn.label
+    assert "fr" in fn.label

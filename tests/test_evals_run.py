@@ -376,3 +376,33 @@ def test_a_tts_candidate_without_a_voice_asks_for_none(tmp_path):
     """Defaulting to a Kokoro voice name would send bm_george to Qwen3-TTS."""
     assert build_runner("tts:mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16",
                         "http://gw", tmp_path).voice == ""
+
+
+# ---- stt backends and options ---------------------------------------------
+
+def test_an_stt_candidate_takes_a_backend_and_a_language():
+    r = build_runner(
+        "stt:mlx-community/whisper-large-v3-mlx,backend=whisper,language=fr",
+        "http://gw", None)
+    assert r.backend == "whisper"
+    assert r.language == "fr"
+    assert r.model == "mlx-community/whisper-large-v3-mlx"
+    assert r.candidate == "whisper-large-v3-mlx/fr"
+
+
+def test_an_stt_candidate_still_defaults_to_the_server_backend():
+    assert build_runner("stt:some/model", "http://gw", None).backend == "server"
+
+
+def test_an_unknown_stt_option_is_named_before_the_run(tmp_path):
+    with pytest.raises(SystemExit) as e:
+        build_runner("stt:some/model,lang=fr", "http://gw", None)
+    assert "lang" in str(e.value)
+
+
+def test_an_unknown_stt_backend_is_reported_as_a_bad_spec():
+    """A ValueError from deep in audio.transcriber would print a traceback; a
+    bad candidate string deserves the same treatment as a bad engine spec."""
+    with pytest.raises(SystemExit) as e:
+        build_runner("stt:some/model,backend=wisper", "http://gw", None)
+    assert "wisper" in str(e.value)
