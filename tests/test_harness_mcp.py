@@ -22,23 +22,42 @@ def spy(monkeypatch, tmp_path):
     calls = []
 
     def fake_lh(argv, timeout=None):
+        """What `lh` ACTUALLY does, which is not what I first assumed.
+
+        `lh svg` and `lh web` always write a file and print its PATH; only
+        `lh code` prints content to stdout. The first version of this fake
+        returned markup on stdout, which is what I believed rather than what
+        the CLI does, so the tests passed while the tool handed callers a path
+        string where an SVG document should have been. Caught live over the
+        LAN, not here."""
         calls.append(argv)
-        out = argv[argv.index("-o") + 1] if "-o" in argv else None
-        if out:
-            open(out, "wb").write(b"\x89PNG\r\n\x1a\n" + b"x" * 200)
-            return out
-        return "<svg xmlns='http://www.w3.org/2000/svg'/>"
+        assert "-o" in argv, "every verb should be given an explicit -o"
+        out = argv[argv.index("-o") + 1]
+        body = (b"\x89PNG\r\n\x1a\n" + b"x" * 200 if argv[1] == "image"
+                else b"<svg xmlns='http://www.w3.org/2000/svg'/>")
+        open(out, "wb").write(body)
+        return out
 
     monkeypatch.setattr(mcp_server, "run_lh", fake_lh)
     monkeypatch.setattr(mcp_server, "OUTDIR", tmp_path)
     return calls
 
 
-def test_svg_shells_out_to_lh(spy):
+def test_svg_returns_the_markup_not_the_path_it_was_written_to(spy):
+    """`lh svg` prints where it put the file. A caller on another machine
+    cannot open that path, and an agent asking for an SVG wants the document."""
     out = mcp_server.svg("two concentric gears")
-    assert "<svg" in out
+    assert out.startswith("<svg"), out
     assert spy[0][:2] == ["lh", "svg"]
     assert "two concentric gears" in spy[0]
+
+
+def test_the_artifact_is_kept_on_the_serving_machine_too(spy, tmp_path):
+    """Returned by value AND left on disk: the text is what the caller wanted,
+    the file is what makes a bad result inspectable afterwards."""
+    mcp_server.svg("a gear")
+    written = list(tmp_path.glob("svg-*.svg"))
+    assert written and written[0].read_text().startswith("<svg")
 
 
 def test_web_and_code_are_the_same_shape(spy):

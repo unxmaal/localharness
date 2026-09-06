@@ -102,11 +102,26 @@ def _out(kind: str, suffix: str) -> Path:
     return OUTDIR / f"{kind}-{stamp}{suffix}"
 
 
+SUFFIX = {"svg": ".svg", "web": ".html", "code": ".txt"}
+
+
 def _text_tool(verb: str, prompt: str, model: str = "") -> str:
-    argv = [LH, verb, prompt]
+    """Run `lh` and return the DOCUMENT, not the path it was written to.
+
+    `lh svg` and `lh web` always write a file and print where it went; only
+    `lh code` prints its content. A caller on another machine cannot open a
+    path on this one, so every verb is given an explicit -o and the file is
+    read back. It stays on disk afterwards, which is what makes a bad result
+    inspectable rather than merely reported.
+    """
+    out = _out(verb, SUFFIX[verb])
+    argv = [LH, verb, prompt, "-o", str(out)]
     if model:
         argv += ["-m", model]
-    return run_lh(argv)
+    run_lh(argv)
+    if not out.exists():
+        raise RuntimeError(f"lh {verb} exited 0 but wrote nothing to {out}")
+    return out.read_text()
 
 
 # ---------------------------------------------------------------------------

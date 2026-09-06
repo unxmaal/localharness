@@ -1,8 +1,8 @@
-"""launchd units for the three services.
+"""launchd units for the services.
 
 The point is that the machine comes back up serving after a reboot or a crash
-without anyone remembering three script names. The units are generated from one
-template rather than hand-written, because three near-identical plists drift:
+without anyone remembering four script names. The units are generated from one
+template rather than hand-written, because near-identical plists drift:
 the last time this repo had three near-identical things, the copies disagreed
 about which port they used.
 """
@@ -14,7 +14,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 GEN = REPO / "scripts" / "launchd.sh"
-SERVICES = ("gateway", "mlx", "tts")
+SERVICES = ("gateway", "mlx", "tts", "mcp")
 
 
 @pytest.fixture(scope="module")
@@ -112,3 +112,21 @@ def test_the_preflight_runs_in_the_launchd_domain_not_the_shell():
     inside launchd."""
     text = GEN.read_text()
     assert "launchctl" in text and ("probe" in text.lower() or "preflight" in text.lower())
+
+
+def test_the_mcp_unit_can_find_lh(plists):
+    """The MCP server shells out to `lh`, which uv installs into
+    ~/.local/bin. launchd starts jobs with PATH=/usr/bin:/bin:/usr/sbin:/sbin
+    and nothing else, so without this the unit loads, listens, and fails every
+    single tool call with "lh: command not found"."""
+    unit = next(v for k, v in plists.items() if "mcp" in k)
+    assert ".local/bin" in unit["EnvironmentVariables"]["PATH"]
+
+
+def test_probe_is_available_without_installing_anything():
+    """The TCC verdict is the whole question, and finding it out should not
+    require committing to an install first."""
+    proc = subprocess.run(["bash", str(GEN), "probe"],
+                          capture_output=True, text=True)
+    # Either verdict is fine here; what matters is that it ran and said so.
+    assert "ok" in proc.stdout.lower() or "denied" in (proc.stdout + proc.stderr).lower()

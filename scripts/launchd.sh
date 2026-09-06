@@ -14,16 +14,19 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 AGENTS="$HOME/Library/LaunchAgents"
 PREFIX="com.unxmaal.localharness"
-SERVICES="gateway mlx tts"
+SERVICES="gateway mlx tts mcp"
 
 # launchd starts jobs with PATH=/usr/bin:/bin:/usr/sbin:/sbin and NOTHING else.
 # uv, ffmpeg, rsvg-convert and rec all live in /opt/homebrew/bin, so without
 # this every service dies on "command not found" -- the same trap a GUI-spawned
 # wezterm set for the voice scripts, and it is just as invisible here.
-JOB_PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+# $HOME/.local/bin is where uv puts `lh`, and serve-mcp.sh shells out to it for
+# every tool call. Without it that unit loads, listens, and fails each call with
+# "lh: command not found".
+JOB_PATH="$HOME/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 usage() {
-  echo "usage: $0 {generate [DIR]|install|uninstall|status}" >&2
+  echo "usage: $0 {generate [DIR]|install|uninstall|status|probe}" >&2
   exit 2
 }
 
@@ -160,6 +163,7 @@ status() {
 
 case "${1:-}" in
   generate)  shift; generate "${1:-}" ;;
+  probe)     preflight && echo "ok: a launchd agent can read ${HF_ROOT:-/Volumes/Models/hf}" ;;
   install)   install_units ;;
   uninstall) uninstall_units ;;
   status)    status ;;

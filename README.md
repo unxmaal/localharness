@@ -95,6 +95,35 @@ mutations were run and which two survived, and why.
 
 ## Run it
 
+Installed as launchd agents, so the machine comes back up serving after a
+reboot or a crash:
+
+    ./scripts/launchd.sh probe       # can an agent read the weights volume?
+    ./scripts/launchd.sh install     # write the units and load them
+    ./scripts/launchd.sh status      # what launchd thinks is running
+    ./scripts/launchd.sh uninstall
+
+`probe` first, always. It runs a throwaway agent that tries to list the weights
+volume and reports the verdict. **macOS TCC denies /Volumes to launchd jobs**,
+and the failure is horrible if you meet it unprepared: the volume stats fine,
+reports free space and appears in /Volumes, so nothing looks wrong until
+mlx_lm hangs forever inside os.listdir, accepting connections and answering
+none, logging nothing, at 0% CPU.
+
+The fix is granting Full Disk Access to **/bin/bash** (System Settings >
+Privacy & Security > Full Disk Access, then Cmd+Shift+G to reach `/bin`). TCC
+propagates the grant to child processes, so bash covers everything the units
+start. It is broad, and that is the trade: a dedicated binary would key its
+grant to a code hash and need re-granting on every rebuild, and `uv` is a
+symlink into `Cellar/uv/<version>/` so a grant to it dies on the next upgrade.
+`/bin/bash` is SIP-protected and never moves.
+
+To restart one after editing it:
+
+    launchctl kickstart -k gui/$UID/com.unxmaal.localharness.mcp
+
+Or start them by hand instead, from a terminal that already has the access:
+
     ./scripts/serve-mlx.sh       # inference engine on :8081
     ./scripts/serve-gateway.sh   # gateway on :4000, the only address clients use
     ./scripts/serve-tts.sh       # Kokoro TTS + Parakeet STT on :8890
