@@ -363,28 +363,77 @@ h3.c. Fallback only.
 ## 5. What is next, in order
 
 Everything the previous list held is done: prompt adherence, STT ranked on its
-own, more voices, HTML rasterization, launchd. What follows is what those turned
-up.
+own, more voices, HTML rasterization, launchd, MCP. What follows is the full set
+of gaps a status review on 2026-09-07 turned up, in execution order.
 
-1. **Wire the vectorize pipeline into `lh svg`.** Section 4 settles that an LLM
-   is the wrong tool and that image-then-vectorize works in 0.05s. It is not
-   wired up. Measure it against OmniSVG and StarVector in the same run, since
-   those are the only other real candidates and neither has been tried.
+**This is a list to complete, not a menu to choose from.** Ordering is about
+sequence, not priority: items 1 and 7 come early because they change how
+everything after them is measured. Nothing here is optional, and nothing gets
+quietly dropped for being further down.
+
+### Enforcement and instruments first
+
+1. **Fix the mcm-engine PreToolUse hook.** It is registered, runs in 0.33s
+   against a 2s timeout, and counts correctly -- and writes its nudge to stderr
+   with **exit 0**, which Claude Code treats as approval and never shows the
+   model. Zero nudges reached the agent across several hundred Bash calls in a
+   full session, so the "blocked after 20 edits" guarantee has never once fired.
+   Exit 2 instead. Also: the nudge text names `mcp__knowledge__search` when the
+   tool is `mcp__mcm-engine__search`, and `.claude/knowledge.db` (last written
+   2026-07-04, no nudge tables) is not where the counters persist. Not this
+   repo's code, but this repo's contract depends on it.
+
 2. **Make the eval report HOW a candidate fails, not just how often.** A pass
-   rate hid a model returning null content behind a 7/9 score. A column
-   distinguishing "wrong answer" from "no answer" would have caught it, and
-   would have caught the whisper-scores-zero bug earlier too.
-3. **The candidate set is still unexamined in three lanes.** The image head to
-   head compared two SPEED models, flux2-klein and z-image-turbo, while the
-   quality leaders FLUX.1-dev and Qwen-Image were never run -- and mflux already
-   supports both. Kokoro exposes 54 voices and five are cached, so "the best
-   male voice" was chosen from three. STT never ran Canary-Qwen-2.5B or
-   parakeet-v3, both named in an earlier version of this list.
-4. **CLI verbs for the remaining lanes**, and a `--json` mode, since the primary
-   caller is an agent parsing output rather than a person reading it.
-5. **Smaller:** more STT scale (`evals/corpora.py --limit 200`); a fleurs-fr
-   generator so French STT is ranked the way English is; pushing to a GitHub
-   remote, deferred.
+   rate hid Qwen3-14B returning null content behind a 7/9 score, and hid whisper
+   scoring a perfect 0.0 by failing every case. A column separating "wrong
+   answer" from "no answer" catches both. **Do this before the surveys below**,
+   or they inherit the same blind spot.
+
+### Fix the lane that does not work
+
+3. **Wire image-then-vectorize into `lh svg`.** Section 4 settles that an LLM is
+   the wrong tool and that vtracer turns a generated raster into real paths in
+   0.05s. It is proven and not wired up. Measure it against OmniSVG and
+   StarVector in the same run -- those are the only other real candidates and
+   neither has been tried.
+
+### Make the small lanes able to measure anything
+
+4. **Widen `video` (1 case) and `web` (2 cases).** One case cannot rank; it is a
+   smoke test wearing a lane's clothes. `web` is worse: the best candidate scores
+   6/6, so the lane no longer discriminates between anything.
+
+### Survey the candidate sets that were never surveyed
+
+The Qwen2.5 audit fixed the text lane. The same defect -- choosing from whatever
+was already installed -- is still live in three more.
+
+5. **image:** the head to head compared flux2-klein and z-image-turbo, both of
+   which are the SPEED picks. FLUX.1-dev and Qwen-Image are the quality leaders
+   and mflux already supports both. Never run.
+6. **tts voices:** mlx-audio exposes 54 Kokoro voices; five are cached. "The best
+   male voice" was chosen from three.
+7. **stt:** Canary-Qwen-2.5B and parakeet-tdt-0.6b-v3, both named in an earlier
+   version of this list and never run.
+8. **The three aliases with zero measurements:** `local-small`, `q3-1.7b`,
+   `q3-coder`. A defined alias nobody has run is a claim nobody has checked.
+
+### Product surface
+
+9. **`--json` output on every verb.** The primary caller is an agent parsing
+   stdout, not a person reading it.
+10. **Verify a cloned voice resembles its reference.** WER measures
+    intelligibility and says nothing about identity, which is the entire point of
+    cloning. Needs a speaker-embedding metric (resemblyzer, a WavLM x-vector) or
+    a human listen via `./scripts/audition.sh`.
+
+### Blocked on things outside this repo
+
+11. **Exercise MCP from a genuine second machine.** Only ever driven by a client
+    on this host. Needs Rachel's box.
+12. **The quality ceilings.** Best local `code` is 6/9; `svg` is structurally
+    valid and semantically empty. These are model limits, and the 30B candidates
+    that might move them are 16 GB against a 24 GB Metal working set. Studio.
 
 ## 6. Traps this repo exists to remember
 
