@@ -64,7 +64,8 @@ mcp = [
 testpaths = ["tests"]
 # `slow` is deselected by default: these load a 4GB model and take minutes,
 # which is not what `make check` is for. `make check-slow` runs them.
-addopts = "-q --strict-markers -m 'not slow'"
+# -rs: a silently skipped test reports green for something it never checked.
+addopts = "-q --strict-markers -rs -m 'not slow'"
 markers = [
     "slow: needs the optional `metrics` group and loads a multi-GB model",
 ]
