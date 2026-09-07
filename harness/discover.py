@@ -15,9 +15,17 @@ missed things for months:
 A number in a document is wrong by the next commit. A command is right whenever
 it is run.
 
-THIS MODULE ONLY LOOKS INWARD -- at what is installed here. It cannot tell you
-that the world has moved on, which is the larger half and the reason Qwen3
-shipped unnoticed. That is issue #19.
+`capabilities()` LOOKS INWARD, at what is installed here. `external()` looks
+OUTWARD, because everything this project got wrong about candidate selection was
+the world moving while nothing here noticed -- Qwen2.5 served four lanes for
+four months while Qwen3 shipped, and ComfyUI was dismissed in one paragraph.
+
+`external()` ASKS REGISTRIES, NOT A LANGUAGE MODEL. A model would produce
+plausible names for repositories that do not exist, and this project has a rule
+against asserting specifics from pretrained memory. An API answer is a fact with
+a URL and a date attached, and it proposes CANDIDATES TO MEASURE rather than
+conclusions: the eval decides, this only says what is worth putting in front of
+it.
 
 Everything degrades rather than raising: discovery runs on machines that do not
 have everything, and a missing tool is a finding rather than a crash.
@@ -27,6 +35,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+
+import httpx
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -199,19 +209,120 @@ def measured() -> set[str]:
     return names
 
 
+def _segments(name: str) -> set[str]:
+    """The parts of a candidate name that could identify a capability.
+
+    A results row is `trace/mflux/flux2-klein-4b-q8` or
+    `Kokoro-82M-bf16/ff_siwis`, so the identifying part is a SEGMENT rather
+    than the whole string.
+    """
+    return {p for p in name.split("/") if p}
+
+
+def _was_measured(name: str, done: set[str]) -> bool:
+    """Exact segment match, never a substring.
+
+    Substring matching marked a capability called `X` as measured because
+    "X" appears inside "Chatterbox-Multilingual-MLX-v2-Q8". Wrongly marking
+    something DONE hides work, which is worse than wrongly offering it twice.
+    """
+    tail = name.split("/")[-1]
+    for m in done:
+        segs = _segments(m)
+        if name in segs or tail in segs:
+            return True
+    return False
+
+
 def annotate(caps: list[Capability] | None = None) -> list[Capability]:
     """Mark each capability with whether anything has measured it."""
     caps = capabilities() if caps is None else caps
     done = measured()
     for c in caps:
-        # A candidate name is not always the capability name: an engine spec
-        # becomes `mflux/flux2-klein-4b-q8` in the table, and a repo id is
-        # reported by its last segment.
-        tail = c.name.split("/")[-1]
-        c.measured = any(tail in m or c.name in m for m in done)
+        c.measured = _was_measured(c.name, done)
     return caps
 
 
 def gaps(caps: list[Capability] | None = None) -> list[Capability]:
     """What exists here and has never been run."""
     return [c for c in annotate(caps) if not c.measured and c.present]
+
+
+# ---------------------------------------------------------------------------
+# Looking outward
+# ---------------------------------------------------------------------------
+
+#: What to ask a registry for, per lane. Deliberately narrow queries against
+#: mlx-community: this machine runs MLX, and proposing a candidate that cannot
+#: run here wastes the reader's time rather than informing them.
+_LANE_QUERIES = {
+    "text": ["mlx-community/Qwen3", "mlx-community/Llama-3", "mlx-community/gemma"],
+    "stt": ["mlx-community/parakeet", "mlx-community/whisper", "mlx-community/canary"],
+    "tts": ["mlx-community/Kokoro", "mlx-community/Chatterbox", "mlx-community/TTS"],
+    "image": ["mlx-community/FLUX", "mlx-community/Qwen-Image", "mlx-community/Z-Image"],
+    "svg": ["starvector", "OmniSVG"],
+    "video": ["mlx-community/MiniMax", "mlx-community/Wan"],
+}
+
+_HOW = {
+    "text": "--modality extract --candidates <alias for {id}>",
+    "stt": "--modality stt --candidates stt:{id}",
+    "tts": "--modality tts --candidates tts:{id}",
+    "image": "--modality image --candidates mflux:{id}",
+    "svg": "--modality svg --candidates <needs a runner: see issue #3>",
+    "video": "--modality video --candidates <needs a runner>",
+}
+
+
+def _hf_models(query: str, limit: int) -> list[dict]:
+    """Ask the HuggingFace registry. Returns [] on any network trouble."""
+    try:
+        r = httpx.get("https://huggingface.co/api/models",
+                      params={"search": query, "limit": limit,
+                              "sort": "downloads", "direction": -1,
+                              # The list endpoint omits lastModified unless
+                              # asked, and every proposal printed a blank date.
+                              # An undated proposal is what this exists to
+                              # avoid.
+                              "full": "true"},
+                      timeout=20)
+        r.raise_for_status()
+        return r.json()
+    except Exception:  # noqa: BLE001
+        # Offline, rate-limited, or the API changed shape. Discovery that
+        # cannot reach the network reports nothing; it does not stop the
+        # command that called it.
+        return []
+
+
+def external(lane: str, limit: int = 8) -> list[Capability]:
+    """Candidates the world has that this machine has never measured.
+
+    Proposals, not conclusions. Each carries the registry URL it came from and
+    the date the registry last changed it, so a stale suggestion is visible as
+    stale rather than quietly believed.
+    """
+    if lane not in _LANE_QUERIES:
+        raise ValueError(
+            f"no external queries defined for lane {lane!r}; "
+            f"known: {', '.join(sorted(_LANE_QUERIES))}")
+
+    done = measured()
+    seen: set[str] = set()
+    out: list[Capability] = []
+    for query in _LANE_QUERIES[lane]:
+        for m in _hf_models(query, limit):
+            repo = m.get("id") or ""
+            if not repo or repo in seen:
+                continue
+            if _was_measured(repo, done):
+                continue          # already measured here
+            seen.add(repo)
+            when = (m.get("lastModified") or m.get("createdAt") or "")[:10]
+            out.append(Capability(
+                "model", repo, lane,
+                f"https://huggingface.co/{repo}",
+                _HOW.get(lane, "--candidates {id}").format(id=repo),
+                note=f"registry last modified {when or 'unknown'}; "
+                     f"{m.get('downloads', 0):,} downloads"))
+    return out[:limit]

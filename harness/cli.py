@@ -334,6 +334,31 @@ def cmd_discover(a) -> int:
     every time anything is installed or any eval is run. A number in a document
     is wrong by the next commit.
     """
+    if a.external:
+        if not a.lane:
+            return err("--external needs a --lane: the registries are asked "
+                       "different questions per modality")
+        try:
+            found = discovery.external(a.lane)
+        except ValueError as exc:
+            return err(str(exc))
+        if a.json:
+            print(json.dumps({"candidates": [vars(c) for c in found]}, indent=2))
+            return 0
+        if not found:
+            print("nothing new found. Either this machine has measured what "
+                  "the registry knows about, or there is no network.")
+            return 0
+        print(f"\n{a.lane}: candidates the registry has that nothing here has "
+              f"measured")
+        print("(proposals, not conclusions -- the eval decides)")
+        for c in found:
+            print(f"\n  {c.name}")
+            print(f"    {c.source}")
+            print(f"    {c.note}")
+            print(f"    -> uv run python -m evals.run {c.how}")
+        return 0
+
     caps = discovery.annotate(discovery.capabilities())
     if a.lane:
         caps = [c for c in caps if c.lane == a.lane]
@@ -487,6 +512,9 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--lane", help="only this modality")
     d.add_argument("--gap", action="store_true",
                    help="only what has never been run")
+    d.add_argument("--external", action="store_true",
+                   help="ask the registries what exists that this machine has "
+                        "never measured (needs --lane)")
     d.set_defaults(func=cmd_discover)
 
     h = sub.add_parser("hear", help="transcribe a clip, or record and transcribe")
