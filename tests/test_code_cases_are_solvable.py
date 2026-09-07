@@ -19,7 +19,12 @@ from harness.checks import code
 CASES = Path(__file__).resolve().parents[1] / "evals" / "cases"
 REFERENCE = CASES / "code" / "reference"
 
-code_cases = [c for c in load_cases(CASES) if c.modality == "code"]
+# Load ONLY the code cases, not the whole tree. Loading everything made this
+# module hostage to every other lane: the generated stt cases point at audio on
+# an external drive, and when that drive did not come back after a reboot,
+# `load_cases` raised during COLLECTION and took all 600+ tests with it. A test
+# about code cases should not be able to fail because a disk is unplugged.
+code_cases = [c for c in load_cases(CASES / "code") if c.modality == "code"]
 
 
 @pytest.mark.parametrize("case", code_cases, ids=lambda c: c.id)

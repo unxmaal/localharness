@@ -224,7 +224,18 @@ def test_the_cases_that_ship_with_the_suite_actually_load():
     """Load-time validation is only worth having if the shipped cases pass it.
     Nothing else in the tests reads the real cases directory."""
     from pathlib import Path
-    cases = load_cases(Path(__file__).resolve().parent.parent / "evals" / "cases")
+    root = Path(__file__).resolve().parent.parent / "evals" / "cases"
+    try:
+        cases = load_cases(root)
+    except ValueError as exc:
+        # The generated stt cases reference audio on an external volume. When
+        # that drive did not come back after a reboot, this raised and every
+        # other assertion below went untested. Skipping is right ONLY for that
+        # cause: a genuinely malformed committed case must still fail here.
+        if "audio_file" in str(exc) and "/Volumes/" in str(exc):
+            import pytest as _pytest
+            _pytest.skip(f"stt corpus volume is not mounted: {exc}")
+        raise
     assert len(cases) >= 8
     committed = {"svg", "web", "image", "tts", "video", "code", "extract"}
     present = {c.modality for c in cases}
