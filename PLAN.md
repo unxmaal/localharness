@@ -585,9 +585,30 @@ of those.
    target written against it. Automatic language ID, which EnviousWispr ships
    and this repo makes the caller supply, is also still open.
 
-6. **Measure the three aliases with zero runs:** `local-small` (Qwen2.5-0.5B)
-   and `q3-1.7b` (0.9 GB). A defined alias nobody has run is a claim nobody has
-   checked. `q3-coder` is 16 GB and refused; see below.
+6. **DONE 2026-09-07. Measure the aliases with zero runs.** A defined alias
+   nobody has run is a claim nobody has checked. Measured across four lanes:
+
+   | lane | local-small (Qwen2.5-0.5B) | q3-1.7b | q3-4b |
+   |---|---|---|---|
+   | extract | 4/10 @ 0.19s | **7/10 @ 0.39s** | 7/10 @ 0.65s |
+   | code | 3/9 | 1/9 | **7/9** |
+   | svg | 1/3 | 2/3 | 2/3 |
+   | web | - | - | **5/5** |
+
+   `q3-1.7b` matches `q3-4b` on extract at 0.39s against 0.65s, and nearly
+   doubles `local-small`'s 4/10. That is the "small and fast, watches a log,
+   answers one question" lane Eric asked for originally, and it had been sitting
+   defined and unmeasured while a 0.5B answered four questions in ten.
+
+   NOT a clean supersede, which is why it stays a table rather than a swap:
+   `local-small` beats `q3-1.7b` on code, 3/9 to 1/9. A 1.7B that reads well
+   does not necessarily write.
+
+   `local-large` still holds extract at 9/10, so no default changed. The value
+   here is knowing what the cheap end actually costs rather than assuming the
+   smallest alias is the cheap one.
+
+   `q3-coder` remains refused at 16 GB; see the table below.
 
 7. **`--json` on every verb.** The primary caller is an agent parsing stdout.
 
