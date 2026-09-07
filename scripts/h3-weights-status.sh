@@ -8,8 +8,10 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
 
+# One place for everything this project produces; see harness/paths.py.
+LH_LOGS="${LOCALHARNESS_HOME:-$HOME/localharness}/logs"
 DEST="${H3_MODEL_DIR:-/Volumes/Models/MiniMax-H3}"
-PIDFILE="${H3_DOWNLOAD_PIDFILE:-.logs/h3-weights.pid}"
+PIDFILE="${H3_DOWNLOAD_PIDFILE:-$LH_LOGS/h3-weights.pid}"
 TARGET_GIB="${H3_TARGET_GIB:-134.2}"
 
 # Liveness comes from a pidfile written by fetch-h3-weights.sh, not from
@@ -45,7 +47,7 @@ elif [ "$RUNNING" = no ]; then
   exit 2
 fi
 
-LOG=.logs/h3-weights.log
+LOG="${LOCALHARNESS_HOME:-$HOME/localharness}/logs/h3-weights.log"
 if [ -f "$LOG" ]; then
   ELAPSED=$(( $(date +%s) - $(stat -f %B "$LOG") ))
   if [ "$ELAPSED" -gt 60 ]; then

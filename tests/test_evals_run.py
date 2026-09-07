@@ -588,3 +588,20 @@ def test_the_disagreement_note_needs_an_actual_disagreement(capsys):
     ])
     report(s)
     assert "disagree" not in capsys.readouterr().out.lower()
+
+
+def test_a_run_gets_its_own_directory_without_being_told(monkeypatch, tmp_path):
+    """--out was required for every lane that writes anything, so every
+    invocation in this repo's history picked a directory by hand and they all
+    picked differently: .logs/img, .logs/voices, .logs/ev-svg-fair."""
+    monkeypatch.setenv("LOCALHARNESS_HOME", str(tmp_path))
+    from evals.run import resolve_outdir
+    d = resolve_outdir(None, "svg")
+    assert d.is_dir()
+    assert d.parent.name == "runs"
+    assert "svg" in d.name
+
+
+def test_an_explicit_out_is_still_honoured(monkeypatch, tmp_path):
+    from evals.run import resolve_outdir
+    assert resolve_outdir(str(tmp_path / "here"), "svg") == tmp_path / "here"

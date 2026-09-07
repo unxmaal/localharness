@@ -26,8 +26,9 @@ echo "dest  $DEST (${AVAIL_GB}GB free)"
 
 # Publish liveness so h3-weights-status.sh can tell a running download from a
 # crashed one without pattern-matching command lines.
-mkdir -p .logs
-PIDFILE="${H3_DOWNLOAD_PIDFILE:-.logs/h3-weights.pid}"
+LH_LOGS="${LOCALHARNESS_HOME:-$HOME/localharness}/logs"
+mkdir -p "$LH_LOGS"
+PIDFILE="${H3_DOWNLOAD_PIDFILE:-$LH_LOGS/h3-weights.pid}"
 echo $$ > "$PIDFILE"
 trap 'rm -f "$PIDFILE"' EXIT
 

@@ -16,6 +16,22 @@ mcp_server = pytest.importorskip(
     reason="needs the `mcp` group: uv run --group mcp pytest")
 
 
+@pytest.fixture(autouse=True)
+def fresh_queue(monkeypatch):
+    """A NEW queue per test.
+
+    mcp_server.QUEUE is a module-level singleton with ONE worker thread, which
+    is right for the server and wrong for a test file: jobs from an earlier
+    test sit in front of a later one, so a test that passed alone failed in a
+    full run with its job still 'queued'. Shared mutable state across tests is
+    the defect, not the timeout."""
+    from harness import jobs
+    q = jobs.Queue()
+    monkeypatch.setattr(mcp_server, "QUEUE", q)
+    yield q
+    q.shutdown()
+
+
 @pytest.fixture
 def spy(monkeypatch, tmp_path):
     """Capture the argv, and fake `lh` writing its artifact."""

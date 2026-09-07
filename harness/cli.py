@@ -26,10 +26,9 @@ import argparse
 import json
 import subprocess
 import sys
-import time
 from pathlib import Path
 
-from harness import audio, completion, env, proc, vector
+from harness import audio, completion, env, paths, proc, vector
 from harness.checks import html as html_check
 from harness.checks import image as image_check
 from harness.checks import svg as svg_check
@@ -72,7 +71,6 @@ DEFAULT_SVG_MODEL = "local-large"
 DEFAULT_WEB_MODEL = "q3-4b"
 DEFAULT_CODE_MODEL = "q3-4b"
 DEFAULT_EXTRACT_MODEL = "local-large"
-OUTDIR = Path("out")
 
 # Named per engine family because the fix differs, and because `uv tool install
 # mflux` on its own silently picks Python 3.9, where every mflux entry point
@@ -123,14 +121,14 @@ def say(*, path=None, body=None, seconds=None, peak_kb=None,
 
 
 def default_output(kind: str, suffix: str) -> Path:
-    """out/image-20260905-142233-041.png — sortable, and unique per run.
+    """Where an artifact goes when the caller did not say.
 
-    Milliseconds are in there because two `lh image` calls a second apart must
-    not overwrite each other; losing a generation to a name collision is the
-    kind of thing you only notice much later.
+    Under $LOCALHARNESS_HOME/out, which is ABSOLUTE. It used to be a relative
+    `out/`, and since `lh` installs onto PATH and runs from anywhere, that
+    scattered artifacts into whatever directory the caller happened to be
+    standing in.
     """
-    stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{int(time.time() * 1000) % 1000:03d}"
-    return OUTDIR / f"{kind}-{stamp}{suffix}"
+    return paths.artifact(kind, suffix)
 
 
 def _generate(spec: str, prompt: str, out: Path, params: dict) -> int:

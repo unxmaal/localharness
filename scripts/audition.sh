@@ -13,6 +13,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 REFS=/Volumes/Models/corpora/voice-refs
+# Clones live wherever the eval wrote them; newest run wins. One output
+# root, so this no longer needs to know which directory someone chose.
+LH_RUNS="${LOCALHARNESS_HOME:-$HOME/localharness}/runs"
 CASE="${1:-fr-pangram}"
 
 say_() { printf '\n\033[1m%s\033[0m\n' "$*"; }
@@ -31,8 +34,7 @@ audition_case() {
   # clip played two minutes ago is not judging similarity.
   for n in 1 2 3; do
     ref="$REFS/fleurs-fr-male-$n.wav"
-    clone=".logs/fr-voices/Chatterbox-Multilingual-MLX-v2-Q8_fleurs-fr-male-$n--$c.wav"
-    [ -f "$clone" ] || clone=".logs/fr-refs/Chatterbox-Multilingual-MLX-v2-Q8_fleurs-fr-male-$n--$c.wav"
+    clone="$(find "$LH_RUNS" .logs -name "*fleurs-fr-male-$n--$c.wav" 2>/dev/null | sort | tail -1)"
     [ -f "$clone" ] || continue
     say_ "-- reference $n, then its clone"
     play "$ref"
@@ -40,7 +42,7 @@ audition_case() {
   done
 
   say_ "-- Kokoro ff_siwis (no reference: a fixed voice, and the only French one it has)"
-  play ".logs/fr-voices/Kokoro-82M-bf16_ff_siwis--$c.wav"
+  play "$(find "$LH_RUNS" .logs -name "Kokoro*ff_siwis--$c.wav" 2>/dev/null | sort | tail -1)"
 }
 
 if [ "$CASE" = "--all" ]; then

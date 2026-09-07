@@ -34,7 +34,7 @@ from pathlib import Path
 from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel
 
-from harness import env, jobs
+from harness import env, jobs, paths
 
 
 class JobInfo(BaseModel):
@@ -59,9 +59,11 @@ class JobInfo(BaseModel):
     path: str | None = None
     error: str | None = None
 
-# Artifacts stay on this machine and are downloaded when wanted, so the path
-# is what a tool result carries rather than the bytes.
-OUTDIR = Path.home() / "localharness-out"
+# Artifacts stay on this machine and are downloaded when wanted, so the path is
+# what a tool result carries rather than the bytes. Under the ONE output root,
+# in its own subdirectory: a caller should be able to tell what a remote agent
+# asked for from what someone typed here.
+OUTDIR = paths.outputs() / "mcp"
 LH = "lh"
 DEFAULT_TIMEOUT = 300.0
 
@@ -97,9 +99,7 @@ def _child_env() -> dict:
 
 
 def _out(kind: str, suffix: str) -> Path:
-    OUTDIR.mkdir(parents=True, exist_ok=True)
-    stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{int(time.time() * 1000) % 1000:03d}"
-    return OUTDIR / f"{kind}-{stamp}{suffix}"
+    return paths.artifact(kind, suffix, where=OUTDIR)
 
 
 SUFFIX = {"svg": ".svg", "web": ".html", "code": ".txt"}

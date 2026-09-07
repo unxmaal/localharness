@@ -14,7 +14,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh
 source scripts/versions.sh
-mkdir -p .logs
+LH_LOGS="${LOCALHARNESS_HOME:-$HOME/localharness}/logs"
+mkdir -p "$LH_LOGS"
 # mlx-audio does not declare its server dependencies, so mlx_audio.server dies
 # with ModuleNotFoundError on a clean install. The full set, read off the import
 # block at the top of mlx_audio/server.py rather than discovered one crash at a

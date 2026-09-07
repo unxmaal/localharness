@@ -2,7 +2,7 @@
 # launchd units for the three services, so the machine comes back up serving
 # after a reboot or a crash without anyone remembering three script names.
 #
-#   ./scripts/launchd.sh generate [DIR]   write the plists (default: ./.logs/launchd)
+#   ./scripts/launchd.sh generate [DIR]   write the plists (default: $LH_HOME/launchd)
 #   ./scripts/launchd.sh install          write them to ~/Library/LaunchAgents and load
 #   ./scripts/launchd.sh uninstall        unload and remove them
 #   ./scripts/launchd.sh status           what launchd thinks is running
@@ -13,6 +13,9 @@
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 AGENTS="$HOME/Library/LaunchAgents"
+# One place for everything this project produces; see harness/paths.py.
+LH_HOME="${LOCALHARNESS_HOME:-$HOME/localharness}"
+LH_LOGS="$LH_HOME/logs"
 PREFIX="com.unxmaal.localharness"
 SERVICES="gateway mlx tts mcp"
 
@@ -47,8 +50,8 @@ write_plist() {
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>WorkingDirectory</key><string>$REPO</string>
-  <key>StandardOutPath</key><string>$REPO/.logs/$service.log</string>
-  <key>StandardErrorPath</key><string>$REPO/.logs/$service.log</string>
+  <key>StandardOutPath</key><string>$LH_LOGS/$service.log</string>
+  <key>StandardErrorPath</key><string>$LH_LOGS/$service.log</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key><string>$JOB_PATH</string>
@@ -61,8 +64,8 @@ PLIST
 }
 
 generate() {
-  local dest="${1:-$REPO/.logs/launchd}"
-  mkdir -p "$dest" "$REPO/.logs"
+  local dest="${1:-$LH_HOME/launchd}"
+  mkdir -p "$dest" "$LH_LOGS"
   for service in $SERVICES; do
     write_plist "$service" "$dest"
     echo "wrote $dest/$PREFIX.$service.plist"

@@ -673,6 +673,32 @@ of those.
 
 9. **A defect sweep of the codebase**, standing rather than one-off.
 
+   FIRST FINDING, Eric's: outputs had FOUR homes and one was relative --
+   `out/` (relative to the caller's cwd), `~/localharness-out/` (MCP),
+   `.logs/` (eval runs mixed with service logs) and `/tmp/` (whatever I was
+   doing). `lh` installs onto PATH, so the relative one scattered artifacts
+   into every directory anyone happened to be standing in.
+
+   Fixed: `harness/paths.py` is the single authority, everything resolves
+   through it, and a test fails if any module reintroduces a relative `out/`.
+   Existing scattered outputs were migrated rather than abandoned.
+
+       $LOCALHARNESS_HOME            default ~/localharness
+         out/                        artifacts
+         out/mcp/                    artifacts asked for over MCP
+         runs/<stamp>-<modality>/    one eval run
+         logs/                       service stdout and stderr
+
+   `--out` is no longer required for an eval: every run names its own
+   directory, which is why the old ones were all called things like
+   `.logs/img`, `.logs/voices` and `.logs/ev-svg-fair`.
+
+   Two more defects came out of the same pass: the MCP tests shared one
+   module-global job queue with a single worker, so a test that passed alone
+   failed in a full run with its job still queued; and the queue's `ahead`
+   counted only QUEUED jobs, telling a caller waiting behind a 54-second image
+   that nothing was ahead of it.
+
 ### Refused, with the number that refused it
 
 Not deferred, not forgotten -- measured against this machine and found not worth

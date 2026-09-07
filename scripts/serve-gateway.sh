@@ -4,7 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh
 source scripts/versions.sh
-mkdir -p .logs
+LH_LOGS="${LOCALHARNESS_HOME:-$HOME/localharness}/logs"
+mkdir -p "$LH_LOGS"
 
 # Opt out of LiteLLM's Responses API adapter. Without it, POST /v1/messages is
 # routed to POST /v1/responses upstream, which mlx_lm.server does not implement,

@@ -5,7 +5,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh
-mkdir -p .logs
+LH_LOGS="${LOCALHARNESS_HOME:-$HOME/localharness}/logs"
+mkdir -p "$LH_LOGS"
 # Binds every interface by default. Deliberate: this is a house LAN, the models
 # are local, and the point of the machine is that other machines on it can use
 # the GPU. It is also the shape the M5 Studio needs, with the Studio serving and

@@ -2,6 +2,22 @@
 
 Local media generation and voice on Apple Silicon, in a command line.
 
+## Where things land
+
+**One root**, `~/localharness`, overridable with `$LOCALHARNESS_HOME`:
+
+    out/                        artifacts: images, audio, svg, pages
+    out/mcp/                    artifacts asked for over MCP
+    runs/<stamp>-<modality>/    one eval run: artifacts and results.json
+    logs/                       service stdout and stderr
+
+There were four places before this, and one of them was relative. `lh`
+installs onto PATH and runs from anywhere, so a relative `out/` scattered
+artifacts into whatever directory the caller happened to be standing in, and a
+generation you cannot find is a generation you did not make. `out` and `logs`
+are kept apart because a generated artifact and a server's stderr are different
+things and only one of them is worth keeping.
+
 ## Install
 
     uv tool install --python 3.12 --editable .

@@ -1,8 +1,11 @@
 """Run the eval suite and print a comparison.
 
     uv run python -m evals.run --modality svg --candidates local-mid,local-small
-    uv run python -m evals.run --modality image --out .logs/img \
+    uv run python -m evals.run --modality image \
         --candidates mflux:flux2-klein-4b,mflux:z-image-turbo
+
+Artifacts and results.json land in $LOCALHARNESS_HOME/runs/<stamp>-<modality>/
+unless --out says otherwise.
 
 A candidate is either a gateway alias (text modalities) or an engine spec
 (anything that runs as a process). Which one it is decides the runner, and a
@@ -21,7 +24,7 @@ import sys
 import time
 from pathlib import Path
 
-from harness import audio, completion
+from harness import audio, completion, paths
 from harness.engines import Engine, parse_options, resolve
 
 from dataclasses import replace
@@ -298,7 +301,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--gateway", default="http://127.0.0.1:4000")
     ap.add_argument("--cases", default=str(ROOT / "cases"))
     ap.add_argument("--out", default=None,
-                    help="write artifacts and results.json here")
+                    help="write artifacts and results.json here "
+                         "(default: a new directory under "
+                         "$LOCALHARNESS_HOME/runs)")
     ap.add_argument("--adherence", choices=("pickscore", "hpsv2"), default=None,
                     help="score how well each image matches its prompt. Loads a "
                          "multi-GB preference model, so it is opt-in and needs "
@@ -316,7 +321,7 @@ def main(argv: list[str] | None = None) -> int:
     # Split on commas that start a new candidate, i.e. those followed by a
     # known engine prefix or by something with no '=' in it.
     candidates = split_candidates(args.candidates)
-    outdir = Path(args.out) if args.out else None
+    outdir = resolve_outdir(args.out, args.modality)
     if outdir:
         outdir.mkdir(parents=True, exist_ok=True)
 
@@ -370,6 +375,19 @@ def main(argv: list[str] | None = None) -> int:
              "rows": [vars(r) for r in results]}, indent=2))
         print(f"\nartifacts + results.json in {outdir}")
     return 0
+
+
+def resolve_outdir(out: str | None, modality: str) -> Path:
+    """Where this run's artifacts and results.json go.
+
+    Always somewhere, and always the same shape. --out used to be REQUIRED for
+    any lane that writes a file, so every invocation in this repo's history
+    picked a directory by hand -- .logs/img, .logs/voices, .logs/ev-svg-fair --
+    and none of them agreed.
+    """
+    if out:
+        return Path(out)
+    return paths.new_run(modality)
 
 
 def split_candidates(raw: str) -> list[str]:

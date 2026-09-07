@@ -45,7 +45,7 @@ KNOWN_VOICES = ("am_adam", "am_onyx", "bm_george", "af_sky", "ff_siwis")
 # bm_george: male, and the best of the male voices on the tts eval -- 0.000
 # mean word error rate over the five cases against am_adam's 0.031 and
 # am_onyx's 0.013. Re-derive with:
-#   uv run python -m evals.run --modality tts --out .logs/voices --candidates \
+#   uv run python -m evals.run --modality tts --candidates \
 #     'tts:mlx-community/Kokoro-82M-bf16,voice=bm_george,...'
 DEFAULT_KOKORO_VOICE = "bm_george"
 
@@ -161,7 +161,7 @@ def speak(text: str, out: str | Path, voice: str = DEFAULT_KOKORO_VOICE,
         # voice that is not in the local cache.
         raise AudioError(
             f"tts failed while generating: {exc}. The server is up but the "
-            f"request failed; the traceback is in its log (.logs/tts.log). "
+            f"request failed; the traceback is in its log ($LOCALHARNESS_HOME/logs/tts.log). "
             f"If you passed --voice, check it is one of: "
             f"{', '.join(KNOWN_VOICES)}") from exc
     except httpx.HTTPError as exc:

@@ -152,12 +152,27 @@ def test_a_missing_generator_says_how_to_install_it(monkeypatch, tmp_path, capsy
     assert "mflux-generate" in err and "uv tool install" in err
 
 
-def test_the_default_output_path_is_unique_and_under_out(spy, monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
+def test_the_default_output_path_is_unique(spy, monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALHARNESS_HOME", str(tmp_path))
     cli.main(["image", "a red fox"])
     cli.main(["image", "a red fox"])
-    written = sorted((tmp_path / "out").glob("*.png"))
-    assert len(written) == 2, "two runs must not overwrite each other"
+    assert len(sorted((tmp_path / "out").glob("*.png"))) == 2, \
+        "two runs must not overwrite each other"
+
+
+def test_output_does_not_follow_the_working_directory(spy, monkeypatch, tmp_path):
+    """The bug this test used to ENCODE. `out/` was relative, and `lh` installs
+    onto PATH, so running it from ~/Desktop wrote to ~/Desktop/out and running
+    it from a repo wrote into that repo. Artifacts went wherever you happened
+    to be standing."""
+    home = tmp_path / "home"
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir(parents=True)
+    monkeypatch.setenv("LOCALHARNESS_HOME", str(home))
+    monkeypatch.chdir(elsewhere)
+    cli.main(["image", "a red fox"])
+    assert sorted((home / "out").glob("*.png")), "artifact did not land in the root"
+    assert not list(elsewhere.rglob("*.png")), "artifact leaked into the cwd"
 
 
 # ---- video ----------------------------------------------------------------

@@ -17,7 +17,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh
-mkdir -p .logs
+LH_LOGS="${LOCALHARNESS_HOME:-$HOME/localharness}/logs"
+mkdir -p "$LH_LOGS"
 
 command -v lh >/dev/null || {
   echo "lh is not on PATH. Install it: uv tool install --python 3.12 --editable ." >&2
