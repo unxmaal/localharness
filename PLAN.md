@@ -626,10 +626,35 @@ of those.
    some verbs accept is worse than no flag, because the caller cannot rely on it
    without first knowing which.
 
-8. **Verify a cloned voice resembles its reference.** WER measures
-   intelligibility and says nothing about identity, which is the whole point of
-   cloning. A speaker-embedding similarity (resemblyzer, WavLM x-vector) is a
-   small model and a real test; `./scripts/audition.sh` is the human fallback.
+8. **PARTLY DONE 2026-09-07. Verify a cloned voice resembles its reference.**
+   WER measures intelligibility and says nothing about identity, so an
+   intelligible clone in a completely different voice scores a perfect 0.000.
+   Every French voice number in this repo was an intelligibility number.
+
+   `harness/checks/similarity.py` embeds two clips with resemblyzer (~17MB,
+   CPU, sub-second) and reports the cosine as `speaker_similarity`, wired into
+   the tts lane whenever a candidate was given a `ref_audio`, with a declared
+   metric direction.
+
+   MEASURED over the French clones:
+
+   | pair | range | mean |
+   |---|---|---|
+   | clone vs ITS OWN reference | 0.742 - 0.949 | 0.878 |
+   | clone vs a DIFFERENT speaker | 0.703 - 0.881 | 0.781 |
+
+   READ THAT AS WEAK, NOT AS A RESULT. The means separate; the RANGES OVERLAP
+   badly. One wrong-speaker pair scored 0.881, higher than a correct pair at
+   0.742, so the metric cannot reliably attribute a clip to a speaker. Three
+   French men reading the same corpus is close to its hardest case.
+
+   THE HONEST LIMIT: NOBODY HAS LISTENED. A cosine between speaker embeddings
+   is a model's opinion about identity, not an ear. The metric is validated only
+   in the narrow sense that it scores a clip against itself at 1.0 and separates
+   the two shipped clips, who are two different men. Whether these clones
+   actually sound like their references is unresolved and cannot be resolved
+   from inside the suite. `./scripts/audition.sh` plays reference and clone back
+   to back; that is still the only ground truth available.
 
 9. **A defect sweep of the codebase**, standing rather than one-off.
 

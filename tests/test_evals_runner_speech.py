@@ -211,3 +211,17 @@ def test_a_missing_reference_clip_is_a_failed_row_not_an_exception(tmp_path):
                ref_audio=tmp_path / "gone.wav").run(french_case())
     assert not r.passed
     assert "gone.wav" in r.detail
+
+
+def test_a_cloning_candidate_asks_for_speaker_similarity(tmp_path):
+    """WER scores an intelligible clone in the wrong voice at a perfect 0.000.
+    A candidate given a reference clip must also be asked whether it sounds
+    like it."""
+    ref = tmp_path / "ref.wav"
+    ref.write_bytes(wav())
+    assert "ref_audio" in runner(tmp_path, voice="", ref_audio=ref).score_kwargs()
+
+
+def test_a_non_cloning_candidate_does_not(tmp_path):
+    """Kokoro has no reference to be similar to."""
+    assert "ref_audio" not in runner(tmp_path).score_kwargs()

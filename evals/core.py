@@ -114,12 +114,32 @@ def _check_extract(artifact, case: Case) -> CheckResult:
     return CheckResult(True, "")
 
 
-def _check_tts(artifact, case: Case, transcriber=None) -> CheckResult:
-    """The sentence that was asked for IS the reference transcript."""
-    return speech_check.check(artifact, reference=case.prompt,
-                              max_wer=case.assertions.get("max_wer"),
-                              transcriber=transcriber,
-                              language=case.language)
+def _check_tts(artifact, case: Case, transcriber=None,
+               ref_audio=None) -> CheckResult:
+    """The sentence that was asked for IS the reference transcript.
+
+    `ref_audio` is the clip a cloning model was imitating. WER cannot see
+    whether it succeeded: an intelligible clone in a completely different voice
+    scores a perfect 0.000, so the property cloning exists to deliver went
+    unmeasured until this.
+    """
+    out = speech_check.check(artifact, reference=case.prompt,
+                             max_wer=case.assertions.get("max_wer"),
+                             transcriber=transcriber,
+                             language=case.language)
+    if ref_audio:
+        try:
+            from harness.checks import similarity
+            score = similarity.compare(ref_audio, artifact)
+        except Exception as exc:  # noqa: BLE001
+            # Never fail a tts row because the optional metrics group is
+            # absent; the WER is still a real measurement without it.
+            out.warnings.append(f"speaker similarity unavailable: {exc}")
+        else:
+            metrics = dict(getattr(out, "metrics", {}) or {})
+            metrics["speaker_similarity"] = round(score, 4)
+            out.metrics_extra = metrics
+    return out
 
 
 def _check_stt(artifact, case: Case) -> CheckResult:
@@ -226,6 +246,9 @@ METRIC_DIRECTION = {
     "ink": "higher",       # fraction of an SVG canvas actually marked
     "motion": "higher",    # change between video frames
     "adherence": "higher",  # how well the picture matches the prompt
+    # Does the clone sound like its reference? A WER cannot see this at
+    # all: an intelligible clone in the wrong voice scores a perfect 0.
+    "speaker_similarity": "higher",
     "code_pass": "higher",  # fraction of a code case's assertions that ran green
 }
 
@@ -472,7 +495,9 @@ def score(case: Case, artifact, **checker_kwargs) -> Result:
                       f"no checker for modality '{case.modality}'")
 
     r = checker(artifact, case, **checker_kwargs)
-    metrics = getattr(r, "metrics", {})
+    # metrics_extra lets a checker ADD to a dataclass property it does not
+    # own; SpeechResult.metrics is computed, not stored.
+    metrics = getattr(r, "metrics_extra", None) or getattr(r, "metrics", {})
     if not r.ok:
         return Result(case.id, "", False, 0.0, 0, r.reason,
                       warnings=r.warnings, metrics=metrics)

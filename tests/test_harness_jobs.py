@@ -68,6 +68,15 @@ def test_only_one_job_runs_at_a_time(q):
     assert max(peak) == 1, f"ran {max(peak)} at once"
 
 
+def test_the_next_job_up_reports_nothing_ahead_of_it(q):
+    """Zero has to mean next, or the number cannot be read."""
+    job_id = q.submit("svg", lambda: None)
+    assert q.wait(job_id, timeout=5).state == "done"
+    second = q.submit("svg", lambda: None)
+    q.wait(second, timeout=5)
+    assert q.status(second).ahead == 0
+
+
 def test_jobs_run_in_the_order_they_were_submitted(q):
     order = []
     ids = [q.submit("svg", lambda n=n: order.append(n)) for n in range(4)]
@@ -79,13 +88,22 @@ def test_jobs_run_in_the_order_they_were_submitted(q):
 def test_a_waiting_job_can_say_how_many_are_ahead_of_it(q):
     """A 90-second wait that reads as 'second in line behind an image' is a
     queue. One that reads as nothing is a slow tool."""
+    started = threading.Event()
     release = threading.Event()
-    q.submit("image", lambda: release.wait(5))
+
+    def hold():
+        # Wait for the worker to have PICKED UP the first job before asserting
+        # anything about the second. Polling for `ahead == 1` on a 1s budget
+        # passed alone and failed under load, which is a flaky test rather than
+        # a slow queue.
+        started.set()
+        release.wait(5)
+
+    q.submit("image", hold)
+    assert started.wait(5), "the worker never started the first job"
     second = q.submit("svg", lambda: None)
-    for _ in range(50):
-        if q.status(second).ahead == 1:
-            break
-        time.sleep(0.02)
+    # ONE ahead, and it is the running one. Counting only the queued jobs told
+    # a caller waiting behind a 54-second image that nothing was ahead of it.
     assert q.status(second).ahead == 1
     assert q.status(second).state == "queued"
     release.set()

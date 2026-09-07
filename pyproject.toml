@@ -33,6 +33,8 @@ metrics = [
     "torch>=2.4",
     "transformers>=4.44",
     "open_clip_torch>=2.24",
+    "resemblyzer>=0.1.4",
+    "setuptools>=70,<81",
 ]
 
 # The multilingual ear. A separate group because mlx-whisper requires torch

@@ -78,4 +78,9 @@ class SpeechRunner(BaseRunner):
         return out, 0
 
     def score_kwargs(self) -> dict:
-        return {"transcriber": self._transcribe}
+        kwargs = {"transcriber": self._transcribe}
+        if self.ref_audio is not None:
+            # So the checker can ask the question WER cannot: does this sound
+            # like the person it was cloned from?
+            kwargs["ref_audio"] = str(self.ref_audio)
+        return kwargs

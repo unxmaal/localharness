@@ -37,7 +37,12 @@ class Job:
     submitted: float = field(default_factory=time.monotonic)
     started: float | None = None
     finished: float | None = None
-    #: How many jobs are ahead of this one. Only meaningful while queued.
+    #: How many jobs will be processed BEFORE this one, counting the one
+    #: currently running. Only meaningful while queued.
+    #:
+    #: It used to count only the queued jobs, so the moment the worker picked
+    #: up the job in front, a caller waiting behind a 54-second image was told
+    #: "0 ahead of you" while plainly still waiting. Zero has to mean next.
     ahead: int = 0
 
     @property
@@ -118,8 +123,9 @@ class Queue:
 
     def _renumber(self) -> None:
         """Caller holds the lock."""
+        running = 1 if self._running else 0
         for position, queued_id in enumerate(self._order):
-            self._jobs[queued_id].ahead = position
+            self._jobs[queued_id].ahead = position + running
 
     def _run(self) -> None:
         while True:
