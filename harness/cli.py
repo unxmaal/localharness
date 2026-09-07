@@ -363,7 +363,11 @@ def cmd_discover(a) -> int:
     if a.lane:
         caps = [c for c in caps if c.lane == a.lane]
     if a.gap:
-        caps = [c for c in caps if not c.measured and c.present]
+        # A BROKEN row is not a gap: it is not something you close by
+        # running the command, and listing it under --gap hands the
+        # reader an invocation that is guaranteed to refuse.
+        caps = [c for c in caps
+                if not c.measured and c.present and not c.blocked]
 
     if a.json:
         print(json.dumps({"capabilities": [vars(c) for c in caps]}, indent=2))
@@ -379,10 +383,24 @@ def cmd_discover(a) -> int:
     for lane in sorted(by_lane):
         print(f"\n{lane}")
         for c in sorted(by_lane[lane], key=lambda c: (c.measured, c.name)):
-            mark = "measured" if c.measured else ("MISSING " if not c.present
-                                                  else "NEVER RUN")
+            # BROKEN OUTRANKS measured, deliberately. upscale-seedvr2 HAS been
+            # measured -- 0/3, precisely because it cannot run -- and printing
+            # it as "measured" told the reader it was fine.
+            if c.blocked:
+                mark = "BROKEN"
+            elif not c.present:
+                mark = "MISSING"
+            elif c.measured:
+                mark = "measured"
+            else:
+                mark = "NEVER RUN"
             print(f"  {mark:9} {c.kind:7} {c.name}")
-            if not c.measured and c.present:
+            # A refusal without its reason sends the reader to the wrong repo.
+            if c.blocked:
+                print(f"            !! {c.blocked}")
+            elif not c.present and c.note:
+                print(f"            !! {c.note}")
+            elif not c.measured:
                 print(f"            -> {c.how}")
     total, done = len(caps), sum(1 for c in caps if c.measured)
     print(f"\n{done}/{total} measured. The rest have never been run here.")

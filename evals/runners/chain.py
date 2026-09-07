@@ -21,6 +21,7 @@ from pathlib import Path
 
 from harness import memory, proc
 from harness.engines import Engine
+from harness.stages import stage_unavailable
 
 from evals.core import Case
 from evals.runners.base import BaseRunner, RunnerError
@@ -148,6 +149,15 @@ class ChainRunner(BaseRunner):
         scale = STAGE_SCALE.get(self.stage, 1)
         w, h = case.params.get("width"), case.params.get("height")
         self.expect_size = (w * scale, h * scale) if (w and h) else None
+
+        # A STAGE KNOWN BROKEN COSTS A FULL GENERATION TO DISCOVER. The crash
+        # is in stage two, so without this the base engine diffuses an image
+        # for every case purely to hand it to something that cannot run. The
+        # refusal is version-pinned (harness/stages.py), so an mflux upgrade
+        # lets it be tried again rather than hiding the fix.
+        broken = stage_unavailable(self.stage)
+        if broken:
+            raise RunnerError(broken)
 
         # BEFORE stage one, not between the stages: fifty seconds of
         # diffusion followed by a refusal is fifty seconds thrown away.

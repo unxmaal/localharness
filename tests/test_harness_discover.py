@@ -273,3 +273,35 @@ def test_a_workflow_primitive_says_what_it_needs(tmp_path):
     (b / "mflux-generate-controlnet").touch()
     c = discover.image_engines(b)[0]
     assert "input" in c.note.lower() or "runner" in c.note.lower()
+
+
+def test_methods_lists_the_workflows_that_exist_not_a_stale_pair():
+    """It used to hardcode two and cite #18 as the reason. #18 is closed."""
+    from harness.stages import STAGE_ENTRY_POINTS
+    names = {c.name for c in discover.methods()}
+    assert {"llm", "trace", "repair"} <= names
+    assert set(STAGE_ENTRY_POINTS) <= names
+
+
+def test_a_broken_stage_carries_its_reason_and_is_not_a_gap():
+    """BROKEN is a third state. `present` is about installation and `measured`
+    is about history; upscale-seedvr2 is installed, HAS been measured (0/3,
+    because it crashes), and must not read as either fine or absent."""
+    ms = {c.name: c for c in discover.methods()}
+    seed = ms["upscale-seedvr2"]
+    assert seed.blocked and "#27" in seed.blocked
+    assert seed.present, "it is installed; it just cannot run"
+    assert not ms["controlnet"].blocked
+
+
+def test_an_implemented_primitive_is_a_candidate_not_a_gap(tmp_path):
+    """Three of the nineteen have a runner; discover must stop calling them
+    'no runner yet' or it reports the repo as it was months ago."""
+    for n in ("mflux-generate-controlnet", "mflux-upscale-controlnet",
+              "mflux-generate-depth"):
+        (tmp_path / n).write_text("")
+    got = {c.name: c for c in discover.image_engines(tmp_path)}
+    assert "--candidates controlnet:" in got["mflux-generate-controlnet"].how
+    assert "no runner yet" not in got["mflux-upscale-controlnet"].how
+    # Still a genuine gap, and it must keep reading as one.
+    assert "no runner yet" in got["mflux-generate-depth"].how
