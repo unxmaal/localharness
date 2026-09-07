@@ -23,6 +23,7 @@ reports success.
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 import time
@@ -82,9 +83,43 @@ INSTALL_HINT = {
 }
 
 
+#: Set by main() from --json. A module global because every verb reports
+#: through err()/say(), and threading a flag through nine functions to reach
+#: two print statements is worse than this.
+_JSON = False
+_VERB = ""
+
+
 def err(msg: str) -> int:
-    print(msg, file=sys.stderr)
+    """Report a failure. Under --json it is DATA on stdout, not a stderr line.
+
+    An agent that has to read stderr to discover something went wrong will not
+    read stderr. The exit code stays 1 either way.
+    """
+    if _JSON:
+        print(json.dumps({"ok": False, "verb": _VERB, "error": msg}))
+    else:
+        print(msg, file=sys.stderr)
     return 1
+
+
+def say(*, path=None, body=None, seconds=None, peak_kb=None,
+        human: str = "") -> int:
+    """Report a success, in whichever shape the caller asked for."""
+    if _JSON:
+        out = {"ok": True, "verb": _VERB}
+        if path is not None:
+            out["path"] = str(path)
+        if body is not None:
+            out["body"] = body
+        if seconds is not None:
+            out["seconds"] = round(seconds, 3)
+        if peak_kb:
+            out["peak_gib"] = round(peak_kb / 1024 / 1024, 2)
+        print(json.dumps(out))
+    else:
+        print(human)
+    return 0
 
 
 def default_output(kind: str, suffix: str) -> Path:
@@ -143,8 +178,9 @@ def _generate(spec: str, prompt: str, out: Path, params: dict) -> int:
     elif not out.exists() or out.stat().st_size == 0:
         return err(f"{engine.name} exited 0 but left no output at {out}")
 
-    print(f"{out}  ({r.seconds:.1f}s, peak {r.peak_kb / 1024 / 1024:.1f} GiB)")
-    return 0
+    return say(path=out, seconds=r.seconds, peak_kb=r.peak_kb,
+               human=f"{out}  ({r.seconds:.1f}s, "
+                     f"peak {r.peak_kb / 1024 / 1024:.1f} GiB)")
 
 
 def cmd_image(a) -> int:
@@ -176,8 +212,7 @@ def _text(a, modality: str, suffix: str, checker) -> int:
     if not checked.ok:
         # Written anyway: you cannot debug what was deleted.
         return err(f"wrote {out}, but it does not check out: {checked.reason}")
-    print(f"{out}")
-    return 0
+    return say(path=out, body=body, human=str(out))
 
 
 #: The prompt an image model needs to produce something a tracer can use. A
@@ -223,8 +258,7 @@ def _svg_by_tracing(a) -> int:
         print(f"warning: {w}", file=sys.stderr)
     if not checked.ok:
         return err(f"wrote {out}, but it does not check out: {checked.reason}")
-    print(f"{out}")
-    return 0
+    return say(path=out, body=svg, human=str(out))
 
 
 def cmd_web(a) -> int:
@@ -250,10 +284,8 @@ def _answer(a, modality: str, context: str = "") -> int:
         out = Path(a.output)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(body if body.endswith("\n") else body + "\n")
-        print(f"{out}")
-    else:
-        print(body)
-    return 0
+        return say(path=out, body=body, human=str(out))
+    return say(body=body, human=body)
 
 
 def cmd_code(a) -> int:
@@ -294,8 +326,7 @@ def cmd_say(a) -> int:
         return err(str(exc))
     if a.play:
         proc.run(audio.play_argv(out))
-    print(f"{out}")
-    return 0
+    return say(path=out, human=str(out))
 
 
 def cmd_voices(a) -> int:
@@ -332,10 +363,10 @@ def cmd_hear(a) -> int:
             return err(f"recording failed (exit {r.returncode})\n{r.stderr.strip()}")
 
     try:
-        print(audio.transcribe(clip, base_url=a.base_url))
+        text = audio.transcribe(clip, base_url=a.base_url)
     except audio.AudioError as exc:
         return err(str(exc))
-    return 0
+    return say(path=clip, body=text, human=text)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -422,12 +453,21 @@ def build_parser() -> argparse.ArgumentParser:
     h.add_argument("--base-url", default=audio.DEFAULT_BASE_URL)
     h.set_defaults(func=cmd_hear)
 
+    # On EVERY verb. A flag that only some subcommands accept is worse than no
+    # flag: the caller cannot rely on it without first knowing which.
+    for parser in sub.choices.values():
+        parser.add_argument("--json", action="store_true",
+                            help="machine-readable result on stdout, including "
+                                 "on failure")
     return ap
 
 
 def main(argv: list[str] | None = None) -> int:
+    global _JSON, _VERB
     ap = build_parser()
     a = ap.parse_args(argv)
+    _JSON = bool(getattr(a, "json", False))
+    _VERB = getattr(a, "command", "") or ""
     # Before anything spawns mflux or h3. Installed on PATH this runs with
     # nothing sourced, and an unset HF_HOME sends huggingface_hub to
     # ~/.cache/huggingface to re-download weights that are already on the

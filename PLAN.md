@@ -610,7 +610,21 @@ of those.
 
    `q3-coder` remains refused at 16 GB; see the table below.
 
-7. **`--json` on every verb.** The primary caller is an agent parsing stdout.
+7. **DONE 2026-09-07. `--json` on every verb.** The primary caller is an agent
+   parsing stdout, not a person reading it.
+
+       $ lh extract "how many tests passed?" -f run.log --json
+       {"ok": true, "verb": "extract", "body": "671"}
+       $ lh extract "how many?" -f missing.log --json          # exit 1
+       {"ok": false, "verb": "extract", "error": "no such file: missing.log"}
+
+   FAILURES ARE DATA TOO, on stdout, not a line on stderr. An agent that has to
+   read stderr to discover something went wrong will not read stderr. The exit
+   code is unchanged either way.
+
+   Added centrally to every subparser rather than verb by verb: a flag only
+   some verbs accept is worse than no flag, because the caller cannot rely on it
+   without first knowing which.
 
 8. **Verify a cloned voice resembles its reference.** WER measures
    intelligibility and says nothing about identity, which is the whole point of

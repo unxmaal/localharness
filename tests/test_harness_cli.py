@@ -536,3 +536,67 @@ def test_svg_and_web_have_their_own_defaults():
     assert p.parse_args(["svg", "x"]).model == cli.DEFAULT_SVG_MODEL
     assert p.parse_args(["web", "x"]).model == cli.DEFAULT_WEB_MODEL
     assert cli.DEFAULT_SVG_MODEL != cli.DEFAULT_WEB_MODEL
+
+
+def last_json(capsys):
+    """The last line printed to stdout, parsed. Uses the capsys FIXTURE: the
+    first version read sys.stdout.getvalue(), which is only a thing when
+    stdout happens to be a StringIO."""
+    import json as _json
+    return _json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+
+# ---- --json ---------------------------------------------------------------
+# The primary caller is an agent parsing stdout, not a person reading it. Every
+# verb currently prints a path or a body and the agent has to guess the shape.
+
+@respx.mock
+def test_json_output_carries_the_path_and_the_timing(spy, tmp_path, capsys):
+    dest = tmp_path / "a.png"
+    assert cli.main(["image", "a fox", "-o", str(dest), "--json"]) == 0
+    out = last_json(capsys)
+    assert out["ok"] is True
+    assert out["path"] == str(dest)
+    assert out["seconds"] > 0
+    assert out["verb"] == "image"
+
+
+@respx.mock
+def test_json_on_a_text_verb_carries_the_body(tmp_path, capsys):
+    respx.post(f"{GW}/v1/chat/completions").mock(
+        return_value=completion("<svg xmlns='http://www.w3.org/2000/svg' "
+                                "viewBox='0 0 9 9'><circle r='3'/></svg>"))
+    assert cli.main(["svg", "a dot", "-o", str(tmp_path / "d.svg"), "--json"]) == 0
+    out = last_json(capsys)
+    assert out["ok"] is True and out["body"].startswith("<svg")
+
+
+@respx.mock
+def test_json_reports_a_failure_as_data_not_a_stderr_line(tmp_path, capsys):
+    """An agent that has to read stderr to find out something went wrong will
+    not read stderr."""
+    respx.post(f"{GW}/v1/chat/completions").mock(
+        return_value=completion("I would rather not."))
+    rc = cli.main(["svg", "a dot", "-o", str(tmp_path / "d.svg"), "--json"])
+    out = last_json(capsys)
+    assert rc == 1
+    assert out["ok"] is False
+    assert out["error"]
+
+
+@respx.mock
+def test_json_on_extract_carries_the_answer(tmp_path, capsys):
+    log = tmp_path / "b.log"
+    log.write_text("3 tests failed")
+    respx.post(f"{GW}/v1/chat/completions").mock(return_value=completion("3"))
+    assert cli.main(["extract", "how many?", "-f", str(log), "--json"]) == 0
+    assert last_json(capsys)["body"] == "3"
+
+
+def test_every_verb_accepts_json():
+    """A flag on some verbs is worse than no flag: the caller cannot rely on
+    it without knowing which."""
+    p = cli.build_parser()
+    for verb in ("image", "video", "svg", "web", "code", "extract", "say", "hear"):
+        args = p.parse_args([verb, "x"] if verb not in ("hear",) else [verb])
+        assert hasattr(args, "json"), verb
