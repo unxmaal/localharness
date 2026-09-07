@@ -6,6 +6,38 @@ Last rewritten 2026-09-07, against a working tree. Numbers here were measured
 on this machine; `docs/validation-log.md` holds the evidence, including
 conclusions that were wrong and how they were caught.
 
+---
+
+## THIS FILE IS NOT THE AUTHORITY ON WHAT IS BEING DONE
+
+Work lives in GitHub issues: <https://github.com/unxmaal/localharness/issues>,
+indexed by the roadmap issue #16.
+
+| | authority on | |
+|---|---|---|
+| **Issues** | WHAT is being done, and its state | current |
+| **PLAN.md** | WHY: the argument for a decision, and the measurement behind it | reasoning |
+
+**When they disagree, the issues are right.** Section 5 of this file was
+rewritten three times in one week because state was living in prose, and prose
+is stale the moment anything is measured. Section 4 stays, because "what was
+measured" is evidence rather than state.
+
+### How work happens here
+
+- an issue before the code, so the argument is durable rather than sitting in a
+  transcript
+- a branch per issue, named for it (`17-lh-discover`)
+- a PR referencing the issue, so it closes on merge
+- `make check` green before the PR is opened
+- the PR body says what was MEASURED, because that is what a reviewer needs
+
+Everything before 2026-09-07 was committed straight to `main`, including one
+commit that broke `evals/run.py` with an indentation error and was caught only
+because the tests happened to run immediately afterwards.
+
+---
+
 ## 1. What this is for
 
 Generate images, video, SVG and web pages, and talk to the machine, entirely
@@ -362,10 +394,9 @@ h3.c. Fallback only.
 
 ## 5. What is next, in order
 
-**Tracked as GitHub issues from 2026-09-07.**
-<https://github.com/unxmaal/localharness/issues> — #16 is the roadmap index.
-This section states the reasoning; the issues carry the state. When they
-disagree, the issues are current.
+**The issues carry the state; this section carries the reasoning.** See the
+note at the top of this file. Items below are annotated with their issue where
+one exists, and the issue is the current word on whether it is done.
 
 ### The bar
 
