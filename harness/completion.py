@@ -123,7 +123,8 @@ def complete(prompt: str, model: str, gateway: str = DEFAULT_GATEWAY,
                        headers={"Authorization": "Bearer sk-local"})
         r.raise_for_status()
         choices = r.json().get("choices") or []
-        text = choices[0]["message"]["content"]
+        message = choices[0]["message"]
+        text = message.get("content")
     except httpx.TimeoutException as exc:
         raise CompletionError(f"timed out after {timeout}s") from exc
     except httpx.HTTPStatusError as exc:
@@ -137,7 +138,20 @@ def complete(prompt: str, model: str, gateway: str = DEFAULT_GATEWAY,
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         raise CompletionError(f"malformed response: {exc}") from exc
 
-    if not text or not text.strip():
+    if text is None or not text.strip():
+        # A THINKING MODEL that spent its whole budget reasoning returns null
+        # content and a populated reasoning_content. Qwen3-8B and Qwen3-14B do
+        # this; Qwen3-4B-Instruct-2507 and Qwen2.5 do not. Saying so beats a
+        # TypeError from three frames away, or "empty completion" for a model
+        # that in fact produced 4000 tokens of thought.
+        reasoning = message.get("reasoning_content") or ""
+        if reasoning:
+            raise CompletionError(
+                f"{model} returned no answer: it spent the whole "
+                f"{max_tokens}-token budget on reasoning "
+                f"({len(reasoning)} characters of it). This is a hybrid "
+                f"thinking model; use a non-thinking one for this lane, or "
+                f"raise max_tokens.")
         raise CompletionError("empty completion")
     return text
 

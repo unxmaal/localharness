@@ -125,6 +125,8 @@ _hf_fatal() {
   return 1 2>/dev/null || exit 1
 }
 
+_hf_explicit=0
+[ -n "${HF_ROOT:-}" ] && _hf_explicit=1
 if [ -n "${HF_ROOT:-}" ]; then
   _hf_usable "$HF_ROOT" \
     || _hf_fatal "HF_ROOT=$HF_ROOT is not writable or has under ${HF_MIN_FREE_GB}GB free." \
@@ -162,7 +164,9 @@ fi
 # weights sitting on a drive that happens to be unplugged. The difference is
 # whether we have been here before, so record it and refuse to move silently.
 HF_STATE_FILE="${HF_STATE_FILE:-$HOME/.localharness-hf-root}"
-if [ -f "$HF_STATE_FILE" ]; then
+# Only police the AUTO-PICK. An explicit HF_ROOT is the caller saying where
+# the weights are, which is the same statement HF_ALLOW_MOVE makes.
+if [ "$_hf_explicit" = "0" ] && [ -f "$HF_STATE_FILE" ]; then
   _hf_prev="$(cat "$HF_STATE_FILE" 2>/dev/null)"
   if [ -n "$_hf_prev" ] && [ "$_hf_prev" != "$HF_ROOT" ] && [ "${HF_ALLOW_MOVE:-0}" != "1" ]; then
     echo "FATAL: the weights cache moved." >&2
@@ -190,6 +194,7 @@ fi
 mkdir -p "$HF_ROOT" || _hf_fatal "cannot create $HF_ROOT" \
   || return 1 2>/dev/null || exit 1
 printf '%s\n' "$HF_ROOT" > "$HF_STATE_FILE" 2>/dev/null || true
+unset _hf_explicit
 
 # Cached weights should not depend on the network. mlx_lm.server issues a HEAD
 # to huggingface.co on every model switch even for local files, so a wifi blip

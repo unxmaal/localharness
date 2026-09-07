@@ -49,8 +49,19 @@ def state(tmp_path):
 def test_the_chosen_root_is_remembered(tmp_path, state):
     a = tmp_path / "a"
     a.mkdir()
-    run_env_raw(hf_root=str(a), state=state)
+    run_env_raw(candidates=str(a), state=state)
     assert Path(state).read_text().strip() == str(a)
+
+
+def test_an_explicit_hf_root_is_never_blocked(tmp_path, state):
+    """Setting HF_ROOT IS the caller saying where the weights are, which is the
+    same statement HF_ALLOW_MOVE makes. Policing it would make the guard fire
+    on every deliberate override."""
+    a = tmp_path / "elsewhere"
+    a.mkdir()
+    Path(state).write_text(str(tmp_path / "recorded") + "\n")
+    proc = run_env_raw(hf_root=str(a), state=state)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
 def test_falling_back_to_a_different_root_is_fatal(tmp_path, state):

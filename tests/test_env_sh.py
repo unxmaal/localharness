@@ -7,6 +7,7 @@ here is a way that guard could fail open.
 import os
 import shutil
 import subprocess
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -23,6 +24,11 @@ pytestmark = pytest.mark.skipif(
 def run_env(hf_root=None, candidates=None, shell="bash", min_free_gb=None):
     """Source env.sh in a clean shell; return (exit_code, HF_HOME, stderr)."""
     env = {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"]}
+    # Isolate the "where did we land last time" record. Without this, every
+    # auto-pick test inherits the real one from $HOME and trips the guard
+    # against relocating the cache -- these tests deliberately pick scratch
+    # directories, which is exactly what that guard exists to refuse.
+    env["HF_STATE_FILE"] = str(Path(tempfile.mkdtemp()) / "root-state")
     if hf_root is not None:
         env["HF_ROOT"] = hf_root
     if candidates is not None:

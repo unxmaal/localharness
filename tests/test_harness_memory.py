@@ -71,3 +71,40 @@ def test_check_model_is_a_one_call_verdict_for_a_repo_id(tmp_path, monkeypatch):
     ok, why = memory.check_model("mlx-community/Unknown-Model")
     # Unknown size must not be silently approved; it warns and allows.
     assert ok and "unknown" in why.lower()
+
+
+def test_hardlinked_and_symlinked_blobs_are_counted_once(tmp_path):
+    """The HF cache keeps real files in blobs/ and symlinks them into
+    snapshots/. Counting both reported every model at exactly TWICE its size,
+    which made the guard refuse models that fit comfortably -- a guard that
+    cries wolf gets switched off."""
+    d = tmp_path / "models--mlx-community--Fake"
+    blobs = d / "blobs"
+    snap = d / "snapshots" / "abc"
+    blobs.mkdir(parents=True)
+    snap.mkdir(parents=True)
+    real = blobs / "deadbeef"
+    real.write_bytes(b"x" * (4 * 1024 ** 2))
+    (snap / "model.safetensors").symlink_to(real)
+    assert memory.size_gb(str(d)) == pytest.approx(4 / 1024, rel=0.05)
+
+
+def test_reclaimable_pages_count_as_available(monkeypatch):
+    """Free + inactive alone understates badly on a machine that has just read
+    93GB of weights: most of what macOS calls active is file cache it will
+    give back. Speculative and purgeable are reclaimable too, and leaving them
+    out made the guard refuse a model on a machine `memory_pressure` called
+    92% free."""
+    fake = '''Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                                    65536.
+Pages active:                                 100000.
+Pages inactive:                                65536.
+Pages speculative:                             65536.
+Pages purgeable:                               65536.
+Pages wired down:                              10000.
+'''
+    class R:
+        stdout = fake
+    monkeypatch.setattr(memory.subprocess, "run", lambda *a, **k: R())
+    # 4 buckets x 65536 pages x 16KB = 4 GB
+    assert memory.available_gb() == pytest.approx(4.0, rel=0.02)

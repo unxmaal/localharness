@@ -75,7 +75,13 @@ def available_gb() -> float:
             digits = [w for w in line.split() if w.isdigit()]
             if digits:
                 page = int(digits[0])
-    free = counts.get("Pages free", 0) + counts.get("Pages inactive", 0)
+    # Free plus everything macOS will hand back without paging anything out.
+    # Free + inactive ALONE understates badly right after reading a large model
+    # off disk: most of what shows as active is file cache. On an idle machine
+    # that `memory_pressure` called 92% free, free+inactive read 12.8 GB.
+    free = sum(counts.get(k, 0) for k in
+               ("Pages free", "Pages inactive", "Pages speculative",
+                "Pages purgeable"))
     if not free:
         return total_gb()
     return free * page / 1024 ** 3
@@ -116,13 +122,22 @@ def size_gb(path: str) -> float | None:
     root = Path(path)
     if not root.exists():
         return None
+    # Deduplicate by inode. The HuggingFace cache keeps the real weights in
+    # blobs/ and symlinks them into snapshots/, so walking naively counts
+    # every file TWICE -- which reported a 4.3 GB model as 8.6 GB and had the
+    # guard refusing models that fit with room to spare.
     total = 0
+    seen: set[tuple[int, int]] = set()
     for f in root.rglob("*"):
         try:
-            if f.is_file() and not f.is_symlink():
-                total += f.stat().st_size
-            elif f.is_symlink() and f.resolve().is_file():
-                total += f.resolve().stat().st_size
+            st = f.stat()          # follows symlinks, which is what we want
+            if not f.is_file():
+                continue
+            key = (st.st_dev, st.st_ino)
+            if key in seen:
+                continue
+            seen.add(key)
+            total += st.st_size
         except OSError:
             continue
     return total / 1024 ** 3 if total else None

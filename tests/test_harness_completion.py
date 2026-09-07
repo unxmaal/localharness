@@ -223,3 +223,35 @@ def test_a_caller_can_override_the_sampling_to_measure_it(tmp_path):
     sent = json.loads(route.calls[0].request.read())
     assert sent["repetition_penalty"] == 1.0
     assert sent["temperature"] == 0.5
+
+
+# ---- thinking models -------------------------------------------------------
+# Qwen3-8B and Qwen3-14B are hybrid-thinking. mlx_lm puts the reasoning in a
+# separate `reasoning_content` field, so nothing leaks into the artifact -- but
+# it spends the token budget. 152 completion tokens to answer "reply with
+# exactly: OK", against 2 for a non-thinking model. On an SVG the whole 4000
+# goes to reasoning and `content` comes back NULL.
+
+@respx.mock
+def test_a_null_content_is_a_clear_error_not_a_typeerror(tmp_path):
+    """It arrived as `TypeError: object of type 'NoneType' has no len()` from
+    somewhere far away. The caller needs to be told which model did it and
+    why."""
+    respx.post(f"{GW}/v1/chat/completions").mock(return_value=httpx.Response(
+        200, json={"choices": [{"message": {
+            "content": None,
+            "reasoning_content": "Okay, the user wants an SVG. Let me think..."}}]}))
+    with pytest.raises(comp.CompletionError) as e:
+        comp.complete("a gear", model="q3-14b", gateway=GW, modality="svg")
+    msg = str(e.value)
+    assert "reasoning" in msg.lower()
+    assert "q3-14b" in msg
+
+
+@respx.mock
+def test_an_ordinary_empty_completion_still_reads_as_empty(tmp_path):
+    respx.post(f"{GW}/v1/chat/completions").mock(return_value=httpx.Response(
+        200, json={"choices": [{"message": {"content": "   "}}]}))
+    with pytest.raises(comp.CompletionError) as e:
+        comp.complete("hi", model="local-mid", gateway=GW)
+    assert "empty" in str(e.value).lower()

@@ -36,17 +36,34 @@ from harness.engines import resolve
 
 DEFAULT_IMAGE_ENGINE = "mflux:flux2-klein-4b"
 DEFAULT_VIDEO_ENGINE = "h3"
-DEFAULT_TEXT_MODEL = "local-mid"
-# Both of these are local-large on the eval's evidence rather than on the
-# assumption in their names. extract exists to delegate cheap work, but
-# local-small answered 40% of the lane and local-large 90% -- and 0.79s is
-# still cheap, while being wrong is not. code is the same call for a weaker
-# reason: local-mid passes more cases outright, local-large scores better on
-# the graded fraction, and with nine cases the graded number uses more of the
-# evidence. Re-derive both with:
-#   uv run python -m evals.run --modality extract --candidates local-large,local-mid,local-small
+# Per-lane defaults, set from the eval of 2026-09-06 rather than from a tier
+# name. NO SINGLE MODEL WINS ALL FOUR LANES, so there is no one default to
+# pick. Re-derive with:
+#   uv run python -m evals.run --modality <lane> --repeat 3 \
+#     --candidates local-mid,local-large,q3-4b,q3-8b,q3-14b
+#
+#   lane     winner       runner-up            why
+#   svg      local-large  q3-14b               7/9 both; 4.7s vs 10.0s
+#   web      local-large  q3-14b               6/6 both; 21s vs 61s
+#
+# q3-14b scores marginally better ink on both and is NOT used, because it is a
+# hybrid THINKING model: it answers "reply with exactly: OK" in 152 completion
+# tokens against 2, and on a real SVG it spends the entire budget reasoning and
+# returns null content. `lh svg` timed out twice at 180s on it. q3-8b is worse
+# still: 0/9 on svg, every run a timeout. The eval's pass rate and median hid
+# this, because an aggregate does not show you HOW the failures fail.
+#   code     q3-4b        q3-8b                6/9 both; 2.9s vs 130s
+#   extract  local-large  q3-14b               9/10 both; 0.79s vs 13.4s
+#
+# Qwen2.5-7B (local-large) KEEPS the extract lane on merit: same accuracy as
+# Qwen3-14B at seventeen times the speed. Being a generation behind did not
+# make it wrong for a job that is one short answer from a log.
+#
+# Qwen2.5-1.5B (local-mid) was the default for svg and web and scored 2/9 and
+# 3/6. That was the single worst consequence of never having compared anything.
+DEFAULT_TEXT_MODEL = "local-large"  # svg, web
+DEFAULT_CODE_MODEL = "q3-4b"
 DEFAULT_EXTRACT_MODEL = "local-large"
-DEFAULT_CODE_MODEL = "local-large"
 OUTDIR = Path("out")
 
 # Named per engine family because the fix differs, and because `uv tool install
