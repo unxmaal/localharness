@@ -88,3 +88,33 @@ def test_system_prompt_steers_toward_bare_output():
     msgs = json.loads(route.calls.last.request.content)["messages"]
     assert msgs[0]["role"] == "system"
     assert "svg" in msgs[0]["content"].lower()
+
+
+def test_the_runner_reports_tokens_per_second(tmp_path):
+    """Latency alone cannot separate a terse model from a fast one."""
+    import httpx
+    import respx
+    from evals.core import Case
+    with respx.mock:
+        respx.post("http://gw/v1/chat/completions").mock(
+            return_value=httpx.Response(200, json={
+                "choices": [{"message": {"content": "<svg/>"}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 200}}))
+        r = CompletionRunner("http://gw", "local-mid").run(
+            Case(id="x", modality="svg", prompt="a gear"))
+    assert r.metrics["tokens_per_s"] > 0
+    assert r.metrics["completion_tokens"] == 200
+
+
+def test_no_usage_means_no_throughput_metric(tmp_path):
+    """Missing, not zero: a zero would rank as the slowest candidate."""
+    import httpx
+    import respx
+    from evals.core import Case
+    with respx.mock:
+        respx.post("http://gw/v1/chat/completions").mock(
+            return_value=httpx.Response(200, json={
+                "choices": [{"message": {"content": "<svg/>"}}]}))
+        r = CompletionRunner("http://gw", "local-mid").run(
+            Case(id="x", modality="svg", prompt="a gear"))
+    assert "tokens_per_s" not in r.metrics

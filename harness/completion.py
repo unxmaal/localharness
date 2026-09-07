@@ -93,13 +93,21 @@ def user_message(prompt: str, context: str = "") -> str:
 
 
 def complete(prompt: str, model: str, gateway: str = DEFAULT_GATEWAY,
+             **kw) -> str:
+    """Ask `model` for a completion. Returns the raw text, unrecovered."""
+    return complete_with_usage(prompt, model, gateway, **kw)[0]
+
+
+def complete_with_usage(prompt: str, model: str, gateway: str = DEFAULT_GATEWAY,
              modality: str = "", context: str = "", timeout: float = 180.0,
              temperature: float | None = None, max_tokens: int = 4000,
-             sampling: dict | None = None) -> str:
-    """Ask `model` for a completion. Returns the raw text, unrecovered.
+             sampling: dict | None = None) -> tuple[str, dict]:
+    """As `complete()`, but also returns the server's token `usage`.
 
-    `sampling` overrides the per-modality defaults, so the eval can run the
-    same case with a knob on and off and let the numbers decide.
+    The gateway reports usage on every completion and this was thrown away, so
+    the text lanes measured latency and never throughput -- two candidates can
+    share a median while one of them wrote three times as much. Absent usage is
+    an empty dict, never an error: mlx_lm.server has answered without the block.
     """
     knobs = dict(SAMPLING.get(modality, {}))
     if temperature is not None:
@@ -122,9 +130,11 @@ def complete(prompt: str, model: str, gateway: str = DEFAULT_GATEWAY,
                        json=payload, timeout=timeout,
                        headers={"Authorization": "Bearer sk-local"})
         r.raise_for_status()
-        choices = r.json().get("choices") or []
+        body = r.json()
+        choices = body.get("choices") or []
         message = choices[0]["message"]
         text = message.get("content")
+        usage = body.get("usage") or {}
     except httpx.TimeoutException as exc:
         raise CompletionError(f"timed out after {timeout}s") from exc
     except httpx.HTTPStatusError as exc:
@@ -153,7 +163,7 @@ def complete(prompt: str, model: str, gateway: str = DEFAULT_GATEWAY,
                 f"thinking model; use a non-thinking one for this lane, or "
                 f"raise max_tokens.")
         raise CompletionError("empty completion")
-    return text
+    return text, usage
 
 
 

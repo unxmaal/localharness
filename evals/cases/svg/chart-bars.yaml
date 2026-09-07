@@ -9,4 +9,7 @@ prompt: |
 methods: [llm]
 assert:
   min_shapes: 6
-  must_contain: ["text"]
+  # "<text" not "text": a bare word matched "context" anywhere in the document
+  # before the matcher gained word boundaries, and this is the needle that
+  # exposed it. An element assertion should name the element.
+  must_contain: ["<text"]

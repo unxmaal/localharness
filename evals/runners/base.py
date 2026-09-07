@@ -33,6 +33,11 @@ class RunnerError(RuntimeError):
 
 
 class BaseRunner:
+    def extra_metrics(self) -> dict:
+        """Numbers the RUNNER measured, merged into the row alongside the
+        checker's. Empty for runners that measure nothing extra."""
+        return {}
+
     #: Name this runner reports in every row. Set by the subclass.
     candidate: str = ""
 
@@ -67,6 +72,9 @@ class BaseRunner:
         row = score(case, artifact, **self.score_kwargs())
         row.candidate = self.candidate
         row.seconds = round(elapsed, 3)
+        # A runner may have measured something the checker cannot see,
+        # such as tokens/sec from the server's usage block.
+        row.metrics = {**row.metrics, **self.extra_metrics()}
         row.peak_kb = peak_kb
         row.artifact = artifact if isinstance(artifact, str) else str(artifact)
         return row

@@ -17,6 +17,34 @@ DRAWING = {"path", "circle", "rect", "ellipse", "line", "polyline", "polygon",
            "text", "use", "image", "g"}
 
 
+#: Attributes that, at zero, make a shape invisible whatever else it has.
+_EXTENT_ATTRS = {"rect": ("width", "height"), "circle": ("r",),
+                 "ellipse": ("rx", "ry"), "line": (), "path": (),
+                 "polyline": (), "polygon": (), "text": ()}
+
+
+def _has_extent(el) -> bool:
+    """False for a shape that cannot mark the canvas at any zoom."""
+    name = el.tag.replace(SVG_NS, "")
+    attrs = _EXTENT_ATTRS.get(name)
+    if not attrs:
+        # path/line/polygon have no size attribute; an empty `d` is the
+        # equivalent and the only one worth catching cheaply.
+        if name in ("path",) and not (el.get("d") or "").strip():
+            return False
+        return True
+    for a in attrs:
+        raw = (el.get(a) or "").strip()
+        if not raw:
+            continue
+        try:
+            if float(raw.rstrip("px%")) == 0:
+                return False
+        except ValueError:
+            continue
+    return True
+
+
 def check(text: str) -> CheckResult:
     src = extract(text, ("svg",))
     if not src.strip():
@@ -35,6 +63,11 @@ def check(text: str) -> CheckResult:
               if e.tag.replace(SVG_NS, "") in DRAWING and e is not root]
     # A <g> alone draws nothing; require at least one real mark.
     marks = [e for e in shapes if e.tag.replace(SVG_NS, "") != "g"]
+    # NOR DOES A SHAPE WITH NO EXTENT. Eight `<rect width="0" height="0"/>`
+    # satisfied `min_shapes: 6` and passed the case. The rasterizer catches a
+    # wholly blank document, but not six real marks padded out with eight
+    # invisible ones, and the count is what the assertion reads.
+    marks = [e for e in marks if _has_extent(e)]
 
     warnings: list[str] = []
     if not root.get("viewBox"):

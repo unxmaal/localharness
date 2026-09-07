@@ -473,6 +473,11 @@ def report(summary: dict) -> None:
         # drew LEAST on the top line.
         scores = []
         for name in metric_names:
+            # A NEUTRAL metric is reported and never ranked on. completion
+            # tokens is the case: more is not better, and as higher-is-better
+            # it would have put the most verbose candidate first.
+            if direction_of(name) == "neutral":
+                continue
             value = s["metrics"].get(name)
             if value is None:
                 # A candidate that reported nothing must sort LAST, not as a
@@ -483,7 +488,8 @@ def report(summary: dict) -> None:
                 scores.append(value if direction_of(name) == "lower" else -value)
         return (-s["pass_rate"], scores, s["median_s"])
 
-    arrows = {n: "v" if direction_of(n) == "lower" else "^" for n in metric_names}
+    arrows = {n: {"lower": "v", "higher": "^"}.get(direction_of(n), "-")
+              for n in metric_names}
     header = f"{'candidate':30} {'pass':>7} {'rate':>6} {'median':>8} {'peak':>9}"
     for name in metric_names:
         header += f" {name + ' ' + arrows[name]:>9} {name + '.worst':>13}"
@@ -504,11 +510,14 @@ def report(summary: dict) -> None:
     if metric_names:
         low = [n for n in metric_names if direction_of(n) == "lower"]
         high = [n for n in metric_names if direction_of(n) == "higher"]
+        flat = [n for n in metric_names if direction_of(n) == "neutral"]
         legend = []
         if low:
             legend.append(f"{', '.join(low)}: lower is better (v)")
         if high:
             legend.append(f"{', '.join(high)}: higher is better (^)")
+        if flat:
+            legend.append(f"{', '.join(flat)}: reported, not ranked on (-)")
         print("  " + "; ".join(legend))
 
     # HOW they failed, not just how often. Qwen3-14B scored 7/9 on svg and

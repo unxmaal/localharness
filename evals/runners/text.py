@@ -24,15 +24,33 @@ class CompletionRunner(BaseRunner):
         self.timeout = timeout
 
     def generate(self, case: Case):
+        import time
+
+        started = time.monotonic()
         try:
-            text = completion.complete(case.prompt, model=self.candidate,
-                                       gateway=self.gateway,
-                                       modality=case.modality,
-                                       context=case.context,
-                                       timeout=self.timeout)
+            text, usage = completion.complete_with_usage(
+                case.prompt, model=self.candidate, gateway=self.gateway,
+                modality=case.modality, context=case.context,
+                timeout=self.timeout)
         except completion.CompletionError as exc:
             # One dud must never abort a fifty-case run: every failure is a row.
             raise RunnerError(str(exc)) from exc
+        # THROUGHPUT, not just latency. Two candidates can share a median while
+        # one of them wrote three times as much, and a median alone cannot tell
+        # a terse model from a fast one. Absent when the server reports no
+        # usage -- MISSING rather than zero, because a zero would rank as the
+        # slowest candidate rather than as an unknown.
+        elapsed = time.monotonic() - started
+        out = int(usage.get("completion_tokens") or 0)
+        self.last_metrics = {}
+        if out and elapsed > 0:
+            self.last_metrics = {
+                "completion_tokens": out,
+                "tokens_per_s": round(out / elapsed, 1),
+            }
         # Peak memory is not observable through an HTTP boundary; the server
         # holds the model. Reporting 0 is honest, and summarize() takes a max.
         return text, 0
+
+    def extra_metrics(self) -> dict:
+        return getattr(self, "last_metrics", {})

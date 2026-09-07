@@ -671,7 +671,8 @@ of those.
    ENGLISH: `.logs/fr-accent/` holds three clones of three different men saying
    one English sentence, which is the comparison worth making.
 
-9. **A defect sweep of the codebase**, standing rather than one-off.
+9. **DONE 2026-09-07 (first pass). A defect sweep of the codebase**, standing
+   rather than one-off.
 
    FIRST FINDING, Eric's: outputs had FOUR homes and one was relative --
    `out/` (relative to the caller's cwd), `~/localharness-out/` (MCP),
@@ -698,6 +699,31 @@ of those.
    failed in a full run with its job still queued; and the queue's `ahead`
    counted only QUEUED jobs, telling a caller waiting behind a 54-second image
    that nothing was ahead of it.
+
+   THEN THE 2026-09-05 HOSTILE REVIEW (KB FINDING #93) was re-read and its
+   still-open items closed. Four had survived four months of work:
+
+   - **`must_contain` was a naive substring.** `needle in artifact.lower()`
+     made "text" satisfied by "context" anywhere in the document, and
+     `chart-bars` asserted exactly that needle. A bare word now needs word
+     boundaries; anything with punctuation (`<table`, `type="password"`) stays
+     a raw substring, which is how every author here already writes them.
+   - **Degenerate shapes counted as drawing.** Eight
+     `<rect width="0" height="0"/>` satisfied `min_shapes: 6`. A shape with no
+     extent is not a shape.
+   - **No throughput.** The gateway returns a `usage` block on every completion
+     and the runner discarded it, so the text lanes measured latency and never
+     tokens/sec. Immediately worth it: q3-4b looked 4x slower than local-large
+     on svg (15.3s against 3.8s) and is in fact writing 2.7x as much at a
+     HIGHER 40.5 tokens/sec against 30.8. Verbose, not slow.
+   - **A metric could not be reported without being ranked on.**
+     `completion_tokens` went in as higher-is-better, which would have put the
+     most verbose candidate first. `METRIC_DIRECTION` now has a third value,
+     `neutral`: shown in the table, excluded from the sort.
+
+   STILL OPEN from that review: `comparable()` exists and is tested but nothing
+   calls it across runs -- there is no `--compare a.json b.json`, so the
+   cross-run guard is written and not wired.
 
 ### Refused, with the number that refused it
 

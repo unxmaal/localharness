@@ -986,3 +986,76 @@ def test_a_case_can_declare_which_methods_it_is_fair_to(tmp_path):
     by = {c.id: c for c in load_cases(tmp_path)}
     assert by["bars"].methods == ("llm",)
     assert by["gear"].methods == (), "no declaration means fair to every method"
+
+
+# ---- must_contain was a naive substring ------------------------------------
+# From the 2026-09-05 hostile review, never closed: `must_contain` lowercases
+# both sides and asks `needle in artifact`, so "text" is satisfied by the word
+# "context" anywhere in the document -- including inside a comment or a CSS
+# class name. chart-bars asserted exactly that needle.
+
+def test_a_bare_word_needle_needs_a_word_boundary():
+    from evals.core import contains
+    assert not contains("<svg><desc>a context diagram</desc></svg>", "text")
+    assert contains("<svg><text>9</text></svg>", "text")
+
+
+def test_a_needle_with_punctuation_is_still_a_raw_substring():
+    """Authors already write "<table" and 'type="password"'. Those must keep
+    working exactly as they read."""
+    from evals.core import contains
+    assert contains("<table class=x>", "<table")
+    assert contains('<input type="password">', 'type="password"')
+    assert not contains("<tablet>", "<table ")
+
+
+def test_matching_stays_case_insensitive():
+    from evals.core import contains
+    assert contains("<SVG><TEXT>9</TEXT></SVG>", "text")
+
+
+# ---- degenerate shapes counted as drawing ----------------------------------
+
+def test_zero_sized_shapes_do_not_count_towards_min_shapes():
+    """Also from the hostile review: eight `<rect width="0" height="0"/>`
+    satisfied min_shapes: 6 and the case passed. A shape with no extent is not
+    a shape."""
+    from harness.checks import svg
+    doc = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9">'
+           + '<rect width="0" height="0"/>' * 8 + "</svg>")
+    r = svg.check(doc)
+    assert r.shape_count == 0, f"counted {r.shape_count} invisible rects"
+    assert not r.ok, "a document of zero-size rects draws nothing"
+
+
+def test_real_shapes_still_count():
+    from harness.checks import svg
+    doc = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9">'
+           + '<rect width="3" height="3"/>' * 8 + "</svg>")
+    r = svg.check(doc)
+    assert r.ok and r.shape_count == 8
+
+
+def test_a_metric_can_be_reported_without_being_ranked():
+    """completion_tokens is context, not quality: more tokens is not better,
+    and it went in as higher-is-better which would rank the most verbose
+    candidate first. It explains a latency rather than scoring anything."""
+    from evals.core import direction_of
+    assert direction_of("completion_tokens") == "neutral"
+    assert direction_of("tokens_per_s") == "higher"
+
+
+def test_a_neutral_metric_is_not_used_to_rank(capsys):
+    from evals.core import summarize
+    from evals.run import report
+    s = summarize([
+        Result("a", "terse", True, 1.0, 0, "",
+               metrics={"completion_tokens": 10, "ink": 0.5}),
+        Result("a", "windy", True, 1.0, 0, "",
+               metrics={"completion_tokens": 900, "ink": 0.1}),
+    ])
+    report(s)
+    out = capsys.readouterr().out
+    # Ranked on ink, so the terse one leads despite writing far less.
+    assert out.index("terse") < out.index("windy")
+    assert "completion_tokens" in out, "still reported, just not ranked on"

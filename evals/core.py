@@ -9,6 +9,7 @@ mechanical and shared, so two candidates are always judged by the same ruler.
 """
 from __future__ import annotations
 
+import re
 import statistics
 import warnings
 from dataclasses import dataclass, field
@@ -249,12 +250,19 @@ METRIC_DIRECTION = {
     # Does the clone sound like its reference? A WER cannot see this at
     # all: an intelligible clone in the wrong voice scores a perfect 0.
     "speaker_similarity": "higher",
+    "tokens_per_s": "higher",
+    # NEUTRAL: reported, never ranked on. More tokens is not better -- as
+    # "higher" it would have put the most verbose candidate first. It is here
+    # because it EXPLAINS a latency: q3-4b looked 4x slower than local-large
+    # and was actually writing 2.7x as much, faster per token.
+    "completion_tokens": "neutral",
     "code_pass": "higher",  # fraction of a code case's assertions that ran green
 }
 
 
 def direction_of(metric: str) -> str:
-    """"lower" or "higher". Warns on an undeclared metric rather than guessing
+    """"lower", "higher" or "neutral". Warns on an undeclared metric rather
+    than guessing
     silently, since a wrong guess inverts a ranking with no visible symptom."""
     if metric not in METRIC_DIRECTION:
         warnings.warn(
@@ -271,6 +279,23 @@ PARAM_KEYS = {"width", "height", "steps", "seed", "guidance", "frames",
 # Assertions that need text to search. Declaring one on an image case can only
 # pass vacuously until the suite can OCR, so it is rejected rather than ignored.
 TEXT_ASSERTIONS = {"min_shapes", "must_contain", "must_not_contain"}
+
+_WORDY = re.compile(r"^\w+$")
+
+
+def contains(artifact: str, needle: str) -> bool:
+    """Is `needle` in `artifact`, without matching half a longer word?
+
+    `needle in artifact.lower()` made "text" satisfied by "context" anywhere in
+    the document -- a comment, a CSS class, an attribute value -- and
+    chart-bars asserted exactly that needle. A bare word now needs word
+    boundaries; anything carrying punctuation ("<table", 'type="password"')
+    stays a raw substring, because that is how every author here already writes
+    them and how they read.
+    """
+    if _WORDY.match(needle):
+        return re.search(rf"\b{re.escape(needle)}\b", artifact, re.I) is not None
+    return needle.lower() in artifact.lower()
 #: `equals` is the narrowest and most useful shape for a delegated lookup: one
 #: token out and nothing else, so the answer can be used without parsing.
 EXTRACT_ASSERTIONS = {"must_contain", "must_not_contain", "equals"}
@@ -514,7 +539,7 @@ def score(case: Case, artifact, **checker_kwargs) -> Result:
                       f"{r.shape_count}", warnings=r.warnings)
 
     for needle in a.get("must_contain") or []:
-        if needle.lower() not in artifact.lower():
+        if not contains(artifact, needle):
             return Result(case.id, "", False, 0.0, 0,
                           f"missing required content: {needle}",
                           warnings=r.warnings)

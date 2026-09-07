@@ -255,3 +255,38 @@ def test_an_ordinary_empty_completion_still_reads_as_empty(tmp_path):
     with pytest.raises(comp.CompletionError) as e:
         comp.complete("hi", model="local-mid", gateway=GW)
     assert "empty" in str(e.value).lower()
+
+
+# ---- throughput ------------------------------------------------------------
+# From the 2026-09-05 hostile review, never closed: the gateway returns a
+# `usage` block on every completion and the runner threw it away, so the text
+# lanes reported latency and never tokens/sec. Two candidates can share a
+# median while one of them wrote three times as much.
+
+@respx.mock
+def test_complete_can_report_the_token_usage(tmp_path):
+    respx.post(f"{GW}/v1/chat/completions").mock(return_value=httpx.Response(
+        200, json={"choices": [{"message": {"content": "hi"}}],
+                   "usage": {"prompt_tokens": 11, "completion_tokens": 22}}))
+    text, usage = comp.complete_with_usage("x", model="local-mid", gateway=GW)
+    assert text == "hi"
+    assert usage["completion_tokens"] == 22
+
+
+@respx.mock
+def test_a_server_that_reports_no_usage_is_not_an_error(tmp_path):
+    """mlx_lm.server has answered without a usage block before. Absent
+    throughput is a missing number, not a failed generation."""
+    respx.post(f"{GW}/v1/chat/completions").mock(return_value=httpx.Response(
+        200, json={"choices": [{"message": {"content": "hi"}}]}))
+    text, usage = comp.complete_with_usage("x", model="local-mid", gateway=GW)
+    assert text == "hi" and usage == {}
+
+
+@respx.mock
+def test_complete_still_returns_just_the_text(tmp_path):
+    """The CLI and everything else call complete(); it must not change shape."""
+    respx.post(f"{GW}/v1/chat/completions").mock(return_value=httpx.Response(
+        200, json={"choices": [{"message": {"content": "hi"}}],
+                   "usage": {"completion_tokens": 3}}))
+    assert comp.complete("x", model="local-mid", gateway=GW) == "hi"
