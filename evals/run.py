@@ -29,10 +29,11 @@ from harness.engines import Engine, parse_options, resolve
 
 from dataclasses import replace
 
-from evals.core import (MODALITIES, Case, Receipt, direction_of,
+from evals.core import (MODALITIES, Case, Receipt, comparable, direction_of,
                         load_cases, summarize)
 from evals.environment import capture
 from evals.runners.process import ProcessRunner
+from evals.runners.repair import RepairRunner
 from evals.runners.speech import SpeechRunner
 from evals.runners.trace import TraceRunner
 from evals.runners.text import CompletionRunner
@@ -47,6 +48,10 @@ PROCESS_ENGINES = ("mflux", "h3")
 #: The svg lane's second METHOD: draw a raster, then vectorize it. Written as
 #: `trace:<engine spec>` so the engine underneath stays the ordinary spec.
 TRACE_PREFIX = "trace"
+#: Generate, check, repair. A WORKFLOW rather than a model: `local-large` and
+#: `repair:local-large` are different products. See evals/runners/repair.py.
+REPAIR_PREFIX = "repair"
+REPAIR_OPTIONS = {"attempts"}
 TTS_OPTIONS = {"voice", "ref_audio", "lang_code", "ear"}
 STT_OPTIONS = {"backend", "language"}
 
@@ -62,6 +67,8 @@ def kind_of(candidate: str) -> str:
         return head
     if head == TRACE_PREFIX:
         return TRACE_PREFIX
+    if head == REPAIR_PREFIX:
+        return REPAIR_PREFIX
     return "gateway"
 
 
@@ -75,6 +82,10 @@ def modality_of(candidate: str) -> str | None:
         # It answers svg cases; the engine underneath makes images, which is
         # the whole point and would be the wrong modality to select on.
         return "svg"
+    if kind == REPAIR_PREFIX:
+        # A text candidate wearing a loop: it runs every text lane, same as
+        # the model it wraps.
+        return None
     if kind == "process":
         engine = engine_for(candidate)
         return engine.modality if engine else None
@@ -188,6 +199,23 @@ def build_runner(candidate: str, gateway: str, outdir: Path | None,
         return _speech_runner(candidate, outdir)
     if kind == "stt":
         return _transcription_runner(candidate)
+    if kind == REPAIR_PREFIX:
+        _, _, rest = candidate.partition(":")
+        model, _, optstr = rest.partition(",")
+        try:
+            options = parse_options(optstr, candidate)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        unknown = set(options) - REPAIR_OPTIONS
+        if unknown:
+            raise SystemExit(
+                f"unknown repair option(s) {', '.join(sorted(unknown))}; "
+                f"allowed: {', '.join(sorted(REPAIR_OPTIONS))}")
+        if not model.strip():
+            raise SystemExit("a repair candidate needs a model, e.g. "
+                             "repair:local-large")
+        return RepairRunner(gateway, model.strip(),
+                            attempts=int(options.get("attempts", 3)))
     if kind == TRACE_PREFIX:
         spec = candidate.partition(":")[2].strip()
         if not spec:
@@ -294,9 +322,12 @@ def select_cases(cases: list[Case], modality: str) -> list[Case]:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="evals.run")
-    ap.add_argument("--modality", required=True,
+    ap.add_argument("--compare", nargs="+", metavar="RESULTS.JSON",
+                    help="put finished runs in one table, or refuse if their "
+                         "receipts say they are not comparable")
+    ap.add_argument("--modality", required=False,
                     help=f"one of {', '.join(ALL_MODALITIES)}, or 'all'")
-    ap.add_argument("--candidates", required=True,
+    ap.add_argument("--candidates", required=False,
                     help="comma-separated gateway aliases and/or engine specs")
     ap.add_argument("--gateway", default="http://127.0.0.1:4000")
     ap.add_argument("--cases", default=str(ROOT / "cases"))
@@ -314,6 +345,15 @@ def main(argv: list[str] | None = None) -> int:
                          "sample per prompt ranks noise; 3 is the usual "
                          "minimum for an image comparison you would act on")
     args = ap.parse_args(argv)
+    if args.compare:
+        return compare_runs(args.compare)
+    # Required for a RUN, not for a comparison. Left off `required=True` so
+    # `--compare` can stand alone; enforced here so a normal run still fails
+    # loudly rather than halfway through.
+    missing = [f"--{n}" for n in ("modality", "candidates")
+               if not getattr(args, n)]
+    if missing:
+        raise SystemExit(f"{' and '.join(missing)} required (or use --compare)")
 
     cases = expand_cases(select_cases(load_cases(args.cases), args.modality),
                          args.repeat)
@@ -377,6 +417,58 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def compare_runs(files: list[str]) -> int:
+    """Put two or more finished runs in one table -- or refuse to.
+
+    `comparable()` has existed and been tested since the receipts were added,
+    and nothing called it. A guard that nothing invokes is a function.
+
+    Refusing is the feature. Rows have been ranked here across runs with
+    different sampling and different candidate sets, and the reader had no way
+    to know.
+    """
+    import json
+
+    loaded = []
+    for f in files:
+        try:
+            data = json.loads(Path(f).read_text())
+        except (OSError, ValueError) as exc:
+            print(f"cannot read {f}: {exc}")
+            return 1
+        raw = data.get("receipt")
+        if not raw:
+            print(f"{f} carries no receipt, so it cannot be compared with "
+                  f"anything. Runs written before receipts existed are in this "
+                  f"state; re-run to get one.")
+            return 1
+        loaded.append((f, Receipt(modality=raw["modality"],
+                                  case_ids=tuple(raw["case_ids"]),
+                                  repeat=raw["repeat"],
+                                  sampling=raw["sampling"],
+                                  gateway=raw["gateway"],
+                                  adherence=raw.get("adherence", "")),
+                       data.get("summary") or {}))
+
+    first_file, first, _ = loaded[0]
+    for f, receipt, _ in loaded[1:]:
+        ok, why = comparable(first, receipt)
+        if not ok:
+            print(f"REFUSED: {first_file} and {f} are not comparable -- {why}.")
+            print("Ranking them in one table would compare two different exams.")
+            return 1
+
+    merged: dict = {}
+    for f, _, summary in loaded:
+        for name, row in summary.items():
+            # Same candidate in two comparable runs: keep them apart by file,
+            # since two samples of one candidate is a repeat, not a duplicate.
+            key = name if name not in merged else f"{name} ({Path(f).parent.name})"
+            merged[key] = row
+    report(merged)
+    return 0
+
+
 def resolve_outdir(out: str | None, modality: str) -> Path:
     """Where this run's artifacts and results.json go.
 
@@ -427,7 +519,7 @@ def _note_ranking_disagreements(summary: dict, metric_names: list) -> None:
         # scored 40/40 and the note still announced that one "passes more
         # cases", which is not a disagreement, it is the note describing sort
         # order noise.
-        rates = {s["pass_rate"] for s in summary.values()}
+        rates = {s.get("pass_rate", 0) for s in summary.values()}
         if len(rates) < 2:
             continue
 
@@ -478,7 +570,7 @@ def report(summary: dict) -> None:
             # it would have put the most verbose candidate first.
             if direction_of(name) == "neutral":
                 continue
-            value = s["metrics"].get(name)
+            value = (s.get("metrics") or {}).get(name)
             if value is None:
                 # A candidate that reported nothing must sort LAST, not as a
                 # perfect score. Defaulting a lower-is-better metric to 0.0 put
@@ -486,7 +578,7 @@ def report(summary: dict) -> None:
                 scores.append(float("inf"))
             else:
                 scores.append(value if direction_of(name) == "lower" else -value)
-        return (-s["pass_rate"], scores, s["median_s"])
+        return (-s.get("pass_rate", 0), scores, s.get("median_s", 0))
 
     arrows = {n: {"lower": "v", "higher": "^"}.get(direction_of(n), "-")
               for n in metric_names}
@@ -497,11 +589,17 @@ def report(summary: dict) -> None:
     print(header)
 
     for name, s in sorted(summary.items(), key=rank):
-        peak = f"{s['peak_kb'] / 1024 / 1024:.1f}GiB" if s["peak_kb"] else "-"
-        line = (f"{name:30} {s['passed']:>3}/{s['total']:<3} "
-                f"{s['pass_rate']:>6.0%} {s['median_s']:>7.2f}s {peak:>9}")
+        # .get throughout: report() now also renders summaries READ FROM DISK
+        # for --compare, and a run written by an older version will not have
+        # every key this one expects. Degrading is right; a KeyError on a
+        # historical result is not.
+        peak_kb = s.get("peak_kb") or 0
+        peak = f"{peak_kb / 1024 / 1024:.1f}GiB" if peak_kb else "-"
+        line = (f"{name:30} {s.get('passed', 0):>3}/{s.get('total', 0):<3} "
+                f"{s.get('pass_rate', 0):>6.0%} "
+                f"{s.get('median_s', 0):>7.2f}s {peak:>9}")
         for metric in metric_names:
-            value = s["metrics"].get(metric)
+            value = (s.get("metrics") or {}).get(metric)
             worst = s.get("metrics_worst", {}).get(metric)
             line += (f" {value:>9.3f}" if value is not None else f" {'-':>9}")
             line += (f" {worst:>13.3f}" if worst is not None else f" {'-':>13}")
@@ -526,7 +624,7 @@ def report(summary: dict) -> None:
     for name, s in sorted(summary.items(), key=rank):
         kinds = [(k, s.get(k, 0)) for k in ("wrong", "empty", "errored")]
         shown = [f"{n} {k}" for k, n in kinds if n]
-        if len(shown) > 0 and s["passed"] < s["total"]:
+        if len(shown) > 0 and s.get("passed", 0) < s.get("total", 0):
             print(f"  {name}: {', '.join(shown)}")
 
     # Two candidates in ONE run can sit different exams: a case may be unfair to
@@ -547,16 +645,16 @@ def report(summary: dict) -> None:
     # A mean over two of nine cases is not comparable with a mean over nine.
     # local-mid's svg ink of 0.564 was exactly that, printed beside 0.229.
     for name, s in sorted(summary.items(), key=rank):
-        thin = {m: n for m, n in s.get("metric_n", {}).items()
-                if m in metric_names and n < s["total"]}
+        thin = {m: n for m, n in (s.get("metric_n") or {}).items()
+                if m in metric_names and n < s.get("total", 0)}
         if thin:
-            parts = ", ".join(f"{m} over {n}/{s['total']}"
+            parts = ", ".join(f"{m} over {n}/{s.get('total', 0)}"
                               for m, n in sorted(thin.items()))
             print(f"  {name}: PARTIAL -- {parts}. Not comparable with a row "
-                  f"scored over all {s['total']}.")
+                  f"scored over all {s.get('total', 0)}.")
 
     for name, s in summary.items():
-        for f in s["failures"]:
+        for f in s.get("failures") or []:
             print(f"  {name}: {f}")
 
     _note_ranking_disagreements(summary, metric_names)

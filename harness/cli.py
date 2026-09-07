@@ -28,7 +28,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from harness import audio, completion, env, paths, proc, vector
+from harness import audio, completion, discover as discovery, env, paths, proc, vector
 from harness.checks import html as html_check
 from harness.checks import image as image_check
 from harness.checks import svg as svg_check
@@ -327,6 +327,43 @@ def cmd_say(a) -> int:
     return say(path=out, human=str(out))
 
 
+def cmd_discover(a) -> int:
+    """What can this machine do, and what has never been measured?
+
+    Built as a command rather than done by hand because the answer changes
+    every time anything is installed or any eval is run. A number in a document
+    is wrong by the next commit.
+    """
+    caps = discovery.annotate(discovery.capabilities())
+    if a.lane:
+        caps = [c for c in caps if c.lane == a.lane]
+    if a.gap:
+        caps = [c for c in caps if not c.measured and c.present]
+
+    if a.json:
+        print(json.dumps({"capabilities": [vars(c) for c in caps]}, indent=2))
+        return 0
+
+    if not caps:
+        print("nothing found" if not a.gap else "no gaps: everything here has been measured")
+        return 0
+
+    by_lane: dict[str, list] = {}
+    for c in caps:
+        by_lane.setdefault(c.lane, []).append(c)
+    for lane in sorted(by_lane):
+        print(f"\n{lane}")
+        for c in sorted(by_lane[lane], key=lambda c: (c.measured, c.name)):
+            mark = "measured" if c.measured else ("MISSING " if not c.present
+                                                  else "NEVER RUN")
+            print(f"  {mark:9} {c.kind:7} {c.name}")
+            if not c.measured and c.present:
+                print(f"            -> {c.how}")
+    total, done = len(caps), sum(1 for c in caps if c.measured)
+    print(f"\n{done}/{total} measured. The rest have never been run here.")
+    return 0
+
+
 def cmd_voices(a) -> int:
     """Three coupled settings behind one name is only usable if the names are
     discoverable."""
@@ -443,6 +480,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("voices", help="list the voices that can be spoken"
                    ).set_defaults(func=cmd_voices)
+
+    d = sub.add_parser("discover",
+                       help="what this machine can do, and what has never "
+                            "been measured")
+    d.add_argument("--lane", help="only this modality")
+    d.add_argument("--gap", action="store_true",
+                   help="only what has never been run")
+    d.set_defaults(func=cmd_discover)
 
     h = sub.add_parser("hear", help="transcribe a clip, or record and transcribe")
     h.add_argument("file", nargs="?", help="an existing audio file")

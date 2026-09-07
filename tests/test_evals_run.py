@@ -605,3 +605,108 @@ def test_a_run_gets_its_own_directory_without_being_told(monkeypatch, tmp_path):
 def test_an_explicit_out_is_still_honoured(monkeypatch, tmp_path):
     from evals.run import resolve_outdir
     assert resolve_outdir(str(tmp_path / "here"), "svg") == tmp_path / "here"
+
+
+def test_a_repair_candidate_becomes_a_repair_runner(tmp_path):
+    from evals.runners.repair import RepairRunner
+    r = build_runner("repair:local-large", "http://gw", tmp_path)
+    assert isinstance(r, RepairRunner)
+    assert r.candidate == "repair/local-large"
+
+
+def test_the_repair_budget_is_settable(tmp_path):
+    r = build_runner("repair:local-large,attempts=5", "http://gw", tmp_path)
+    assert r.attempts == 5
+
+
+def test_a_repair_candidate_gets_the_text_lanes(tmp_path):
+    from evals.run import cases_for
+    cases = [Case(id="s", modality="svg", prompt="a gear"),
+             Case(id="i", modality="image", prompt="a fox",
+                  params={"width": 64, "height": 64})]
+    assert [c.id for c in cases_for("repair:local-large", cases)] == ["s"]
+
+
+def test_an_unknown_repair_option_is_named(tmp_path):
+    with pytest.raises(SystemExit) as e:
+        build_runner("repair:local-large,tries=5", "http://gw", tmp_path)
+    assert "tries" in str(e.value)
+
+
+# ---- --compare -------------------------------------------------------------
+# comparable() has existed, tested, and been called by nothing. A guard that
+# nothing invokes is a function.
+
+def _run_dir(tmp_path, name, receipt, summary):
+    import json
+    d = tmp_path / name
+    d.mkdir(parents=True)
+    (d / "results.json").write_text(json.dumps(
+        {"receipt": receipt, "summary": summary}))
+    return d / "results.json"
+
+
+RECEIPT = {"modality": "svg", "case_ids": ["a", "b"], "repeat": 1,
+           "sampling": {"svg": {"temperature": 0.4}}, "gateway": "http://gw",
+           "adherence": ""}
+
+
+def test_two_runs_of_the_same_shape_compare(tmp_path, capsys):
+    from evals.run import compare_runs
+    a = _run_dir(tmp_path, "a", RECEIPT, {"local-large": {"pass_rate": 0.5,
+                                                          "total": 2, "passed": 1,
+                                                          "median_s": 1.0,
+                                                          "metrics": {"ink": 0.1}}})
+    b = _run_dir(tmp_path, "b", RECEIPT, {"q3-4b": {"pass_rate": 1.0,
+                                                    "total": 2, "passed": 2,
+                                                    "median_s": 2.0,
+                                                    "metrics": {"ink": 0.3}}})
+    assert compare_runs([str(a), str(b)]) == 0
+    out = capsys.readouterr().out
+    assert "local-large" in out and "q3-4b" in out
+
+
+def test_incomparable_runs_are_refused_with_the_axis_that_differs(tmp_path, capsys):
+    from evals.run import compare_runs
+    a = _run_dir(tmp_path, "a", RECEIPT, {"x": {"pass_rate": 1.0, "total": 2,
+                                                "passed": 2, "median_s": 1.0,
+                                                "metrics": {}}})
+    other = {**RECEIPT, "sampling": {"svg": {"temperature": 0.9}}}
+    b = _run_dir(tmp_path, "b", other, {"y": {"pass_rate": 1.0, "total": 2,
+                                              "passed": 2, "median_s": 1.0,
+                                              "metrics": {}}})
+    assert compare_runs([str(a), str(b)]) == 1
+    err = capsys.readouterr().out + capsys.readouterr().err
+    assert "sampling" in err.lower() or "refus" in err.lower()
+
+
+def test_a_run_with_no_receipt_cannot_be_compared(tmp_path, capsys):
+    """Runs written before receipts existed. Silently comparing them is
+    exactly the thing this guard is for."""
+    import json
+    from evals.run import compare_runs
+    d = tmp_path / "old"
+    d.mkdir()
+    (d / "results.json").write_text(json.dumps({"summary": {}}))
+    b = _run_dir(tmp_path, "new", RECEIPT, {})
+    assert compare_runs([str(d / "results.json"), str(b)]) == 1
+    assert "receipt" in (capsys.readouterr().out).lower()
+
+
+def test_compare_works_through_the_command_line(tmp_path, capsys):
+    """The unit tests called compare_runs() directly and passed while the CLI
+    path was broken: --candidates was still required, so `--compare` alone
+    died in argparse. Test the entry point, not just the function."""
+    from evals.run import main
+    a = _run_dir(tmp_path, "a", RECEIPT, {"x": {"pass_rate": 1.0, "total": 2,
+                                                "passed": 2, "median_s": 1.0,
+                                                "metrics": {}}})
+    assert main(["--compare", str(a), str(a)]) == 0
+
+
+def test_a_normal_run_still_requires_its_arguments(tmp_path):
+    from evals.run import main
+    with pytest.raises(SystemExit):
+        main(["--modality", "svg"])          # no --candidates
+    with pytest.raises(SystemExit):
+        main(["--candidates", "local-mid"])  # no --modality

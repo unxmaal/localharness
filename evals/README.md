@@ -57,6 +57,20 @@ without one. Calling `mlx_whisper` directly wants exactly what those repos
 hold. It costs a model load per process rather than per request, which is the
 right trade for an eval and the wrong one for a chat loop.
 
+## Comparing two finished runs
+
+    uv run python -m evals.run --compare A/results.json B/results.json
+
+Every run writes a RECEIPT — modality, case ids, repeat, sampling, adherence
+backend — and this refuses to put two runs in one table when their receipts say
+they answered different questions. Refusing is the feature: rows have been
+ranked here across runs with different sampling and different candidate sets,
+and the reader had no way to know.
+
+Timing is deliberately NOT an axis of comparability. It is an output of a run
+rather than a property of the exam, which is why a warm eval median and a
+one-shot CLI call are not comparable even when their quality numbers are.
+
 ## Two different measurements, kept apart
 
 **The competence gate** separates working from broken, and it is objective. No

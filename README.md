@@ -49,6 +49,33 @@ pulls it: 370MB installed rather than 1.1GB.
     lh voices
     lh hear  --seconds 5
 
+`lh discover` answers "what can this machine do that nobody has measured", by
+reading the receipts every eval run already writes. Built as a command rather
+than done by hand because the answer changes whenever anything is installed or
+any eval is run:
+
+    lh discover --gap            # only what has never been run
+    lh discover --lane image     # one modality
+    lh discover --json           # for an agent
+
+### Workflows are candidates too
+
+A candidate can be a **workflow** rather than a model. Two exist:
+
+    --candidates trace:mflux:flux2-klein-4b   # draw a raster, then vectorize it
+    --candidates repair:q3-4b                 # generate, check, repair
+
+`repair` closes a loop that was always available and never used: every checker
+here is an automated verifier — the eval executes generated code, rasterizes
+SVG, renders HTML in a browser — and none of them was ever fed back into
+generation. Same model, asked again with the checker's own complaint attached.
+Measured at `--repeat 3`:
+
+| lane | single-shot | repair | mean attempts | tokens |
+|---|---|---|---|---|
+| code | 20/27 (74%) | **24/27 (89%)** | 1.33 | 115 vs 107 |
+| svg | 6/9 (67%) | **9/9 (100%)** | 1.44 | 269 vs 226 |
+
 `lh voices` lists what can be spoken. **The default is `fr-male`**, which is
 cloned rather than picked from a table: Kokoro has five fixed voices and no accented English
 among them, while Chatterbox clones from a reference clip and clones ACROSS

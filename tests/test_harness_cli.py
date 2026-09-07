@@ -615,3 +615,55 @@ def test_every_verb_accepts_json():
     for verb in ("image", "video", "svg", "web", "code", "extract", "say", "hear"):
         args = p.parse_args([verb, "x"] if verb not in ("hear",) else [verb])
         assert hasattr(args, "json"), verb
+
+
+# ---- lh discover -----------------------------------------------------------
+
+def test_discover_lists_capabilities_and_marks_the_unmeasured(capsys, monkeypatch):
+    from harness import discover as d
+    monkeypatch.setattr(d, "capabilities", lambda: [
+        d.Capability("model", "ran-before", "text", "gateway", "cmd-a"),
+        d.Capability("model", "never-run", "text", "gateway", "cmd-b"),
+    ])
+    monkeypatch.setattr(d, "measured", lambda: {"ran-before"})
+    assert cli.main(["discover"]) == 0
+    out = capsys.readouterr().out
+    assert "never-run" in out and "ran-before" in out
+    assert "cmd-b" in out, "an unmeasured capability must say how to measure it"
+
+
+def test_discover_can_show_only_the_gap(capsys, monkeypatch):
+    from harness import discover as d
+    monkeypatch.setattr(d, "capabilities", lambda: [
+        d.Capability("model", "ran-before", "text", "gateway", "cmd-a"),
+        d.Capability("model", "never-run", "text", "gateway", "cmd-b"),
+    ])
+    monkeypatch.setattr(d, "measured", lambda: {"ran-before"})
+    assert cli.main(["discover", "--gap"]) == 0
+    out = capsys.readouterr().out
+    assert "never-run" in out and "ran-before" not in out
+
+
+def test_discover_filters_by_lane(capsys, monkeypatch):
+    from harness import discover as d
+    monkeypatch.setattr(d, "capabilities", lambda: [
+        d.Capability("model", "a-text", "text", "gateway", "x"),
+        d.Capability("engine", "an-image", "image", "mflux", "y"),
+    ])
+    monkeypatch.setattr(d, "measured", lambda: set())
+    cli.main(["discover", "--lane", "image"])
+    out = capsys.readouterr().out
+    assert "an-image" in out and "a-text" not in out
+
+
+def test_discover_json_is_machine_readable(capsys, monkeypatch):
+    import json as _json
+    from harness import discover as d
+    monkeypatch.setattr(d, "capabilities", lambda: [
+        d.Capability("model", "never-run", "text", "gateway", "cmd-b")])
+    monkeypatch.setattr(d, "measured", lambda: set())
+    assert cli.main(["discover", "--json"]) == 0
+    rows = _json.loads(capsys.readouterr().out)["capabilities"]
+    assert rows[0]["name"] == "never-run"
+    assert rows[0]["measured"] is False
+    assert rows[0]["how"] == "cmd-b"
