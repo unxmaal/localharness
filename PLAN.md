@@ -435,8 +435,8 @@ of those.
    wording was corrected to match -- it had claimed a hard block that never
    existed.
 
-2. **Make the eval report HOW a candidate fails, and say when two rows may not
-   be compared at all.** Two gaps in the same instrument.
+2. **DONE 2026-09-07. Make the eval report HOW a candidate fails, and say
+   when two rows may not be compared at all.** Two gaps in the same instrument.
 
    **(a) How, not just how often.** A pass rate hid Qwen3-14B returning null
    content behind a 7/9 score, and hid whisper scoring a perfect 0.0 by failing
@@ -463,7 +463,17 @@ of those.
    ONE frozen checkpoint so the comparison is PAIRED, where `--repeat` here
    averages unpaired samples.
 
-   Both halves before any further survey, or the surveys inherit the blind spots.
+   Shipped: `failure_kind()` splits every failure into wrong / empty / error
+   and the report prints the breakdown; `metric_n` records how many rows each
+   metric was computed over and the report flags any PARTIAL one; a `Receipt`
+   goes into results.json and `comparable()` says whether two runs may share a
+   table, arguing each excluded axis so it can be challenged.
+
+   It caught a live bug on its first run. The "pass rate and ink DISAGREE" note
+   announced that local-mid scored better on ink, 0.239 against 0.195 -- its
+   0.239 computed over the ONE case it passed, the rival's over two. The note
+   was itself making the mistake this item exists to prevent, and is now silent
+   when any candidate's metric is partial.
 
 3. **Give the svg lane its second method.** Wire image-then-vectorize into
    `lh svg` and measure it against the LLM path on the same cases. Proven at

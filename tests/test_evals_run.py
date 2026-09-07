@@ -488,3 +488,23 @@ def test_language_selection_leaves_the_other_lanes_alone(tmp_path):
     cases = [Case(id="fox", modality="image", prompt="a fox",
                   params={"width": 64, "height": 64})]
     assert [c.id for c in cases_for("mflux:z-image-turbo", cases)] == ["fox"]
+
+
+def test_the_disagreement_note_is_silent_when_a_metric_is_partial(capsys):
+    """Caught by the PARTIAL line on its first live run: the note announced
+    that local-mid 'scores better on ink' at 0.239 against 0.195, while its
+    0.239 came from the ONE case it passed and the other from two. Ranking on a
+    metric computed over different samples is the mistake this whole item is
+    about, and the note was making it."""
+    s = summarize([
+        Result("a", "thorough", True, 1.0, 0, "", metrics={"ink": 0.19}),
+        Result("b", "thorough", True, 1.0, 0, "", metrics={"ink": 0.20}),
+        Result("c", "thorough", False, 1.0, 0, "drew 1 shape"),
+        Result("a", "lucky", False, 1.0, 0, "drew 1 shape"),
+        Result("b", "lucky", False, 1.0, 0, "drew 1 shape"),
+        Result("c", "lucky", True, 1.0, 0, "", metrics={"ink": 0.24}),
+    ])
+    report(s)
+    out = capsys.readouterr().out
+    assert "PARTIAL" in out
+    assert "disagree" not in out.lower(), out

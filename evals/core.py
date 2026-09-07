@@ -271,6 +271,101 @@ class Result:
     metrics: dict = field(default_factory=dict)
 
 
+# ---------------------------------------------------------------------------
+# How a candidate failed, and whether two runs may be compared at all
+# ---------------------------------------------------------------------------
+
+#: Substrings that mean the candidate produced NOTHING, as opposed to producing
+#: something wrong. Read off real failure details rather than invented.
+_EMPTY_MARKS = ("empty completion", "no answer", "left no output",
+                "no output", "wrote nothing", "returned no text")
+#: Substrings that mean the INSTRUMENT broke. An outage is not a candidate
+#: scoring badly, and recording it as one is how a dead server becomes a model
+#: ranking -- whisper scored 0/40 that way and sorted above two working models.
+_ERROR_MARKS = ("timed out", "unreachable", "not installed", "could not launch",
+                "connection", "http 5", "server error")
+
+
+def failure_kind(detail: str) -> str:
+    """"" | "wrong" | "empty" | "error" for one failure's detail line.
+
+    A pass rate says how OFTEN a candidate fails and never HOW. Qwen3-14B
+    scored 7/9 on svg and looked like a winner; both failures were null
+    content, because it is a thinking model that spent the whole token budget
+    reasoning. Nothing in the table could show that.
+    """
+    if not detail:
+        return ""
+    low = detail.lower()
+    # Order matters: an instrument failure often also produced nothing, and the
+    # broken instrument is the more useful of the two readings.
+    if any(m in low for m in _ERROR_MARKS):
+        return "error"
+    if any(m in low for m in _EMPTY_MARKS):
+        return "empty"
+    return "wrong"
+
+
+@dataclass(frozen=True)
+class Receipt:
+    """What a run WAS, so two runs can be told apart before being ranked.
+
+    Borrowed from EnviousWispr's `model_registry.comparable()`. The axes are
+    the ones that change what the exam asks, and each exclusion is argued in
+    `comparable()` so it can be challenged rather than discovered.
+    """
+    modality: str
+    case_ids: tuple
+    repeat: int
+    sampling: dict
+    gateway: str
+    adherence: str = ""
+
+    def as_dict(self) -> dict:
+        return {"modality": self.modality, "case_ids": list(self.case_ids),
+                "repeat": self.repeat, "sampling": dict(self.sampling),
+                "gateway": self.gateway, "adherence": self.adherence}
+
+
+def comparable(a: Receipt, b: Receipt) -> tuple[bool, str]:
+    """May these two runs be ranked in one table?
+
+    IN, because each changes what was asked:
+      * `modality` and `case_ids` -- a different exam, or a different number of
+        questions on it. The ids and not just the count: nine easy cases and
+        nine hard ones are not one lane.
+      * `sampling` -- adding a repetition penalty changed what the svg lane
+        produces, so a run from before it is a different exam from one after.
+      * `adherence` -- PickScore and HPSv2 are two graders.
+
+    OUT, each for a stated reason:
+      * TIMING AND MEMORY. They are outputs of the run, not properties of the
+        exam. Two runs may be compared on quality while their latencies are not
+        comparable at all, which is exactly the warm-versus-cold trap: an eval
+        median amortises the model load across cases and a one-shot CLI call
+        does not.
+      * `gateway` HOST. The same aliases served from another machine answer the
+        same questions. The alias NAMES are part of the candidate, not the run.
+      * Wall-clock time and git sha. Recorded in the receipt for provenance,
+        deliberately not compared: a commit that touches the README does not
+        invalidate a measurement, and a commit that touches sampling is already
+        caught by `sampling`.
+    """
+    if a.modality != b.modality:
+        return False, f"different modality: {a.modality} vs {b.modality}"
+    if tuple(a.case_ids) != tuple(b.case_ids):
+        return False, (f"different case set: {len(a.case_ids)} vs "
+                       f"{len(b.case_ids)} cases")
+    if a.repeat != b.repeat:
+        return False, f"different repeat: {a.repeat} vs {b.repeat}"
+    if dict(a.sampling) != dict(b.sampling):
+        return False, f"different sampling: {a.sampling} vs {b.sampling}"
+    if a.adherence != b.adherence:
+        return False, (f"different adherence backend: {a.adherence!r} vs "
+                       f"{b.adherence!r}")
+    return True, "same exam"
+
+
 def load_cases(directory: str | Path) -> list[Case]:
     """Load every *.yaml under `directory`, sorted by id for stable runs."""
     directory = Path(directory)
@@ -429,6 +524,16 @@ def summarize(results: list[Result]) -> dict:
             "metrics_worst": _worst_metrics(rows),
             "failures": [f"{r.case_id}: {r.detail}" for r in rows
                          if not r.passed],
+            # HOW they failed, not just how many. See failure_kind().
+            "wrong": sum(1 for r in rows
+                         if not r.passed and failure_kind(r.detail) == "wrong"),
+            "empty": sum(1 for r in rows
+                         if not r.passed and failure_kind(r.detail) == "empty"),
+            "errored": sum(1 for r in rows
+                           if not r.passed and failure_kind(r.detail) == "error"),
+            # How many rows each metric was actually computed over. A mean over
+            # 2 of 9 cases printed beside a mean over 9 is not a comparison.
+            "metric_n": {k: len(v) for k, v in _gather_metrics(rows).items()},
         }
     return out
 

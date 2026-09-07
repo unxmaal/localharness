@@ -863,3 +863,94 @@ def test_a_french_case_is_scored_with_french_number_words(tmp_path):
     r = score(Case(id="n", modality="stt", prompt="92 jetons", language="fr"),
               "quatre-vingt-douze jetons")
     assert r.metrics["wer"] == 0.0
+
+
+# ---- how a candidate failed, not just how often ---------------------------
+# A pass rate hid Qwen3-14B returning NULL CONTENT behind a 7/9 score: both its
+# failures were "no answer", not "wrong answer", and the row read like a
+# winner. It hid whisper the other way round too -- 0/40, no metric at all, and
+# a missing lower-is-better number sorted as a perfect 0.0.
+
+def test_a_result_records_why_it_failed():
+    from evals.core import failure_kind
+    assert failure_kind("") == ""
+    assert failure_kind("word error rate 0.47 over the limit") == "wrong"
+    assert failure_kind("2/5 checks passed") == "wrong"
+
+
+def test_producing_nothing_is_not_the_same_as_producing_something_wrong():
+    """The distinction the report exists to make."""
+    from evals.core import failure_kind
+    for detail in ("empty completion",
+                   "q3-14b returned no answer: it spent the whole 4000-token "
+                   "budget on reasoning",
+                   "mflux exited 0 but left no output at /tmp/x.png"):
+        assert failure_kind(detail) == "empty", detail
+
+
+def test_a_broken_instrument_is_its_own_kind():
+    """An outage is not the candidate scoring badly. Recording it as a wrong
+    answer is how a dead server becomes a model ranking."""
+    from evals.core import failure_kind
+    for detail in ("timed out after 180.0s",
+                   "gateway unreachable at http://127.0.0.1:4000",
+                   "could not transcribe: stt unreachable"):
+        assert failure_kind(detail) == "error", detail
+
+
+def test_summarize_counts_each_kind_separately():
+    from evals.core import summarize
+    s = summarize([
+        Result("a", "m", True, 1.0, 0, ""),
+        Result("b", "m", False, 1.0, 0, "2/5 checks passed"),
+        Result("c", "m", False, 1.0, 0, "empty completion"),
+        Result("d", "m", False, 1.0, 0, "timed out after 180.0s"),
+    ])["m"]
+    assert s["wrong"] == 1 and s["empty"] == 1 and s["errored"] == 1
+
+
+# ---- comparability --------------------------------------------------------
+# From EnviousWispr's model_registry.comparable(). Rows have been ranked here
+# across runs with different sampling and different warm/cold conditions, and
+# local-mid's svg ink of 0.564 -- computed over the TWO cases it passed -- was
+# printed beside numbers computed over nine.
+
+def test_a_metric_carries_the_sample_it_was_computed_over():
+    from evals.core import summarize
+    s = summarize([
+        Result("a", "m", True, 1.0, 0, "", metrics={"ink": 0.5}),
+        Result("b", "m", False, 1.0, 0, "no ink here"),
+        Result("c", "m", True, 1.0, 0, "", metrics={"ink": 0.3}),
+    ])["m"]
+    assert s["metric_n"]["ink"] == 2, "a mean over 2 of 3 must say so"
+
+
+def test_two_runs_of_the_same_shape_are_comparable():
+    from evals.core import Receipt, comparable
+    a = Receipt(modality="svg", case_ids=("x", "y"), repeat=3,
+                sampling={"temperature": 0.4}, gateway="http://gw")
+    ok, why = comparable(a, Receipt(**{**a.__dict__}))
+    assert ok, why
+
+
+def test_a_different_case_set_is_not_comparable():
+    from evals.core import Receipt, comparable
+    a = Receipt(modality="svg", case_ids=("x", "y"), repeat=3,
+                sampling={}, gateway="http://gw")
+    b = Receipt(modality="svg", case_ids=("x", "z"), repeat=3,
+                sampling={}, gateway="http://gw")
+    ok, why = comparable(a, b)
+    assert not ok and "case" in why.lower()
+
+
+def test_different_sampling_is_not_comparable():
+    """Adding a repetition penalty changed what the svg lane produces. Ranking
+    a run from before it against one from after is comparing two exams."""
+    from evals.core import Receipt, comparable
+    a = Receipt(modality="svg", case_ids=("x",), repeat=1,
+                sampling={"temperature": 0.2}, gateway="http://gw")
+    b = Receipt(modality="svg", case_ids=("x",), repeat=1,
+                sampling={"temperature": 0.4, "repetition_penalty": 1.1},
+                gateway="http://gw")
+    ok, why = comparable(a, b)
+    assert not ok and "sampling" in why.lower()

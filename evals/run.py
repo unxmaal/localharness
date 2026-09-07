@@ -21,13 +21,13 @@ import sys
 import time
 from pathlib import Path
 
-from harness import audio
+from harness import audio, completion
 from harness.engines import Engine, parse_options, resolve
 
 from dataclasses import replace
 
-from evals.core import (MODALITIES, Case, direction_of, load_cases,
-                        summarize)
+from evals.core import (MODALITIES, Case, Receipt, direction_of,
+                        load_cases, summarize)
 from evals.environment import capture
 from evals.runners.process import ProcessRunner
 from evals.runners.speech import SpeechRunner
@@ -328,9 +328,19 @@ def main(argv: list[str] | None = None) -> int:
 
     report(summarize(results))
     if outdir:
+        # The RECEIPT: what this run was, so a later run can be told apart
+        # from it before anyone ranks the two together. See core.comparable().
+        receipt = Receipt(
+            modality=args.modality,
+            case_ids=tuple(sorted({c.id for c in cases})),
+            repeat=args.repeat,
+            sampling={m: dict(v) for m, v in sorted(completion.SAMPLING.items())},
+            gateway=args.gateway,
+            adherence=getattr(args, "adherence", "") or "")
         (outdir / "results.json").write_text(json.dumps(
             {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
              "environment": capture(),
+             "receipt": receipt.as_dict(),
              "summary": summarize(results),
              "rows": [vars(r) for r in results]}, indent=2))
         print(f"\nartifacts + results.json in {outdir}")
@@ -370,6 +380,15 @@ def _note_ranking_disagreements(summary: dict, metric_names: list) -> None:
     by_rate = [n for n, _ in sorted(summary.items(),
                                     key=lambda kv: -kv[1]["pass_rate"])]
     for metric in metric_names:
+        # A metric computed over a DIFFERENT NUMBER OF CASES per candidate is
+        # not a ranking, and this note was making exactly that comparison: on
+        # its first live run it announced that local-mid scored better on ink,
+        # from the one case it passed, against a rival scored over two.
+        partial = {name for name, s in summary.items()
+                   if s.get("metric_n", {}).get(metric, s["total"]) < s["total"]}
+        if partial:
+            continue
+
         # Only candidates that actually reported this metric. A model that
         # failed every case has no opinion about it, and reading its absence as
         # a score is how a broken candidate wins.
@@ -440,6 +459,26 @@ def report(summary: dict) -> None:
         if high:
             legend.append(f"{', '.join(high)}: higher is better (^)")
         print("  " + "; ".join(legend))
+
+    # HOW they failed, not just how often. Qwen3-14B scored 7/9 on svg and
+    # looked like a winner; both failures were null content from a thinking
+    # model that spent the budget reasoning. The pass rate could not say so.
+    for name, s in sorted(summary.items(), key=rank):
+        kinds = [(k, s.get(k, 0)) for k in ("wrong", "empty", "errored")]
+        shown = [f"{n} {k}" for k, n in kinds if n]
+        if len(shown) > 0 and s["passed"] < s["total"]:
+            print(f"  {name}: {', '.join(shown)}")
+
+    # A mean over two of nine cases is not comparable with a mean over nine.
+    # local-mid's svg ink of 0.564 was exactly that, printed beside 0.229.
+    for name, s in sorted(summary.items(), key=rank):
+        thin = {m: n for m, n in s.get("metric_n", {}).items()
+                if m in metric_names and n < s["total"]}
+        if thin:
+            parts = ", ".join(f"{m} over {n}/{s['total']}"
+                              for m, n in sorted(thin.items()))
+            print(f"  {name}: PARTIAL -- {parts}. Not comparable with a row "
+                  f"scored over all {s['total']}.")
 
     for name, s in summary.items():
         for f in s["failures"]:
