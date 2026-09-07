@@ -30,13 +30,20 @@ TRACE_STYLE = ("flat vector illustration, simple clean shapes, bold outlines, "
 
 class TraceRunner(BaseRunner):
     def __init__(self, engine: Engine, outdir: str | Path,
-                 width: int = 512, height: int = 512):
+                 width: int = 512, height: int = 512,
+                 preset: str = "illustration"):
+        if preset not in vector.TRACE_PRESETS:
+            raise ValueError(
+                f"unknown trace preset {preset!r}; "
+                f"known: {', '.join(sorted(vector.TRACE_PRESETS))}")
         self.engine = engine
         self.width = width
         self.height = height
+        self.preset = preset
         self.outdir = Path(outdir)
         self.outdir.mkdir(parents=True, exist_ok=True)
-        self.candidate = f"trace/{engine.name}"
+        name = "trace" if preset == "illustration" else f"trace-{preset}"
+        self.candidate = f"{name}/{engine.name}"
 
     def generate(self, case: Case):
         stem = self.candidate.replace("/", "_")
@@ -66,7 +73,7 @@ class TraceRunner(BaseRunner):
             raise RunnerError(f"{self.engine.name} exited 0 but left no output")
 
         try:
-            svg = vector.trace(png)
+            svg = vector.trace(png, preset=self.preset)
         except vector.VectorError as exc:
             raise RunnerError(str(exc)) from exc
         # The engine's peak, not the tracer's: tracing is 0.05s and a few MB,

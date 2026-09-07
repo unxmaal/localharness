@@ -1,21 +1,4 @@
-"""Turning a raster into vector paths.
-
-THE SVG LANE'S ANSWER. Five language models were measured on it and all five
-draw the same thing: valid markup that is not the picture. Asked for a cartoon
-frog holding a coffee mug they emitted eighty near-identical `<path>` elements
-and, once the sampling was fixed, a complete document of coloured blobs. Asked
-for two concentric gears, two offset squares. That is not a model-size problem:
-an LLM writes bezier coordinates it cannot see, with no spatial model tying one
-shape to the next.
-
-A diffusion model draws the frog in 54 seconds and this turns it into real
-paths in 0.05. The module is deliberately thin, because the value is the
-PIPELINE and vtracer is someone else's Rust that already works.
-
-The tradeoff, stated: tracing produces MANY paths (a 512x512 cartoon runs to
-~68KB) where a hand-authored icon would use a dozen. It is the right answer for
-illustration and the wrong one for a 24x24 UI glyph.
-"""
+"""Turning a raster into vector paths, via vtracer."""
 from __future__ import annotations
 
 import re
@@ -58,16 +41,29 @@ class VectorError(RuntimeError):
     """The raster could not be turned into usable vector paths."""
 
 
+# Issue #4. Measured 2026-09-07 on a traced 512px gear: resolution is the
+# dominant lever on document size, path_precision a smaller one, and
+# filter_speckle does nothing at all (8/32/64 were byte-identical).
+#   512px pp3 26,310B ink 0.2763 | 128px pp1 8,202B ink 0.2808
+TRACE_PRESETS = {
+    "illustration": {"trace_at": None, "path_precision": 3},
+    "icon": {"trace_at": 128, "path_precision": 1},
+}
+
+
 def trace(image: str | Path, *, colormode: str = "color",
           filter_speckle: int = 8, color_precision: int = 6,
-          path_precision: int = 3) -> str:
-    """Vectorize `image`, returning the SVG document as text.
-
-    Defaults are tuned for flat illustration, which is what the image lane
-    produces when asked for one: `filter_speckle` drops the single-pixel noise
-    that diffusion leaves in flat areas, and it is the difference between a
-    usable file and forty thousand paths.
-    """
+          path_precision: int = 3, trace_at: int | None = None,
+          preset: str = "") -> str:
+    """Vectorize `image`, returning the SVG document as text."""
+    if preset:
+        if preset not in TRACE_PRESETS:
+            raise VectorError(
+                f"unknown trace preset {preset!r}; "
+                f"known: {', '.join(sorted(TRACE_PRESETS))}")
+        cfg = TRACE_PRESETS[preset]
+        trace_at = cfg["trace_at"]
+        path_precision = cfg["path_precision"]
     image = Path(image)
     if not image.exists():
         raise VectorError(f"no image at {image}")
@@ -78,6 +74,13 @@ def trace(image: str | Path, *, colormode: str = "color",
         raise VectorError(f"vtracer is not installed: {exc}") from exc
 
     with tempfile.TemporaryDirectory() as d:
+        if trace_at:
+            from PIL import Image
+            small = Path(d) / "small.png"
+            with Image.open(image) as im:
+                im.convert("RGB").resize((trace_at, trace_at),
+                                         Image.LANCZOS).save(small)
+            image = small
         out = Path(d) / "traced.svg"
         try:
             vtracer.convert_image_to_svg_py(

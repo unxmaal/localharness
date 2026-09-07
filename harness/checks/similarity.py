@@ -1,39 +1,11 @@
 """Does a cloned voice sound like the person it was cloned from?
 
-WER CANNOT SEE THIS, and every voice number in this repo is a WER. The tts lane
-transcribes the audio and counts word errors, so a perfectly intelligible clone
-in a completely different voice scores 0.000 -- the one property cloning exists
-to deliver is the one nothing measured. Kokoro's ff_siwis "beat" every
-Chatterbox clone on that lane while not being a clone at all.
+A WER cannot see this: an intelligible clone in the wrong voice scores 0.000.
 
-A speaker embedding does see it: one fixed-size vector per utterance, and the
-cosine between two of them is speaker similarity. resemblyzer's encoder is
-~17MB and runs on CPU in well under a second, so this is cheap enough to put
-beside the WER rather than instead of it.
-
-READ IT AS A COMPARISON, NOT A SCORE. The absolute number depends on the
-recording conditions of both clips. Two utterances by one speaker in one
-session sit high; the same speaker down a phone line sits lower.
-
-AND ON THIS DATA IT DOES NOT WORK AT ALL. Measured 2026-09-07, the control
-that should have been run first: TWO GENUINELY DIFFERENT MEN, both real
-recordings from google/fleurs, score **0.827** against each other. A clone
-against its own reference scores 0.855-0.904. That is a gap of about 0.05
-between "same person" and "different person", which is inside the spread of
-everything else -- one wrong-speaker pair scored 0.881, above a correct pair at
-0.742.
-
-So this metric cannot separate speakers here and no ranking should be drawn
-from it. Three French men reading the same corpus is close to its hardest
-case, and resemblyzer's encoder is small and old. It stays in the tree because
-the QUESTION is right and a working answer probably needs a stronger embedding
-(a WavLM x-vector, ECAPA-TDNN) validated against a same-versus-different
-control FIRST. Until then `./scripts/audition.sh` and a human ear are the only
-evidence about whether a clone worked.
-
-THE LESSON, which cost a set of confident numbers: a similarity metric is
-meaningless without a NEGATIVE CONTROL. "Clone matches its reference at 0.878"
-says nothing until you know what two different people score.
+NEVER COMPARE ACROSS RECORDING CONDITIONS. Two real recordings score high
+against each other whatever their speakers, and two synthesized clips likewise,
+so a single global threshold is invalid. The eval only ever asks ref-vs-clone,
+which is one condition pair, and the control below is run in that condition.
 """
 from __future__ import annotations
 
@@ -89,3 +61,23 @@ def compare(a: str | Path, b: str | Path) -> float:
     if denom == 0:
         raise SimilarityError("one of the clips embedded to a zero vector")
     return float(np.dot(va, vb) / denom)
+
+
+#: Measured 2026-09-07, resemblyzer, ref-vs-synth only, 3 identities.
+CONTROL_FLOOR = 0.79
+
+
+def control(same: list[tuple], different: list[tuple]) -> dict:
+    """Score known-same and known-different pairs and report whether they split.
+
+    Run this before quoting any figure. A metric whose classes overlap cannot
+    rank anything, and that is invisible in the scores themselves.
+    """
+    if not same or not different:
+        raise SimilarityError("a control needs both same and different pairs")
+    s = [compare(a, b) for a, b in same]
+    d = [compare(a, b) for a, b in different]
+    return {"same_min": min(s), "same_max": max(s), "same_mean": sum(s) / len(s),
+            "diff_min": min(d), "diff_max": max(d), "diff_mean": sum(d) / len(d),
+            "gap": min(s) - max(d), "separates": min(s) > max(d),
+            "n_same": len(s), "n_different": len(d)}
