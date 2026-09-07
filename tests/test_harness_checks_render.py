@@ -9,6 +9,7 @@ rect. The only way to catch that is to draw it and look.
 rsvg-convert is librsvg's CLI and is already installed here.
 """
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -158,3 +159,50 @@ def test_the_page_is_loaded_from_a_file_never_from_a_url(tmp_path):
     argv = render.chrome_argv(tmp_path / "in.html", tmp_path / "out.png", 800)
     assert any(a.startswith("file://") for a in argv)
     assert "--disable-gpu" in argv or "--headless" in " ".join(argv)
+
+
+# ---- Chrome must not touch the user's browser ------------------------------
+
+def test_chrome_uses_an_isolated_profile(tmp_path):
+    """Without --user-data-dir, headless Chrome runs against the DEFAULT
+    profile: it contends for the lock with a live browser, writes into the
+    real profile, bounces the dock, and renders the page through whatever
+    extensions happen to be installed -- so the result is not reproducible
+    either. Eric spotted it as a bouncing dock icon."""
+    argv = render.chrome_argv(tmp_path / "p.html", tmp_path / "o.png", 800,
+                              profile=tmp_path / "profile")
+    joined = " ".join(argv)
+    assert f"--user-data-dir={tmp_path / 'profile'}" in joined
+    assert "--no-first-run" in argv
+    assert "--no-default-browser-check" in argv
+    assert "--disable-extensions" in argv
+
+
+def test_a_render_creates_and_cleans_up_its_own_profile(tmp_path, monkeypatch):
+    """The caller should not have to know chrome needs a scratch directory."""
+    seen = {}
+
+    def fake_shoot(argv, out, cwd, timeout=60.0):
+        seen["argv"] = argv
+        assert any(a.startswith("--user-data-dir=") for a in argv)
+        Path(out).write_bytes(b"\x89PNG\r\n\x1a\n")
+        return ""
+
+    monkeypatch.setattr(render, "_shoot", fake_shoot)
+    monkeypatch.setattr(render, "chrome_path", lambda: "/fake/chrome")
+    render.rasterize_html("<html><body>hi</body></html>", tmp_path / "shot.png")
+    prof = next(a for a in seen["argv"] if a.startswith("--user-data-dir="))
+    assert not Path(prof.split("=", 1)[1]).exists(), "scratch profile left behind"
+
+
+def test_the_shot_does_not_wait_for_chrome_to_exit(tmp_path):
+    """Issue #29: with its own profile chrome writes the PNG and then hangs, so
+    waiting on the process is waiting for the timeout."""
+    out = tmp_path / "shot.png"
+    argv = ["/bin/sh", "-c",
+            f"printf x > {out}; sleep 30"]
+    import time as _t
+    start = _t.monotonic()
+    render._shoot(argv, out, str(tmp_path), timeout=20.0)
+    assert _t.monotonic() - start < 10, "waited for a process that never exits"
+    assert out.exists()

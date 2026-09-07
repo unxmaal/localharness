@@ -102,6 +102,21 @@ def resolve_voice(name: str) -> Voice:
         f"unknown voice {name!r}; cloned: {', '.join(sorted(VOICE_PRESETS))}; "
         f"kokoro: {', '.join(KNOWN_VOICES)}")
 
+# mlx_audio's SpeechRequest defaults repetition_penalty to 1.0 and forwards it,
+# overriding the 1.2 Chatterbox itself defaults to. Issue #6.
+CHATTERBOX_REPETITION_PENALTY = 1.2
+
+# Healthy is 0.25-0.56 s/word; a runaway was 3.4-5.3.
+SECONDS_PER_WORD_CEILING = 1.0
+# Below this a clip is mostly onset and silence, so the rate is noise.
+RUNAWAY_MIN_WORDS = 6
+
+
+def token_budget(text: str) -> int:
+    """A cap proportional to the text instead of mlx_audio's flat 1200."""
+    return max(200, len(text.split()) * 12)
+
+
 # A WAV header is 44 bytes and 8000 bytes is a fifth of a second at 16k mono:
 # below that there is no speech in the file whatever the status code said.
 MIN_AUDIO_BYTES = 8000
@@ -133,6 +148,10 @@ def speak(text: str, out: str | Path, voice: str = DEFAULT_KOKORO_VOICE,
     out = Path(out)
     payload = {"model": model, "input": text,
                "speed": speed, "response_format": "wav"}
+    # Cloning path only: Kokoro takes neither field. Issue #6.
+    if ref_audio is not None:
+        payload["repetition_penalty"] = CHATTERBOX_REPETITION_PENALTY
+        payload["max_tokens"] = token_budget(text)
     # Only some models have a voice table. Sending voice="" to one that does
     # not is a request for a voice named empty string.
     if voice:
@@ -175,6 +194,11 @@ def speak(text: str, out: str | Path, voice: str = DEFAULT_KOKORO_VOICE,
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(r.content)
+    # A runaway returns 200 with a minute of invented speech, not an error.
+    runaway = runaway_reason(out, text)
+    if runaway:
+        raise AudioError(f"tts ran away: {runaway}. The audio is at {out} so it "
+                         f"can be listened to. See issue #6.")
     return out
 
 
@@ -391,3 +415,34 @@ def transcriber(backend: str = "server", model: str = "", language: str = "",
     label = f"{backend}:{model.split('/')[-1]}"
     _run.label = f"{label}/{language}" if language else label
     return _run
+
+
+def audio_seconds(path: str | Path) -> float:
+    """Duration of a WAV, or 0.0 when it cannot be read as one."""
+    import contextlib
+    import wave
+    try:
+        with contextlib.closing(wave.open(str(path))) as w:
+            rate = w.getframerate()
+            return w.getnframes() / rate if rate else 0.0
+    except (OSError, wave.Error):
+        return 0.0
+
+
+def runaway_reason(path: str | Path, text: str,
+                   ceiling: float = SECONDS_PER_WORD_CEILING) -> str:
+    """Why this audio is too long for its text, or "" when it is plausible.
+
+    One-sided: too-short is truncation, a different failure.
+    """
+    words = len(text.split())
+    if words < RUNAWAY_MIN_WORDS:
+        return ""
+    seconds = audio_seconds(path)
+    if seconds <= 0:
+        return ""
+    rate = seconds / words
+    if rate <= ceiling:
+        return ""
+    return (f"{seconds:.2f}s of audio for {words} words ({rate:.2f}s/word, "
+            f"ceiling {ceiling:.2f})")

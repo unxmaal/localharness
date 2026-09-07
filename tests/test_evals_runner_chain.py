@@ -220,3 +220,42 @@ def test_a_stage_with_no_declared_model_is_allowed(tmp_path, monkeypatch):
     monkeypatch.setitem(STAGE_SCALE, "light", 1)
     r = ChainRunner(fake_engine(), "light", tmp_path).run(case())
     assert r.passed, r.detail
+
+
+def test_a_broken_stage_refuses_before_the_base_engine_runs(tmp_path,
+                                                            monkeypatch):
+    """Issue #27. The crash is in stage two, so the cost of discovering it is a
+    whole diffusion run per case unless the guard fires first."""
+    ran = []
+
+    def argv(prompt, out, params):
+        ran.append(out)
+        return ["true"]
+
+    r = ChainRunner(fake_engine(argv=argv), "upscale-seedvr2", tmp_path)
+    monkeypatch.setattr(chain, "stage_unavailable",
+                        lambda s: "broken: see issue #27" if s == "upscale-seedvr2" else "")
+    with pytest.raises(Exception) as exc:
+        r.generate(case())
+    assert "#27" in str(exc.value)
+    assert ran == [], "the base engine ran despite a known-broken second stage"
+
+
+def test_a_healthy_stage_is_not_blocked_by_the_broken_registry(tmp_path,
+                                                               monkeypatch):
+    def fake_stage(src, dst, params, prompt):
+        png(dst, 64)
+        return ["true"]
+
+    monkeypatch.setitem(STAGES, "probe", fake_stage)
+    monkeypatch.setitem(STAGE_SCALE, "probe", 1)
+    out, _ = ChainRunner(fake_engine(), "probe", tmp_path).generate(case())
+    assert Path(out).exists()
+
+
+def test_every_implemented_stage_maps_to_an_entry_point():
+    """Two registries in two modules drift. `lh discover` reads one and the
+    runner reads the other, so a stage missing from either is invisible."""
+    from harness.stages import STAGE_ENTRY_POINTS
+    assert set(STAGE_ENTRY_POINTS) == set(STAGES)
+    assert set(STAGE_SCALE) >= set(STAGES)

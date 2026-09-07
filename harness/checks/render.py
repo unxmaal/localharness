@@ -20,6 +20,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from harness.checks.base import CheckResult
@@ -54,16 +55,20 @@ def chrome_path() -> str | None:
     return None
 
 
-def chrome_argv(src: Path, out: Path, width: int) -> list[str]:
-    """Headless Chrome, rendering a LOCAL FILE.
+def chrome_argv(src: Path, out: Path, width: int,
+                profile: Path | None = None) -> list[str]:
+    """Headless Chrome, rendering a LOCAL FILE in an ISOLATED PROFILE.
 
     file:// and not a data: URL or a served page: a generated page may
     reference an external URL, and the checker must never be the thing that
     fetches it. An opaque white background is forced so a transparent body does
     not read as ink, and a virtual time budget lets layout and webfonts settle
     before the shot rather than capturing a half-painted frame.
+
+    An isolated `--user-data-dir` keeps the render reproducible and off the
+    user's default profile. Issue #29.
     """
-    return [
+    argv = [
         chrome_path() or "chrome",
         "--headless=new",
         "--disable-gpu",
@@ -73,8 +78,16 @@ def chrome_argv(src: Path, out: Path, width: int) -> list[str]:
         "--virtual-time-budget=2000",
         f"--window-size={width},{int(width * 0.75)}",
         f"--screenshot={out}",
-        f"file://{src}",
     ]
+    if profile is not None:
+        # A fresh profile otherwise spends its first run on setup work and
+        # first-run prompts, which is time added to every single check.
+        argv += [f"--user-data-dir={profile}",
+                 "--no-first-run",
+                 "--no-default-browser-check",
+                 "--disable-extensions"]
+    argv.append(f"file://{src}")
+    return argv
 
 
 def rasterize_html(html: str, out: str | Path, width: int = 800) -> Path:
@@ -84,16 +97,52 @@ def rasterize_html(html: str, out: str | Path, width: int = 800) -> Path:
 
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
+    if out.exists():
+        out.unlink()
     with tempfile.TemporaryDirectory() as d:
         src = Path(d) / "page.html"
         src.write_text(html)
-        proc = subprocess.run(chrome_argv(src, out, width),
-                              capture_output=True, text=True, timeout=60,
-                              cwd=d)
+        profile = Path(d) / "chrome-profile"
+        stderr = _shoot(chrome_argv(src, out, width, profile=profile), out, d)
     if not out.exists():
-        raise RenderError(f"chrome produced no screenshot: "
-                          f"{proc.stderr.strip()[:300]}")
+        raise RenderError(f"chrome produced no screenshot: {stderr[:300]}")
     return out
+
+
+def _shoot(argv: list[str], out: Path, cwd: str, timeout: float = 60.0) -> str:
+    """Run chrome and stop once the PNG is written.
+
+    With its own --user-data-dir chrome writes the screenshot and then does not
+    exit, so waiting for the process is waiting for the timeout. Issue #29.
+    """
+    err = tempfile.TemporaryFile("w+")
+    # A file, not a pipe: chrome's grandchildren inherit the handle and keep a
+    # pipe open long after we terminate it, so reading one would block.
+    proc = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=err, cwd=cwd)
+    deadline = time.monotonic() + timeout
+    size = -1
+    exited = False
+    try:
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                exited = True
+                break
+            now = out.stat().st_size if out.exists() else -1
+            if now > 0 and now == size:      # written and stable
+                break
+            size = now
+            time.sleep(0.1)
+        if not exited:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+        err.seek(0)
+        return err.read().strip()
+    finally:
+        err.close()
 
 
 def ink_html(html: str, width: int = 800) -> float:

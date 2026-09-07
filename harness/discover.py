@@ -38,9 +38,12 @@ import shutil
 
 import httpx
 from dataclasses import dataclass, field
+
 from pathlib import Path
 
 from harness import paths
+from harness.stages import (ENTRY_POINT_STAGES, STAGE_ENTRY_POINTS,
+                            stage_unavailable)
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -72,6 +75,8 @@ class Capability:
     how: str
     measured: bool = False
     present: bool = True
+    #: Installed but unusable, and why. Distinct from `present` and `measured`.
+    blocked: str = ""
     note: str = ""
 
 
@@ -112,9 +117,21 @@ def image_engines(bindir: Path | None = None) -> list[Capability]:
                  "mflux-save", "mflux-train", "mflux-lora-library"):
             continue
         if workflowish:
+            # Three of these have a runner; the rest are still gaps.
+            stage = ENTRY_POINT_STAGES.get(n)
+            if stage:
+                broken = stage_unavailable(stage)
+                out.append(Capability(
+                    "workflow", n, "image", str(bindir),
+                    f"uv run python -m evals.run --modality image "
+                    f"--candidates {stage}:mflux:flux2-klein-4b",
+                    blocked=broken,
+                    note="runnable via ChainRunner: stage one generates, "
+                         "this consumes the result"))
+                continue
             out.append(Capability(
                 "workflow", n, "image", str(bindir),
-                "no runner yet -- needs one that supplies its input; see #18",
+                "no runner yet -- needs one that supplies its input; see #24",
                 note="needs an input image, mask or reference: this is the "
                      "ComfyUI-style workflow vocabulary, shipped natively"))
             continue
@@ -153,18 +170,30 @@ def external_tools() -> list[Capability]:
 
 
 def methods() -> list[Capability]:
-    """Workflows the harness implements, as opposed to models it can call.
-
-    Deliberately short, and that is the point: issue #18. The suite has spent
-    its life comparing models, and the one workflow it has (`trace`) beat five
-    language models on its lane.
-    """
-    return [
+    """Workflows the harness implements, as opposed to models it can call."""
+    out = [
         Capability("method", "llm", "svg", "harness/cli.py",
-                   "--candidates local-large"),
+                   "--candidates local-large",
+                   note="the baseline every workflow has to beat"),
         Capability("method", "trace", "svg", "harness/vector.py",
-                   "--candidates trace:mflux:flux2-klein-4b"),
+                   "--candidates trace:mflux:flux2-klein-4b",
+                   note="raster then vectorize; beat five language models 4/4 "
+                        "to 2/6 on this lane"),
+        Capability("method", "repair", "code", "evals/runners/repair.py",
+                   "--candidates repair:q3-4b --modality code",
+                   note="generate, check with the checker that already exists, "
+                        "repair; code 20/27 -> 24/27 at --repeat 3"),
+        Capability("method", "repair", "svg", "evals/runners/repair.py",
+                   "--candidates repair:local-large --modality svg",
+                   note="svg 6/9 -> 9/9 at --repeat 3, mean ~1.4 attempts"),
     ]
+    for stage in sorted(STAGE_ENTRY_POINTS):
+        broken = stage_unavailable(stage)
+        out.append(Capability(
+            "method", stage, "image", "evals/runners/chain.py",
+            f"--candidates {stage}:mflux:flux2-klein-4b --modality image",
+            blocked=broken, note="two-stage image workflow"))
+    return out
 
 
 def cached_audio_models(root: Path | None = None) -> list[Capability]:
