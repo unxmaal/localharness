@@ -48,11 +48,17 @@ REPO = Path(__file__).resolve().parent.parent
 #: helpers, and listing those would invite someone to evaluate a tool that
 #: produces no artifact.
 _GENERATE_PREFIX = "mflux-generate"
-#: These generate, but not a plain image from a prompt: they need a control
-#: image, a mask or an existing picture, so they cannot be dropped into the
-#: image lane as-is.
+#: These generate, but not from a prompt alone: they need a control image, a
+#: mask, or an existing picture. They are the WORKFLOW vocabulary -- the exact
+#: thing ComfyUI is wanted for -- and mflux ships all of them natively in MLX.
+#:
+#: The first version of this module DROPPED them, because they cannot answer a
+#: plain-prompt image case. That hid the most important gap in the project
+#: behind a tidy list. They are reported as a distinct kind instead, so nobody
+#: drops one into the image lane and gets a failure that means nothing.
 _NEEDS_INPUT = ("controlnet", "depth", "fill", "redux", "edit", "upscal",
-                "kontext", "inpaint", "img2img")
+                "kontext", "inpaint", "img2img", "in-context", "concept",
+                "refine", "inspire")
 
 
 @dataclass
@@ -99,11 +105,21 @@ def image_engines(bindir: Path | None = None) -> list[Capability]:
         return []
     out = []
     for n in names:
-        if not n.startswith(_GENERATE_PREFIX):
+        workflowish = any(k in n.lower() for k in _NEEDS_INPUT)
+        if not (n.startswith(_GENERATE_PREFIX) or workflowish):
             continue
-        if any(k in n.lower() for k in _NEEDS_INPUT):
+        if n in ("mflux-info", "mflux-capabilities", "mflux-completions",
+                 "mflux-save", "mflux-train", "mflux-lora-library"):
             continue
-        spec = n.replace(_GENERATE_PREFIX + "-", "mflux:") if "-" in n[len(_GENERATE_PREFIX):] else "mflux:dev"
+        if workflowish:
+            out.append(Capability(
+                "workflow", n, "image", str(bindir),
+                "no runner yet -- needs one that supplies its input; see #18",
+                note="needs an input image, mask or reference: this is the "
+                     "ComfyUI-style workflow vocabulary, shipped natively"))
+            continue
+        spec = (n.replace(_GENERATE_PREFIX + "-", "mflux:")
+                if "-" in n[len(_GENERATE_PREFIX):] else "mflux:dev")
         out.append(Capability(
             "engine", n, "image", str(bindir),
             f"uv run python -m evals.run --modality image --candidates {spec}"))

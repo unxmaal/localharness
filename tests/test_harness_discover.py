@@ -45,12 +45,14 @@ def test_engines_come_from_the_installed_entry_points(tmp_path):
     for n in ("mflux-generate-flux2", "mflux-generate-qwen", "mflux-concept",
               "python", "hf"):
         (b / n).touch()
-    names = {c.name for c in discover.image_engines(b)}
-    assert "mflux-generate-flux2" in names
-    assert "mflux-generate-qwen" in names
-    # Not a generator; listing it would invite someone to evaluate it.
-    assert "mflux-concept" not in names
-    assert "python" not in names
+    found = {c.name: c for c in discover.image_engines(b)}
+    assert found["mflux-generate-flux2"].kind == "engine"
+    assert found["mflux-generate-qwen"].kind == "engine"
+    # `concept` produces an image from a reference rather than a prompt, so it
+    # is a workflow primitive rather than an engine. It used to be dropped
+    # entirely, which hid it.
+    assert found["mflux-concept"].kind == "workflow"
+    assert "python" not in found
 
 
 def test_external_tools_report_whether_they_are_present(monkeypatch):
@@ -240,3 +242,34 @@ def test_a_missing_date_says_unknown_rather_than_nothing(monkeypatch):
                                            "downloads": 5}])
     monkeypatch.setattr(discover, "measured", lambda: set())
     assert "unknown" in discover.external("text", limit=1)[0].note.lower()
+
+
+# ---- workflow primitives must not be hidden --------------------------------
+# The first version dropped every entry point needing an input image, because
+# they cannot answer a plain-prompt image case. That silently hid the most
+# important gap in the project: mflux ships controlnet, depth, fill, redux,
+# in-context, kontext and two upscalers -- the whole ComfyUI-style workflow
+# vocabulary, natively in MLX -- and NONE of them has been measured.
+
+def test_workflow_primitives_are_reported_not_dropped(tmp_path):
+    b = tmp_path / "bin"
+    b.mkdir()
+    for n in ("mflux-generate-flux2", "mflux-generate-controlnet",
+              "mflux-upscale-seedvr2", "mflux-generate-depth", "mflux-info"):
+        (b / n).touch()
+    found = {c.name: c for c in discover.image_engines(b)}
+    assert "mflux-generate-flux2" in found
+    assert found["mflux-generate-flux2"].kind == "engine"
+    # Present, and marked as a different KIND so nobody drops one into the
+    # plain image lane and reports a failure that means nothing.
+    assert found["mflux-generate-controlnet"].kind == "workflow"
+    assert found["mflux-upscale-seedvr2"].kind == "workflow"
+    assert "mflux-info" not in found
+
+
+def test_a_workflow_primitive_says_what_it_needs(tmp_path):
+    b = tmp_path / "bin"
+    b.mkdir()
+    (b / "mflux-generate-controlnet").touch()
+    c = discover.image_engines(b)[0]
+    assert "input" in c.note.lower() or "runner" in c.note.lower()
