@@ -392,15 +392,56 @@ of those.
 
 ### The work, in order
 
-1. **Fix the mcm-engine PreToolUse hook.** Registered, runs in 0.33s against a
-   2s timeout, counts correctly -- and writes its nudge to stderr with **exit
-   0**, which Claude Code treats as approval and never shows the model. Zero
-   nudges reached the agent across several hundred Bash calls in a full session,
-   so the "blocked after 20 edits" guarantee has never once fired. Exit 2
-   instead. Also: the nudge names `mcp__knowledge__search` when the tool is
-   `mcp__mcm-engine__search`, and the counters are not persisting in
-   `.claude/knowledge.db` (last written 2026-07-04, no nudge tables). First,
-   because it is the thing meant to catch the agent drifting.
+1. **Fix the mcm-engine PreToolUse hook.**
+
+   **(a) DONE 2026-09-07, mcm-engine 80a43e0.** The hook was registered, ran in
+   0.33s against a 2s timeout, and counted correctly -- and wrote every nudge to
+   stderr with **exit 0**, which Claude Code shows the model only on exit 2. An
+   agent ran several hundred built-in tool calls in one session and received
+   none of them. Fixed by also emitting JSON on stdout as
+   `hookSpecificOutput/additionalContext`, the channel `hooks/session_start.py`
+   already uses. Verified live: the next Bash call came back with the nudge
+   attached. Also fixed: the nudge named `mcp__knowledge__search`, which does
+   not exist in this deployment.
+
+   **(b) TODO -- decide whether it should block.** It has never blocked
+   anything. RULE #61 records the reason as fail-open safety: a block would
+   "dead-lock the agent exactly when the knowledge backend is unreachable, the
+   one moment it cannot call a reset tool". **That reason does not hold**, tested
+   directly: the counter resets in `_decide` on the PreToolUse *attempt*, before
+   the tool runs and regardless of whether it succeeds. 7 edits -> `mutators 7`;
+   one `search` attempt -> `mutators 0`. A down backend traps nothing, and the
+   hook needs no network in its default path.
+
+   Fail-open on the hook's OWN errors is separate and worth keeping: a malformed
+   payload and a corrupted state file both exit 0. Verified.
+
+   What actually argues against blocking is different from what is recorded:
+
+   - **Restricted-tool subagents deadlock permanently.** `statusline-setup` has
+     `Tools: Read, Edit` and no MCP tools at all. Six edits and it is blocked
+     with no reset available to it, forever. This is the real trap and it is not
+     the one on record.
+   - **The thresholds are far below what the contract claims.** Actual
+     `WARN_THRESHOLD = 3`, `BLOCK_THRESHOLD = 6`; CLAUDE.md advertises 8 and 20.
+     Six edits is nothing during a refactor, and warn-at-3 is already noisy
+     enough to fire twice inside one turn of read-only investigation.
+
+   So: not bad in principle, unusable as configured. Three changes make it safe:
+
+   1. **Raise the thresholds to what CLAUDE.md already claims** (warn 8, block
+      20). The document is the spec; the code drifted from it.
+   2. **Prefer `permissionDecision: "ask"` over a hard deny.** PreToolUse JSON
+      supports it. It turns the worst case from "the agent is stuck" into "Eric
+      clicks once", which is the right failure mode for an enforcement mechanism
+      still being tuned.
+   3. **Restricted-tool agents are then covered by (2)** -- a subagent with no
+      MCP tools cannot deadlock, because the human is the escape hatch.
+
+   Also outstanding: **CLAUDE.md overstates what exists.** It claims enforcement
+   "AT TWO LEVELS" with Edit/Write "BLOCKED after 20". Both halves were false --
+   level 2 never reached the agent, and per RULE #61 it never blocks at all. The
+   wording needs to match whatever (b) decides.
 
 2. **Make the eval report HOW a candidate fails, not just how often.** A pass
    rate hid Qwen3-14B returning null content behind a 7/9 score, and hid whisper
