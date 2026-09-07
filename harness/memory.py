@@ -143,11 +143,27 @@ def size_gb(path: str) -> float | None:
     return total / 1024 ** 3 if total else None
 
 
+#: Bits per weight in an unquantised checkpoint. Used to scale the on-disk
+#: size when a caller will quantise on load.
+_BASE_BITS = 16
+
+
 def check_model(repo: str, resident_gb: float = 0.0,
-                reserve_gb: float = DEFAULT_RESERVE_GB) -> tuple[bool, str]:
-    """One call: will loading `repo` be safe on this machine right now?"""
+                reserve_gb: float = DEFAULT_RESERVE_GB,
+                quantize: int | None = None) -> tuple[bool, str]:
+    """One call: will loading `repo` be safe on this machine right now?
+
+    `quantize` is the bit width the CALLER will load at. Without it this used
+    the on-disk size, which is right for a pre-quantised MLX repo and badly
+    wrong for a bf16 checkpoint loaded with `--quantize 4`: it refused
+    FLUX.1-dev at "needs 31.4 GB" while a stage using exactly that model ran
+    successfully on the same machine. A guard that blocks working work gets
+    switched off, which is worse than no guard at all.
+    """
     path = cache_path(repo)
     need = size_gb(path) if path else None
+    if need is not None and quantize:
+        need = need * quantize / _BASE_BITS
     if need is None:
         # Allowed, but said out loud. Refusing everything uncached would make
         # the guard the thing that breaks the workflow.

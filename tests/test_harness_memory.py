@@ -108,3 +108,26 @@ Pages wired down:                              10000.
     monkeypatch.setattr(memory.subprocess, "run", lambda *a, **k: R())
     # 4 buckets x 65536 pages x 16KB = 4 GB
     assert memory.available_gb() == pytest.approx(4.0, rel=0.02)
+
+
+def test_a_quantised_load_costs_less_than_the_repo_on_disk(tmp_path, monkeypatch):
+    """CAUGHT BY A FALSE REFUSAL. The guard used on-disk size as the load cost,
+    which is right for a pre-quantised MLX repo and WRONG for a bf16 repo
+    loaded with --quantize 4. It refused FLUX.1-dev at "needs 31.4 GB" while
+    the stage using it was running successfully on the same machine.
+
+    A guard that blocks working work gets switched off, which is worse than
+    having no guard."""
+    monkeypatch.setattr(memory, "cache_path", lambda repo: "/fake")
+    monkeypatch.setattr(memory, "size_gb", lambda path: 32.0)
+    ok, why = memory.check_model("x/bf16-model", quantize=4,
+                                 reserve_gb=0.0)
+    # 32 GB at bf16 is 16 bits per weight; at 4 bits it is a quarter of that.
+    assert "8.0" in why, why
+
+
+def test_no_quantisation_still_costs_the_full_size(tmp_path, monkeypatch):
+    monkeypatch.setattr(memory, "cache_path", lambda repo: "/fake")
+    monkeypatch.setattr(memory, "size_gb", lambda path: 32.0)
+    _, why = memory.check_model("x/model", reserve_gb=0.0)
+    assert "32.0" in why

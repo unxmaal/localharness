@@ -19,7 +19,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from harness import proc
+from harness import memory, proc
 from harness.engines import Engine
 
 from evals.core import Case
@@ -34,7 +34,8 @@ def _mflux(name: str) -> str:
     return found or str(MFLUX_BIN / name)
 
 
-def upscale_seedvr2(src: Path, dst: Path, params: dict) -> list[str]:
+def upscale_seedvr2(src: Path, dst: Path, params: dict,
+                    prompt: str) -> list[str]:
     """SeedVR2 diffusion super-resolution.
 
     `--low-ram` and `--vae-tiling` are not optional on 32 GB: the VAE decode is
@@ -51,11 +52,70 @@ def upscale_seedvr2(src: Path, dst: Path, params: dict) -> list[str]:
             "--no-metadata"]
 
 
-#: name -> builds the second stage's command line.
-STAGES = {"upscale-seedvr2": upscale_seedvr2}
+def upscale_controlnet(src: Path, dst: Path, params: dict,
+                       prompt: str) -> list[str]:
+    """The other upscaler, and a different code path to the same goal.
+
+    Worth having precisely because `upscale-seedvr2` is broken against the
+    installed mlx (issue #27): one route being dead says nothing about the
+    other, and the only way to know is to run it.
+
+    Takes explicit width and height rather than a scale factor, so the size it
+    is told to make and STAGE_SCALE have to agree.
+    """
+    w = int(params.get("width") or 512) * 2
+    h = int(params.get("height") or 512) * 2
+    return [_mflux("mflux-upscale-controlnet"),
+            "--controlnet-image-path", str(src),
+            "--prompt", prompt,
+            "--width", str(w), "--height", str(h),
+            "--output", str(dst),
+            "--low-ram", "--quantize", "4", "--no-metadata"]
+
+
+def controlnet(src: Path, dst: Path, params: dict, prompt: str) -> list[str]:
+    """Regenerate, conditioned on the structure of the first attempt.
+
+    THE REASON PEOPLE REACH FOR COMFYUI. Stage one produces a base image,
+    stage two treats it as a control image and generates again -- the
+    img2img/ControlNet pattern, and it needs no case to supply an input from
+    outside because stage one IS the input.
+
+    Same size in and out: only the upscalers scale.
+    """
+    return [_mflux("mflux-generate-controlnet"),
+            "--controlnet-image-path", str(src),
+            "--prompt", prompt,
+            "--controlnet-strength", "0.6",
+            "--width", str(int(params.get("width") or 512)),
+            "--height", str(int(params.get("height") or 512)),
+            "--output", str(dst),
+            "--low-ram", "--quantize", "4", "--no-metadata"]
+
+
+#: name -> builds the second stage's command line. Four arguments, always:
+#: where the first stage put its image, where this one should write, the
+#: case's generation params, and the prompt -- conditioning stages need the
+#: prompt as well as the image.
+STAGES = {"upscale-seedvr2": upscale_seedvr2,
+          "upscale-controlnet": upscale_controlnet,
+          "controlnet": controlnet}
 #: How each stage changes the output resolution, so the checker can be told
 #: what the workflow INTENDED rather than what the case asked to generate.
-STAGE_SCALE = {"upscale-seedvr2": 2}
+#: Every stage must appear here; an undeclared scale fails the size check for
+#: reasons nobody can debug.
+STAGE_SCALE = {"upscale-seedvr2": 2, "upscale-controlnet": 2, "controlnet": 1}
+#: What each stage LOADS, so the memory guard can refuse it before anything
+#: runs. A stage often pulls a bigger model than the base engine -- the
+#: controlnet stages want FLUX.1-dev, 31GB on disk -- and stage one's weights
+#: may still be resident when stage two starts.
+#: (repo, bits it is loaded at). The bit width matters: these stages pass
+#: --quantize 4 against a bf16 checkpoint, so the resident cost is a quarter
+#: of what is on disk. Sizing by disk alone refused a stage that was working.
+STAGE_MODELS = {
+    "upscale-controlnet": ("black-forest-labs/FLUX.1-dev", 4),
+    "controlnet": ("black-forest-labs/FLUX.1-dev", 4),
+}
 
 
 class ChainRunner(BaseRunner):
@@ -89,6 +149,16 @@ class ChainRunner(BaseRunner):
         w, h = case.params.get("width"), case.params.get("height")
         self.expect_size = (w * scale, h * scale) if (w and h) else None
 
+        # BEFORE stage one, not between the stages: fifty seconds of
+        # diffusion followed by a refusal is fifty seconds thrown away.
+        declared = STAGE_MODELS.get(self.stage)
+        if declared:
+            repo, bits = declared
+            ok, why = memory.check_model(repo, quantize=bits)
+            if not ok:
+                raise RunnerError(
+                    f"{self.stage} would load {repo} and it does not fit: {why}")
+
         params = {"width": case.params.get("width"),
                   "height": case.params.get("height"),
                   "steps": None, "seed": case.params.get("seed")}
@@ -102,7 +172,7 @@ class ChainRunner(BaseRunner):
             raise RunnerError(f"{self.engine.name} exited 0 but wrote no image")
         self.last_metrics = {"stages": 1}
 
-        second = self._run(STAGES[self.stage](mid, out, params),
+        second = self._run(STAGES[self.stage](mid, out, params, case.prompt),
                            f"{self.stage} (stage 2)")
         if not out.exists():
             raise RunnerError(f"{self.stage} exited 0 but wrote no image")
