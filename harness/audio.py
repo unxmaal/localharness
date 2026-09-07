@@ -102,44 +102,18 @@ def resolve_voice(name: str) -> Voice:
         f"unknown voice {name!r}; cloned: {', '.join(sorted(VOICE_PRESETS))}; "
         f"kokoro: {', '.join(KNOWN_VOICES)}")
 
-# CHATTERBOX RUNAWAY, issue #6. mlx_audio's SpeechRequest declares
-# repetition_penalty with a default of 1.0, and the server forwards every
-# non-None field. Chatterbox's own generate() defaults it to 1.2. So going
-# through the HTTP server SILENTLY DISABLES the penalty the model ships with,
-# and nothing in the request says so -- the caller who sends nothing gets
-# different sampling from the caller who calls the model directly.
-#
-# MEASURED 2026-09-07 on the five French cases: three of five ran to exactly
-# 48.00 seconds, an identical ceiling that is the max_tokens budget being
-# exhausted rather than a sentence ending. At repetition_penalty=1.2 the same
-# three came back at 4.28s, 5.40s and 9.92s.
-#
-# HONEST SCOPE: this reproduces on lang_code="fr" and does NOT reproduce on
-# lang_code="en", which is the path that matters here -- short, medium and long
-# English through the fr-male accent voice all came back proportionate, with and
-# without the penalty. So this is a guard against a failure mode that has been
-# seen, not a fix for one that is currently biting English.
+# mlx_audio's SpeechRequest defaults repetition_penalty to 1.0 and forwards it,
+# overriding the 1.2 Chatterbox itself defaults to. Issue #6.
 CHATTERBOX_REPETITION_PENALTY = 1.2
 
-#: Seconds of speech a word is worth, plus slack. Measured at 0.25-0.48 s/word
-#: across short and long English through the cloned voice, so 1.0 is roughly
-#: three times the worst observed rate: comfortably clear of normal variation
-#: and far under a runaway, which was 3.4-5.3 s/word.
+# Healthy is 0.25-0.56 s/word; a runaway was 3.4-5.3.
 SECONDS_PER_WORD_CEILING = 1.0
-#: Below this, per-word rates are meaningless -- a three-word clip is mostly
-#: onset and trailing silence.
+# Below this a clip is mostly onset and silence, so the rate is noise.
 RUNAWAY_MIN_WORDS = 6
 
 
 def token_budget(text: str) -> int:
-    """A cap proportional to the text instead of a flat 1200.
-
-    The server's flat budget is what a runaway spends. Sizing it to the input
-    means an overrun stops near the end of the sentence rather than a minute
-    later.
-    """
-    # ~3 tokens per word at the audio codec's rate, times 4 for slack, and
-    # never less than a floor that short phrases cannot trip.
+    """A cap proportional to the text instead of mlx_audio's flat 1200."""
     return max(200, len(text.split()) * 12)
 
 
@@ -174,9 +148,7 @@ def speak(text: str, out: str | Path, voice: str = DEFAULT_KOKORO_VOICE,
     out = Path(out)
     payload = {"model": model, "input": text,
                "speed": speed, "response_format": "wav"}
-    # Issue #6. Only for the cloning path: Kokoro takes neither field and has
-    # never run away, so sending them there would be changing a lane that
-    # works to fix one that does not.
+    # Cloning path only: Kokoro takes neither field. Issue #6.
     if ref_audio is not None:
         payload["repetition_penalty"] = CHATTERBOX_REPETITION_PENALTY
         payload["max_tokens"] = token_budget(text)
@@ -222,9 +194,7 @@ def speak(text: str, out: str | Path, voice: str = DEFAULT_KOKORO_VOICE,
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(r.content)
-    # A runaway is not an error the server reports: it returns 200 with a minute
-    # of fluent invented speech. Duration against the word count is the only
-    # cheap signal, and saying so beats handing back audio nobody will play.
+    # A runaway returns 200 with a minute of invented speech, not an error.
     runaway = runaway_reason(out, text)
     if runaway:
         raise AudioError(f"tts ran away: {runaway}. The audio is at {out} so it "
@@ -463,12 +433,7 @@ def runaway_reason(path: str | Path, text: str,
                    ceiling: float = SECONDS_PER_WORD_CEILING) -> str:
     """Why this audio is too long for its text, or "" when it is plausible.
 
-    Returns a string rather than a bool so the caller can quote the numbers:
-    "48.00s for 9 words" is a diagnosis, "True" is not.
-
-    Deliberately one-sided. Audio that is too SHORT is a different failure
-    (truncation) with a different cause, and folding both into one check would
-    give a single number two jobs.
+    One-sided: too-short is truncation, a different failure.
     """
     words = len(text.split())
     if words < RUNAWAY_MIN_WORDS:

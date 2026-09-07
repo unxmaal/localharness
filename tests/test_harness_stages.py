@@ -1,9 +1,4 @@
-"""A known-broken stage must refuse early, and must stop refusing when fixed.
-
-The second half is the one worth testing. A guard that blocks forever is
-indistinguishable from a stage that stays broken forever, because the guard
-removes the only evidence that would tell them apart.
-"""
+"""A known-broken stage refuses early, and stops refusing once fixed."""
 from pathlib import Path
 
 import pytest

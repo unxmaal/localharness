@@ -1,23 +1,4 @@
-"""Issue #6: Chatterbox continuing past the end of the input.
-
-The failure is not an error. The server returns 200 with a minute of fluent
-invented speech, so nothing downstream notices until a human plays the file.
-
-MEASURED 2026-09-07 through mlx_audio 0.5.1 on port 8890, and the numbers below
-are those measurements rather than invented thresholds:
-
-  * on lang_code="fr", three of five cases ran to EXACTLY 48.00 seconds. An
-    identical duration across different sentences is a token budget being
-    exhausted, not sentences ending. Rates: 1.37, 3.43 and 5.33 s/word.
-  * the same three at repetition_penalty=1.2: 9.92s, 5.40s, 4.28s.
-  * on lang_code="en" through the accent voice it does NOT reproduce: short,
-    medium and long all came back at 0.25-0.36 s/word with and without the
-    penalty.
-
-So the guard is against a failure mode that has been observed, on a path that
-is currently healthy. That is worth stating plainly rather than implying
-English was ever broken.
-"""
+"""Issue #6: Chatterbox running past the end of its input."""
 import struct
 import wave
 

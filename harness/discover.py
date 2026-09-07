@@ -74,14 +74,8 @@ class Capability:
     #: complaint rather than a finding.
     how: str
     measured: bool = False
-    #: Is it installed at all? False means absent from this machine.
     present: bool = True
-    #: Installed, but it CANNOT RUN, and this says why. Distinct from
-    #: `present` because "not installed" and "installed and broken" are
-    #: different findings with different fixes, and distinct from `measured`
-    #: because a thing can have been measured and be broken now -- which is
-    #: exactly upscale-seedvr2, measured 0/3 precisely BECAUSE it is broken.
-    #: A row that has been measured must never read as healthy on that basis.
+    #: Installed but unusable, and why. Distinct from `present` and `measured`.
     blocked: str = ""
     note: str = ""
 
@@ -123,11 +117,7 @@ def image_engines(bindir: Path | None = None) -> list[Capability]:
                  "mflux-save", "mflux-train", "mflux-lora-library"):
             continue
         if workflowish:
-            # THREE OF THESE NOW HAVE A RUNNER. Reporting the whole set as
-            # "no runner yet" is how this tool started lying: ChainRunner
-            # landed and discover went on describing the state of the repo
-            # before it. What has a runner is a candidate; what does not is
-            # still a gap, and the two must not read the same.
+            # Three of these have a runner; the rest are still gaps.
             stage = ENTRY_POINT_STAGES.get(n)
             if stage:
                 broken = stage_unavailable(stage)
@@ -180,13 +170,7 @@ def external_tools() -> list[Capability]:
 
 
 def methods() -> list[Capability]:
-    """Workflows the harness implements, as opposed to models it can call.
-
-    It used to list two and cite #18 as the reason it was short. #18 is closed
-    and there are now six, so the list is generated from the registries rather
-    than retyped -- a hand-maintained inventory is stale by the next commit,
-    which is the entire premise of this module.
-    """
+    """Workflows the harness implements, as opposed to models it can call."""
     out = [
         Capability("method", "llm", "svg", "harness/cli.py",
                    "--candidates local-large",

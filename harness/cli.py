@@ -363,9 +363,7 @@ def cmd_discover(a) -> int:
     if a.lane:
         caps = [c for c in caps if c.lane == a.lane]
     if a.gap:
-        # A BROKEN row is not a gap: it is not something you close by
-        # running the command, and listing it under --gap hands the
-        # reader an invocation that is guaranteed to refuse.
+        # A broken row is not a gap: running the command only refuses.
         caps = [c for c in caps
                 if not c.measured and c.present and not c.blocked]
 
@@ -383,9 +381,7 @@ def cmd_discover(a) -> int:
     for lane in sorted(by_lane):
         print(f"\n{lane}")
         for c in sorted(by_lane[lane], key=lambda c: (c.measured, c.name)):
-            # BROKEN OUTRANKS measured, deliberately. upscale-seedvr2 HAS been
-            # measured -- 0/3, precisely because it cannot run -- and printing
-            # it as "measured" told the reader it was fine.
+            # BROKEN outranks measured: a thing can be measured and broken.
             if c.blocked:
                 mark = "BROKEN"
             elif not c.present:
@@ -395,7 +391,6 @@ def cmd_discover(a) -> int:
             else:
                 mark = "NEVER RUN"
             print(f"  {mark:9} {c.kind:7} {c.name}")
-            # A refusal without its reason sends the reader to the wrong repo.
             if c.blocked:
                 print(f"            !! {c.blocked}")
             elif not c.present and c.note:
