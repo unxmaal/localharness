@@ -276,3 +276,99 @@ def test_github_links_are_tools_not_model_candidates(week):
     kinds = {p.name: p.kind for p in feeds.candidates(week)}
     assert kinds.get("Merserk/dlss5-visual-enhancer") == "tool"
     assert kinds.get("inclusionAI/LLaDA-Image") == "repo"
+
+
+# ---- apple silicon relevance (#45) ----------------------------------------
+
+def test_native_mlx_outranks_a_generic_model():
+    """Measured 2026-09-07: 0/25 and 1/25 of the reddit weekly entries mention
+    Apple Silicon at all, so an MLX result must not be ranked identically to a
+    generic GGUF one."""
+    mlx = feeds.relevance("SDMLX - Speeds up SDXL workflows on Mac using native MLX.")
+    plain = feeds.relevance("Ling-3.0-tiny - Low-cost local AI reasoning model.")
+    assert mlx > plain
+
+
+def test_hardware_this_machine_does_not_have_scores_negative():
+    assert feeds.relevance("ninfer-4090 - Runs Qwen3.8-27B on one RTX 4090.") < 0
+    assert feeds.relevance("needs CUDA and 24GB VRAM") < 0
+
+
+def test_relevance_is_zero_when_the_text_says_neither_way():
+    assert feeds.relevance("A compact model that tops benchmarks.") == 0
+
+
+def test_a_term_repeated_does_not_inflate_the_score():
+    once = feeds.relevance("mlx")
+    many = feeds.relevance("mlx mlx mlx mlx mlx")
+    assert once == many
+
+
+def test_candidates_carry_their_relevance(recap):
+    props = {p.name: p for p in feeds.candidates(recap[:1])}
+    assert any(p.relevance > 0 for p in props.values())
+
+
+# ---- release feeds (#45) ---------------------------------------------------
+
+RELEASES = """<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry><title>v0.5.3</title><link href="https://x/1"/><updated>2026-09-01</updated></entry>
+  <entry><title>v0.5.10</title><link href="https://x/2"/><updated>2026-08-01</updated></entry>
+  <entry><title>v0.5.1</title><link href="https://x/3"/><updated>2026-07-01</updated></entry>
+</feed>"""
+
+
+def test_newest_release_compares_numerically_not_as_text():
+    """0.5.10 is newer than 0.5.3, and string ordering says the opposite."""
+    assert feeds.newest_release(feeds.parse(RELEASES)) == "0.5.10"
+
+
+def test_behind_is_false_when_either_version_is_unreadable():
+    assert not feeds.behind("", "0.5.1")
+    assert not feeds.behind("0.5.3", "")
+    assert feeds.behind("0.5.3", "0.5.1")
+    assert not feeds.behind("0.5.1", "0.5.3")
+    assert not feeds.behind("0.5.1", "0.5.1")
+
+
+def test_a_pinned_service_version_is_found_in_versions_sh(tmp_path):
+    pins = tmp_path / "versions.sh"
+    pins.write_text('MLX_AUDIO_PIN="mlx-audio==0.5.1"\n'
+                    'MISAKI_PIN="misaki[en]==0.9.4"\n')
+    assert feeds.installed_version("misaki", pins) == "0.9.4"
+
+
+def test_every_releases_source_declares_what_it_tracks():
+    for s in feeds.DEFAULT_SOURCES:
+        if s.kind == "releases":
+            assert s.name in feeds.TRACKS, s.name
+
+
+def test_a_releases_source_reports_drift_not_the_repo_it_watches(monkeypatch):
+    """Proposing `ml-explore/mlx` to a project built on MLX is noise. The
+    useful signal is that we are behind."""
+    src = Source("mlx-releases", "https://example.invalid/r.atom",
+                 kind="releases", lane="all")
+    monkeypatch.setitem(feeds.TRACKS, "mlx-releases", "mlx")
+    monkeypatch.setattr(feeds, "installed_version", lambda p, pins=None: "0.5.1")
+    got = discover.from_feeds([src], reader=lambda s: feeds.parse(RELEASES))
+    assert [c.name for c in got] == ["mlx"]
+    assert got[0].kind == "update"
+    assert "0.5.10" in got[0].note
+
+
+def test_a_current_releases_source_reports_nothing(monkeypatch):
+    src = Source("mlx-releases", "https://example.invalid/r.atom",
+                 kind="releases", lane="all")
+    monkeypatch.setitem(feeds.TRACKS, "mlx-releases", "mlx")
+    monkeypatch.setattr(feeds, "installed_version", lambda p, pins=None: "0.5.10")
+    assert discover.from_feeds([src], reader=lambda s: feeds.parse(RELEASES)) == []
+
+
+def test_the_platform_filter_drops_cuda_only_proposals(week):
+    src = Source("fix", "https://example.invalid", lane="image")
+    everything = discover.from_feeds([src], reader=lambda s: week, verify=False)
+    filtered = discover.from_feeds([src], reader=lambda s: week, verify=False,
+                                   min_relevance=1)
+    assert len(filtered) < len(everything)
+    assert all(c.relevance >= 1 for c in filtered)
