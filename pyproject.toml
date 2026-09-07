@@ -11,6 +11,7 @@ dependencies = [
     "jiwer>=4.0.0",
     "num2words>=0.5.14",
     "pyobjc-framework-vision>=12.2.2",
+    "vtracer>=0.6.15",
 ]
 
 [project.scripts]

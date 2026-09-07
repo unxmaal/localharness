@@ -508,3 +508,69 @@ def test_the_disagreement_note_is_silent_when_a_metric_is_partial(capsys):
     out = capsys.readouterr().out
     assert "PARTIAL" in out
     assert "disagree" not in out.lower(), out
+
+
+# ---- the svg lane's second method ------------------------------------------
+
+def test_a_trace_candidate_becomes_a_trace_runner(tmp_path):
+    from evals.runners.trace import TraceRunner
+    r = build_runner("trace:mflux:flux2-klein-4b", "http://gw", tmp_path)
+    assert isinstance(r, TraceRunner)
+    assert r.candidate.startswith("trace/")
+
+
+def test_a_trace_candidate_only_gets_svg_cases(tmp_path):
+    from evals.run import cases_for
+    cases = [Case(id="s", modality="svg", prompt="a gear"),
+             Case(id="i", modality="image", prompt="a fox",
+                  params={"width": 64, "height": 64})]
+    got = cases_for("trace:mflux:flux2-klein-4b", cases)
+    assert [c.id for c in got] == ["s"]
+
+
+def test_a_trace_candidate_needs_an_output_directory(tmp_path):
+    with pytest.raises(SystemExit) as e:
+        build_runner("trace:mflux:flux2-klein-4b", "http://gw", None)
+    assert "--out" in str(e.value)
+
+
+def test_a_bad_engine_inside_a_trace_spec_is_caught_early(tmp_path):
+    with pytest.raises(SystemExit):
+        build_runner("trace:mflux:no-such-model-xyz", "http://gw", tmp_path)
+
+
+def test_a_case_that_is_unfair_to_tracing_is_not_given_to_it():
+    """A traced SVG has no <text> element by construction, so a case asserting
+    one measures the method rather than the candidate."""
+    from evals.run import cases_for
+    cases = [Case(id="bars", modality="svg", prompt="bars", methods=("llm",)),
+             Case(id="gear", modality="svg", prompt="a gear")]
+    assert [c.id for c in cases_for("trace:mflux:flux2-klein-4b", cases)] == ["gear"]
+    assert [c.id for c in cases_for("local-large", cases)] == ["bars", "gear"]
+
+
+def test_the_report_says_when_candidates_sat_different_exams(capsys):
+    """Caught live: `trace` ran 4 rows and `local-large` 6, because chart-bars
+    is llm-only. 4/4 against 2/6 reads as a pass-rate comparison and is not
+    one. Whether two runs are comparable was item 2; this is the same question
+    one level down, INSIDE a single run."""
+    s = summarize([
+        Result("gear", "trace", True, 1.0, 0, ""),
+        Result("mark", "trace", True, 1.0, 0, ""),
+        Result("gear", "llm", False, 1.0, 0, "drew 1"),
+        Result("mark", "llm", False, 1.0, 0, "drew 1"),
+        Result("bars", "llm", True, 1.0, 0, ""),
+    ])
+    report(s)
+    out = capsys.readouterr().out
+    assert "different cases" in out.lower()
+    assert "bars" in out
+
+
+def test_no_such_note_when_everyone_sat_the_same_exam(capsys):
+    s = summarize([
+        Result("gear", "a", True, 1.0, 0, ""),
+        Result("gear", "b", False, 1.0, 0, "drew 1"),
+    ])
+    report(s)
+    assert "different cases" not in capsys.readouterr().out.lower()

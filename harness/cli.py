@@ -28,7 +28,7 @@ import sys
 import time
 from pathlib import Path
 
-from harness import audio, completion, env, proc
+from harness import audio, completion, env, proc, vector
 from harness.checks import html as html_check
 from harness.checks import image as image_check
 from harness.checks import svg as svg_check
@@ -173,8 +173,51 @@ def _text(a, modality: str, suffix: str, checker) -> int:
     return 0
 
 
+#: The prompt an image model needs to produce something a tracer can use. A
+#: photographic fox vectorizes into thousands of paths; flat shapes on white
+#: vectorize into an icon.
+TRACE_STYLE = ("flat vector illustration, simple clean shapes, bold outlines, "
+               "solid colours, white background, no gradients, no texture")
+
+
 def cmd_svg(a) -> int:
+    if getattr(a, "method", "llm") == "trace":
+        return _svg_by_tracing(a)
     return _text(a, "svg", ".svg", svg_check.check)
+
+
+def _svg_by_tracing(a) -> int:
+    """Draw it, then vectorize it.
+
+    The measured answer for this lane. Five language models were compared on
+    it and all five produce valid markup that is not the picture, because an
+    LLM writes bezier coordinates it cannot see. Diffusion draws in pixel
+    space, where "frog" is a shape it has seen.
+    """
+    out = Path(a.output or default_output("svg", ".svg")).resolve()
+    png = out.with_suffix(".png")
+    # The raster is KEPT. When the SVG is wrong the first question is always
+    # whether the raster was wrong too, and deleting it throws away the only
+    # way to answer.
+    rc = _generate(a.engine, f"{a.prompt}, {TRACE_STYLE}", png,
+                   {"width": a.width, "height": a.height,
+                    "steps": None, "seed": a.seed})
+    if rc != 0:
+        return rc
+    try:
+        svg = vector.trace(png)
+    except vector.VectorError as exc:
+        return err(f"{png} was generated but could not be vectorized: {exc}")
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(svg)
+    checked = svg_check.check(svg)
+    for w in checked.warnings:
+        print(f"warning: {w}", file=sys.stderr)
+    if not checked.ok:
+        return err(f"wrote {out}, but it does not check out: {checked.reason}")
+    print(f"{out}")
+    return 0
 
 
 def cmd_web(a) -> int:
@@ -319,6 +362,18 @@ def build_parser() -> argparse.ArgumentParser:
                        help="gateway alias")
         p.add_argument("--gateway", default=completion.DEFAULT_GATEWAY)
         p.set_defaults(func=func)
+        if name == "svg":
+            # `llm` is still the default because it is seconds against a
+            # minute, and for a two-shape icon it is sometimes enough. `trace`
+            # is the one that draws the picture.
+            p.add_argument("--method", choices=("llm", "trace"), default="llm",
+                           help="llm: a language model writes the paths. "
+                                "trace: generate an image and vectorize it")
+            p.add_argument("--engine", default=DEFAULT_IMAGE_ENGINE,
+                           help="image engine used by --method trace")
+            p.add_argument("--width", type=int, default=512)
+            p.add_argument("--height", type=int, default=512)
+            p.add_argument("--seed", type=int)
 
     c = sub.add_parser("code", help="generate code")
     c.add_argument("prompt")

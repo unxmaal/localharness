@@ -954,3 +954,35 @@ def test_different_sampling_is_not_comparable():
                 gateway="http://gw")
     ok, why = comparable(a, b)
     assert not ok and "sampling" in why.lower()
+
+
+def test_a_gpu_timeout_is_an_instrument_failure_not_a_bad_drawing():
+    """Caught live on the first trace run. Metal's wording is 'GPU Timeout
+    Error', not 'timed out', so the classifier called a driver failure a wrong
+    answer and it counted against the model's score."""
+    from evals.core import failure_kind
+    detail = ("mflux exited 1: RuntimeError: [METAL] Command buffer execution "
+              "failed: Caused GPU Timeout Error "
+              "(00000002:kIOGPUCommandBufferCallbackErrorTimeout).")
+    assert failure_kind(detail) == "error"
+
+
+def test_an_out_of_memory_crash_is_also_the_instrument():
+    from evals.core import failure_kind
+    assert failure_kind("mflux exited 3: out of memory") == "error"
+
+
+# ---- a case can be unfair to a method -------------------------------------
+# chart-bars asserts must_contain: ["text"]. A vectorizer CANNOT satisfy it:
+# tracing turns glyphs into outlines, so a traced SVG has no <text> element by
+# construction. The case was written when an LLM was the only method, and it
+# encodes that assumption. Comparing methods on it measures the assumption.
+
+def test_a_case_can_declare_which_methods_it_is_fair_to(tmp_path):
+    (tmp_path / "a.yaml").write_text(
+        "id: bars\nmodality: svg\nprompt: draw bars\nmethods: [llm]\n"
+        "assert:\n  must_contain: ['text']\n")
+    (tmp_path / "b.yaml").write_text("id: gear\nmodality: svg\nprompt: a gear\n")
+    by = {c.id: c for c in load_cases(tmp_path)}
+    assert by["bars"].methods == ("llm",)
+    assert by["gear"].methods == (), "no declaration means fair to every method"

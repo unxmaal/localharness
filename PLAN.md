@@ -475,11 +475,39 @@ of those.
    was itself making the mistake this item exists to prevent, and is now silent
    when any candidate's metric is partial.
 
-3. **Give the svg lane its second method.** Wire image-then-vectorize into
+3. **DONE 2026-09-07. Give the svg lane its second method.** Wire image-then-vectorize into
    `lh svg` and measure it against the LLM path on the same cases. Proven at
    0.05s producing a recognisable frog, where five language models produced
-   coloured blobs. This is the only lane where the winning method is currently
-   not implemented.
+   coloured blobs.
+
+   Shipped as `lh svg --method trace` and the eval candidate
+   `trace:mflux:flux2-klein-4b`, scored by the same checker on the same cases.
+   MEASURED, two cases at --repeat 2:
+
+   | candidate | pass | median | ink |
+   |---|---|---|---|
+   | trace/flux2-klein-4b | **4/4 100%** | 52.7s | **0.222** |
+   | local-large (LLM) | 2/6 33% | 5.3s | 0.057 |
+
+   Tracing wins the lane outright on quality and loses by 10x on time. `llm`
+   stays the CLI default because seconds against a minute is sometimes the right
+   trade for a two-shape icon; `trace` is the one that draws the picture.
+
+   THREE DEFECTS THIS TURNED UP, all fixed:
+   - `failure_kind` scored a Metal GPU timeout as a WRONG DRAWING. Metal says
+     "GPU Timeout Error", never "timed out", so a driver failure counted against
+     the model.
+   - `chart-bars` asserts `must_contain: ["text"]`, which a vectorizer cannot
+     satisfy at any quality -- tracing turns glyphs into outlines. The case was
+     written when an LLM was the only method and encodes that assumption. Cases
+     can now declare `methods:` and it is `[llm]`.
+   - Two candidates in ONE run then sat different exams (4 rows against 6), and
+     4/4 beside 2/6 reads as a pass-rate comparison. The report now says so and
+     names the cases only one of them ran.
+
+   STILL OPEN: a traced icon is ~28KB of paths where a hand-authored one is a
+   few hundred bytes. Right for illustration, wrong for a 24x24 UI glyph.
+   OmniSVG and StarVector remain unmeasured -- both are torch on MPS.
 
 4. **Widen `web` from two cases.** The best candidate scores 6/6, so the lane
    discriminates between nothing. Cheap: cases are text.

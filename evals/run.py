@@ -31,6 +31,7 @@ from evals.core import (MODALITIES, Case, Receipt, direction_of,
 from evals.environment import capture
 from evals.runners.process import ProcessRunner
 from evals.runners.speech import SpeechRunner
+from evals.runners.trace import TraceRunner
 from evals.runners.text import CompletionRunner
 from evals.runners.transcription import TranscriptionRunner
 
@@ -40,6 +41,9 @@ ALL_MODALITIES = sorted(MODALITIES)
 
 
 PROCESS_ENGINES = ("mflux", "h3")
+#: The svg lane's second METHOD: draw a raster, then vectorize it. Written as
+#: `trace:<engine spec>` so the engine underneath stays the ordinary spec.
+TRACE_PREFIX = "trace"
 TTS_OPTIONS = {"voice", "ref_audio", "lang_code", "ear"}
 STT_OPTIONS = {"backend", "language"}
 
@@ -53,6 +57,8 @@ def kind_of(candidate: str) -> str:
         return "process"
     if head in ("tts", "stt"):
         return head
+    if head == TRACE_PREFIX:
+        return TRACE_PREFIX
     return "gateway"
 
 
@@ -62,6 +68,10 @@ def modality_of(candidate: str) -> str | None:
     kind = kind_of(candidate)
     if kind in ("tts", "stt"):
         return kind
+    if kind == TRACE_PREFIX:
+        # It answers svg cases; the engine underneath makes images, which is
+        # the whole point and would be the wrong modality to select on.
+        return "svg"
     if kind == "process":
         engine = engine_for(candidate)
         return engine.modality if engine else None
@@ -175,6 +185,18 @@ def build_runner(candidate: str, gateway: str, outdir: Path | None,
         return _speech_runner(candidate, outdir)
     if kind == "stt":
         return _transcription_runner(candidate)
+    if kind == TRACE_PREFIX:
+        spec = candidate.partition(":")[2].strip()
+        if not spec:
+            raise SystemExit("a trace candidate needs an engine, e.g. "
+                             "trace:mflux:flux2-klein-4b")
+        try:
+            engine = resolve(spec)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        if outdir is None:
+            raise SystemExit(f"{candidate} writes images; pass --out")
+        return TraceRunner(engine, outdir)
     try:
         engine = resolve(candidate)
     except ValueError as exc:
@@ -192,6 +214,9 @@ def cases_for(candidate: str, cases: list[Case]) -> list[Case]:
     if modality is None:
         return [c for c in cases if c.modality in TEXT_MODALITIES]
     picked = [c for c in cases if c.modality == modality]
+    # A case may declare which methods it can fairly test. See Case.methods.
+    method = TRACE_PREFIX if kind_of(candidate) == TRACE_PREFIX else "llm"
+    picked = [c for c in picked if not c.methods or method in c.methods]
     language = language_of(candidate)
     if language is not None:
         picked = [c for c in picked if c.language == language]
@@ -468,6 +493,21 @@ def report(summary: dict) -> None:
         shown = [f"{n} {k}" for k, n in kinds if n]
         if len(shown) > 0 and s["passed"] < s["total"]:
             print(f"  {name}: {', '.join(shown)}")
+
+    # Two candidates in ONE run can sit different exams: a case may be unfair to
+    # a method (chart-bars asserts <text>, which tracing cannot emit) or to a
+    # language. Their pass rates are then not comparable, and 4/4 against 2/6
+    # reads exactly as though they were.
+    sat = {name: set(s.get("case_ids", [])) for name, s in summary.items()}
+    if len({frozenset(v) for v in sat.values()}) > 1:
+        shared = set.intersection(*sat.values()) if sat else set()
+        print("  Note: candidates sat DIFFERENT cases, so the pass rates are "
+              "not directly comparable.")
+        for name in sorted(sat):
+            extra = sorted(sat[name] - shared)
+            if extra:
+                print(f"    {name}: also ran {', '.join(extra)}")
+        print(f"    shared by all: {', '.join(sorted(shared)) or 'none'}")
 
     # A mean over two of nine cases is not comparable with a mean over nine.
     # local-mid's svg ink of 0.564 was exactly that, printed beside 0.229.

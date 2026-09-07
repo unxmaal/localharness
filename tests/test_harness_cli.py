@@ -477,3 +477,51 @@ def test_the_voices_command_lists_what_can_be_spoken(capsys):
     assert cli.main(["voices"]) == 0
     out = capsys.readouterr().out
     assert "fr-male" in out and "bm_george" in out
+
+
+# ---- lh svg --method trace -------------------------------------------------
+# The svg lane's LLM path is measured and weak: valid markup that is not the
+# picture. Generating a raster and vectorizing it is the method that works, so
+# it has to be reachable from the product, not just proven in a scratch file.
+
+@respx.mock
+def test_svg_defaults_to_the_language_model_path(tmp_path):
+    respx.post(f"{GW}/v1/chat/completions").mock(return_value=completion(
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
+        "<circle cx='12' cy='12' r='8'/></svg>"))
+    assert cli.main(["svg", "a gear", "-o", str(tmp_path / "g.svg")]) == 0
+
+
+def test_svg_trace_runs_the_image_engine_then_vectorizes(spy, tmp_path, monkeypatch):
+    """One command, two stages. The engine writes a PNG and the tracer turns it
+    into paths; neither half is much use to a caller on its own."""
+    traced = []
+    monkeypatch.setattr(cli.vector, "trace",
+                        lambda p, **kw: traced.append(p) or "<svg><path d='M0 0'/></svg>")
+    dest = tmp_path / "frog.svg"
+    assert cli.main(["svg", "a frog", "--method", "trace", "-o", str(dest)]) == 0
+    assert dest.read_text().startswith("<svg")
+    assert traced, "the image was never vectorized"
+    assert "mflux" in spy[0]["argv"][0]
+
+
+def test_svg_trace_keeps_the_intermediate_png(spy, tmp_path, monkeypatch):
+    """When the SVG is wrong, the question is always whether the raster was
+    wrong too. Deleting it throws away the only way to tell."""
+    monkeypatch.setattr(cli.vector, "trace", lambda p, **kw: "<svg><path/></svg>")
+    dest = tmp_path / "frog.svg"
+    cli.main(["svg", "a frog", "--method", "trace", "-o", str(dest)])
+    assert dest.with_suffix(".png").exists()
+
+
+def test_a_trace_failure_is_reported_not_raised(spy, tmp_path, monkeypatch):
+    def boom(p, **kw):
+        raise cli.vector.VectorError("traced to a blank document")
+    monkeypatch.setattr(cli.vector, "trace", boom)
+    assert cli.main(["svg", "a frog", "--method", "trace",
+                     "-o", str(tmp_path / "f.svg")]) == 1
+
+
+def test_an_unknown_method_is_rejected_by_the_parser(tmp_path):
+    with pytest.raises(SystemExit):
+        cli.main(["svg", "a gear", "--method", "magic"])

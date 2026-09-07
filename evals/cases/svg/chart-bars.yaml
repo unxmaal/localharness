@@ -3,6 +3,10 @@ modality: svg
 prompt: |
   Draw an SVG bar chart with exactly 5 bars of heights 3, 7, 4, 9, 6 units,
   with a baseline axis. Label each bar with its value.
+# An LLM can emit <text>; a vectorizer cannot. Tracing turns glyphs into
+# outlines, so a traced SVG has no <text> element however good the picture is.
+# Handing this case to `trace` would measure the method, not the candidate.
+methods: [llm]
 assert:
   min_shapes: 6
   must_contain: ["text"]

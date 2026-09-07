@@ -39,6 +39,13 @@ class Case:
     context: str = ""
     #: Input audio for a transcription case, resolved beside the case file.
     audio: Path | None = None
+    #: Which METHODS this case can fairly test, empty meaning all of them.
+    #: chart-bars asserts must_contain ["text"], which a vectorizer cannot
+    #: satisfy at any quality: tracing turns glyphs into outlines, so a traced
+    #: SVG has no <text> element by construction. The case was written when an
+    #: LLM was the only method and it encodes that assumption; handing it to
+    #: another method measures the assumption rather than the candidate.
+    methods: tuple = ()
     #: Which language the speech is in. Selection uses it: an English-only
     #: candidate handed a French case scores near 1.0 word error rate, which
     #: is a row about the wrong instrument rather than about the candidate.
@@ -282,8 +289,11 @@ _EMPTY_MARKS = ("empty completion", "no answer", "left no output",
 #: Substrings that mean the INSTRUMENT broke. An outage is not a candidate
 #: scoring badly, and recording it as one is how a dead server becomes a model
 #: ranking -- whisper scored 0/40 that way and sorted above two working models.
-_ERROR_MARKS = ("timed out", "unreachable", "not installed", "could not launch",
-                "connection", "http 5", "server error")
+_ERROR_MARKS = ("timed out", "timeout", "unreachable", "not installed",
+                "could not launch", "connection", "http 5", "server error",
+                # Metal says "GPU Timeout Error", never "timed out". The first
+                # trace run hit one and it was scored as a wrong drawing.
+                "[metal]", "out of memory", "traceback")
 
 
 def failure_kind(detail: str) -> str:
@@ -396,7 +406,8 @@ def load_cases(directory: str | Path) -> list[Case]:
         cases.append(Case(id=raw["id"], modality=modality, prompt=raw["prompt"],
                           context=context, audio=audio, params=params,
                           assertions=assertions, source=path,
-                          language=raw.get("language") or "en"))
+                          language=raw.get("language") or "en",
+                          methods=tuple(raw.get("methods") or ())))
     return cases
 
 
@@ -534,6 +545,10 @@ def summarize(results: list[Result]) -> dict:
             # How many rows each metric was actually computed over. A mean over
             # 2 of 9 cases printed beside a mean over 9 is not a comparison.
             "metric_n": {k: len(v) for k, v in _gather_metrics(rows).items()},
+            # WHICH cases this candidate actually sat. Two candidates in one
+            # run can get different sets -- a case may be unfair to a method,
+            # or to a language -- and then their pass rates are not comparable.
+            "case_ids": sorted({r.case_id.split("#")[0] for r in rows}),
         }
     return out
 
