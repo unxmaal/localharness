@@ -76,16 +76,16 @@ def test_the_metric_direction_is_declared():
     assert direction_of("speaker_similarity") == "higher"
 
 
-def test_the_negative_control_is_documented_as_failing():
-    """The control that should have been run first: two different men score
-    0.827, a clone against its own reference 0.855-0.904. A 0.05 gap is not a
-    discriminator, and this module must not read as though it were one."""
+def test_the_condition_confound_is_documented():
+    """The original retraction pooled comparison TYPES. Two real recordings
+    score high against each other whatever their speakers, so a global
+    threshold is invalid; held to ref-vs-clone the metric separates. The module
+    must keep saying so, because the pooled reading is the intuitive one."""
     import inspect
 
     from harness.checks import similarity as mod
     doc = inspect.getdoc(mod)
-    assert "0.827" in doc
-    assert "NEGATIVE CONTROL" in doc
+    assert "NEVER COMPARE ACROSS RECORDING CONDITIONS" in doc
 
 
 def test_two_different_men_score_close_to_a_correct_pair():
