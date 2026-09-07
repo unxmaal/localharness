@@ -334,6 +334,10 @@ def cmd_discover(a) -> int:
     every time anything is installed or any eval is run. A number in a document
     is wrong by the next commit.
     """
+    if getattr(a, "sources", False):
+        return _report_sources(a)
+    if getattr(a, "feeds", False):
+        return _report_feeds(a)
     if a.external:
         if not a.lane:
             return err("--external needs a --lane: the registries are asked "
@@ -399,6 +403,74 @@ def cmd_discover(a) -> int:
                 print(f"            -> {c.how}")
     total, done = len(caps), sum(1 for c in caps if c.measured)
     print(f"\n{done}/{total} measured. The rest have never been run here.")
+    _warn_stale_sources()
+    return 0
+
+
+def _warn_stale_sources() -> None:
+    """Discovery nobody remembers to run is discovery that does not happen."""
+    from harness import feeds
+
+    try:
+        stale = [r for r in feeds.staleness() if r["stale"]]
+    except Exception:  # noqa: BLE001
+        return
+    if not stale:
+        return
+    names = ", ".join(r["name"] for r in stale[:4])
+    print(f"\n{len(stale)} discovery source(s) not read in "
+          f"{feeds.interval_days()} days: {names}")
+    print("  lh discover --feeds     read them now")
+    print("  lh discover --sources   when each was last read")
+
+
+def _report_sources(a) -> int:
+    from harness import feeds
+
+    rows = feeds.staleness()
+    proposed = discovery.feed_sources()
+    if a.json:
+        print(json.dumps({"sources": rows,
+                          "proposed": [vars(c) for c in proposed]}, indent=2))
+        return 0
+    print(f"\ndiscovery sources (interval {feeds.interval_days()} days, "
+          f"${feeds.INTERVAL_ENV} to change)")
+    for r in rows:
+        age = ("never read" if r["age_days"] is None
+               else f"{r['age_days']:.1f} days ago")
+        mark = "STALE" if r["stale"] else "ok   "
+        print(f"  {mark} {r['name']:24} {age}")
+        print(f"        {r['url']}")
+    if proposed:
+        print("\nsources these feeds point at that we do not read:")
+        for c in proposed:
+            print(f"  {c.name:20} {c.note}")
+        print(f"\n  Add one to {feeds.config_path()} to start reading it. "
+              f"Deliberately manual: a source URL out of untrusted prose "
+              f"should need a human nod.")
+    return 0
+
+
+def _report_feeds(a) -> int:
+    found = discovery.from_feeds(verify=not a.no_verify)
+    if a.json:
+        print(json.dumps({"candidates": [vars(c) for c in found]}, indent=2))
+        return 0
+    broken = [c for c in found if c.blocked]
+    for c in broken:
+        err(f"{c.name}: {c.blocked}")
+    found = [c for c in found if not c.blocked]
+    if not found:
+        print("nothing new in the feeds, or no network.")
+        return 0
+    print("\ncandidates the community is talking about that nothing here "
+          "has measured")
+    print("(a popularity signal, not a measurement -- the eval decides)")
+    for c in found:
+        print(f"\n  {c.name}")
+        print(f"    {c.source}")
+        print(f"    {c.note}")
+        print(f"    -> uv run python -m evals.run {c.how}")
     return 0
 
 
@@ -528,6 +600,14 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--external", action="store_true",
                    help="ask the registries what exists that this machine has "
                         "never measured (needs --lane)")
+    d.add_argument("--feeds", action="store_true",
+                   help="read the community aggregation feeds for candidates")
+    d.add_argument("--sources", action="store_true",
+                   help="list discovery sources, when each was last read, and "
+                        "any new sources the feeds point at")
+    d.add_argument("--no-verify", action="store_true",
+                   help="with --feeds, skip resolving prose names against the "
+                        "registry (faster, noisier)")
     d.set_defaults(func=cmd_discover)
 
     h = sub.add_parser("hear", help="transcribe a clip, or record and transcribe")
