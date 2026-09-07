@@ -223,7 +223,7 @@ def cached_audio_models(root: Path | None = None) -> list[Capability]:
 def capabilities() -> list[Capability]:
     """Everything this machine can be asked to do, in one list."""
     return (gateway_aliases() + image_engines() + cached_audio_models()
-            + methods() + external_tools())
+            + methods() + external_tools() + not_adopted())
 
 
 def measured() -> set[str]:
@@ -460,3 +460,24 @@ def feed_sources(sources=None, reader=None) -> list[Capability]:
                        "add it to discovery-sources.json to start reading it",
                        present=False, note=p.why)
             for p in feeds.candidate_sources(entries, sources)]
+
+
+#: Things deliberately NOT adopted, so the decision surfaces where someone would
+#: go looking rather than only in PLAN.md. Same job the BROKEN state does for a
+#: stage: stop the question being rediscovered from scratch.
+NOT_ADOPTED = [
+    ("ComfyUI", "image",
+     "the reason to want it is workflows, and mflux ships 19 of them natively "
+     "in MLX. It would add a torch/MPS runtime and a server with a UI, on a "
+     "machine chosen for MLX and a project whose caller is an agent",
+     20),
+]
+
+
+def not_adopted() -> list[Capability]:
+    """Recorded decisions against a tool, with the issue that argued it."""
+    return [Capability("decision", name, lane, f"issue #{issue}",
+                       "reopen the issue if a workflow exists there and "
+                       "nowhere in mflux",
+                       present=False, blocked=f"not adopted: {why}. See #{issue}")
+            for name, lane, why, issue in NOT_ADOPTED]

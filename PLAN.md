@@ -404,9 +404,17 @@ one of them, natively in MLX:
     generate-qwen-edit    generate-flux2-edit   upscale-seedvr2
     upscale-controlnet    concept-from-image    lora-library / train
 
-**Nineteen workflow primitives, and not one has ever been measured here.**
-`lh discover --lane image --gap` prints them. That is the real gap, and it was
-invisible for months while the argument was about ComfyUI.
+**Nineteen workflow primitives.** `lh discover --lane image` prints them and
+says which have a runner. As of 2026-09-07 three do: `controlnet`,
+`upscale-controlnet` and `upscale-seedvr2`, all via `ChainRunner` (#24). One of
+them is measured, and the measurement is that it does not work: `upscale-seedvr2`
+scored 0/3 because mflux passes an array where `mx.repeat` wants an int, so it
+is refused up front against the pinned versions (#27). The other sixteen still
+have no runner, because each needs an input image, a mask or a depth map that
+no case supplies yet.
+
+That gap was invisible for months while the argument was about ComfyUI, which
+is the point: the thing worth wanting was already installed and unmeasured.
 
 What ComfyUI would ADD on this machine is a torch/MPS runtime and a server with
 a UI. Published figures put MPS 3-5x behind CUDA and MLX 50-70% ahead of MPS on
@@ -415,6 +423,16 @@ is a server where this project is a CLI whose primary caller is an agent.
 
 So: not adopted, and now for a reason that survives contact with the question.
 Reopen if a workflow turns out to exist there and nowhere in mflux.
+
+Two honest limits on that reasoning. The MLX-versus-MPS speed claim above is
+from published figures, not from anything measured on this machine, and it
+would take installing torch and ComfyUI to settle. And the memory figure that
+rules ComfyUI out for video (~40 GB resident) was measured by someone else on
+an M4 Pro with 64 GB, not here. Both are cited rather than owned.
+
+The decision is also recorded in `lh discover`, which prints ComfyUI as
+`declined` with this reasoning and the issue number, so the question is not
+rediscovered from scratch by whoever next wonders about it.
 
 ## 5. What is next, in order
 

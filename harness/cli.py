@@ -221,12 +221,14 @@ TRACE_STYLE = ("flat vector illustration, simple clean shapes, bold outlines, "
 
 
 def cmd_svg(a) -> int:
-    if getattr(a, "method", "llm") == "trace":
-        return _svg_by_tracing(a)
+    method = getattr(a, "method", "llm")
+    if method in ("trace", "icon"):
+        return _svg_by_tracing(a, preset="illustration" if method == "trace"
+                                          else "icon")
     return _text(a, "svg", ".svg", svg_check.check)
 
 
-def _svg_by_tracing(a) -> int:
+def _svg_by_tracing(a, preset: str = "illustration") -> int:
     """Draw it, then vectorize it.
 
     The measured answer for this lane. Five language models were compared on
@@ -245,7 +247,7 @@ def _svg_by_tracing(a) -> int:
     if rc != 0:
         return rc
     try:
-        svg = vector.trace(png)
+        svg = vector.trace(png, preset=preset)
     except vector.VectorError as exc:
         return err(f"{png} was generated but could not be vectorized: {exc}")
 
@@ -385,8 +387,11 @@ def cmd_discover(a) -> int:
     for lane in sorted(by_lane):
         print(f"\n{lane}")
         for c in sorted(by_lane[lane], key=lambda c: (c.measured, c.name)):
+            # A recorded decision is not a defect, so it gets its own mark.
+            if c.kind == "decision":
+                mark = "declined"
             # BROKEN outranks measured: a thing can be measured and broken.
-            if c.blocked:
+            elif c.blocked:
                 mark = "BROKEN"
             elif not c.present:
                 mark = "MISSING"
@@ -401,7 +406,9 @@ def cmd_discover(a) -> int:
                 print(f"            !! {c.note}")
             elif not c.measured:
                 print(f"            -> {c.how}")
-    total, done = len(caps), sum(1 for c in caps if c.measured)
+    # A declined tool is not an unmeasured gap, so it stays out of the ratio.
+    countable = [c for c in caps if c.kind != "decision"]
+    total, done = len(countable), sum(1 for c in countable if c.measured)
     print(f"\n{done}/{total} measured. The rest have never been run here.")
     _warn_stale_sources()
     return 0
@@ -551,9 +558,11 @@ def build_parser() -> argparse.ArgumentParser:
             # `llm` is still the default because it is seconds against a
             # minute, and for a two-shape icon it is sometimes enough. `trace`
             # is the one that draws the picture.
-            p.add_argument("--method", choices=("llm", "trace"), default="llm",
+            p.add_argument("--method", choices=("llm", "trace", "icon"),
+                           default="llm",
                            help="llm: a language model writes the paths. "
-                                "trace: generate an image and vectorize it")
+                                "trace: generate an image and vectorize it. "
+                                "icon: the same, tuned for a small file")
             p.add_argument("--engine", default=DEFAULT_IMAGE_ENGINE,
                            help="image engine used by --method trace")
             p.add_argument("--width", type=int, default=512)
