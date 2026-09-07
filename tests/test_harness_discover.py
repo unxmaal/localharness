@@ -314,3 +314,24 @@ def test_an_implemented_primitive_is_a_candidate_not_a_gap(tmp_path):
     assert "no runner yet" not in got["mflux-upscale-controlnet"].how
     # Still a genuine gap, and it must keep reading as one.
     assert "no runner yet" in got["mflux-generate-depth"].how
+
+
+def test_a_declined_tool_is_recorded_where_people_look():
+    """Issue #20. The ComfyUI decision lived only in PLAN.md, so it kept being
+    rediscovered. Same job the BROKEN state does for a broken stage."""
+    caps = {c.name: c for c in discover.not_adopted()}
+    comfy = caps["ComfyUI"]
+    assert comfy.kind == "decision"
+    assert not comfy.present
+    assert "#20" in comfy.blocked
+    assert "mflux" in comfy.blocked
+
+
+def test_declined_tools_appear_in_the_capability_list():
+    assert "ComfyUI" in {c.name for c in discover.capabilities()}
+
+
+def test_a_declined_tool_is_not_a_gap():
+    """It is not something you close by running a command."""
+    gaps = {c.name for c in discover.gaps()}
+    assert "ComfyUI" not in gaps

@@ -1,4 +1,5 @@
 """Issue #4: a traced icon was 28KB with nothing reporting the size."""
+import argparse
 import shutil
 from pathlib import Path
 
@@ -87,3 +88,42 @@ def test_the_svg_check_reports_the_document_size():
            'fill="black"/></svg>')
     r = CHECKERS["svg"](svg, Case(id="x", modality="svg", prompt="p"))
     assert r.metrics["svg_bytes"] == len(svg.encode())
+
+
+def test_the_cli_offers_every_preset_the_eval_can_rank():
+    """Issue #38. The eval could prove the icon preset was 3.2x smaller and
+    `lh` had no way to ask for one."""
+    import argparse
+
+    from harness import cli
+    parser = cli.build_parser() if hasattr(cli, "build_parser") else None
+    if parser is None:
+        import pytest
+        pytest.skip("no build_parser to introspect")
+    choices = None
+    for action in parser._subparsers._group_actions[0].choices["svg"]._actions:
+        if action.dest == "method":
+            choices = set(action.choices)
+    assert choices is not None
+    assert set(TRACE_PRESETS) <= choices | {"illustration"}
+    assert "icon" in choices
+
+
+def test_the_cli_icon_method_uses_the_icon_preset(tmp_path, monkeypatch):
+    from harness import cli
+    seen = {}
+
+    def fake_generate(engine, prompt, png, params):
+        gear(png)
+        return 0
+
+    monkeypatch.setattr(cli, "_generate", fake_generate)
+    real = vector.trace
+    monkeypatch.setattr(vector, "trace",
+                        lambda p, **kw: seen.setdefault("preset",
+                                                        kw.get("preset")) or real(p, **kw))
+    a = argparse.Namespace(method="icon", prompt="a gear", engine="x",
+                           output=str(tmp_path / "o.svg"), width=64, height=64,
+                           seed=1, json=False)
+    cli.cmd_svg(a)
+    assert seen["preset"] == "icon"
