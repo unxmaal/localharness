@@ -658,7 +658,14 @@ of those.
    failing control is pinned in the module docstring and in a test, so it cannot
    quietly stop being true.
 
-   UNTIL THEN THE ONLY EVIDENCE IS A HUMAN EAR. `./scripts/audition.sh` plays
+   THE HUMAN EAR HAS NOW ANSWERED IT, and the answer is that the cloning works.
+   Eric listened to three clones of three different men saying one English
+   sentence: "they all sound different". So the reference clip DOES transfer
+   speaker identity, `fr-male` and `fr-male-2` are a real distinction, and it
+   was only the metric that failed. That is the finding; the numbers above are
+   still withdrawn.
+
+   UNTIL A BETTER METRIC EXISTS THE ONLY EVIDENCE IS A HUMAN EAR. `./scripts/audition.sh` plays
    reference and clone back to back. Note also that French clips are the wrong
    thing to audition for this project's actual use case, which is French-ACCENTED
    ENGLISH: `.logs/fr-accent/` holds three clones of three different men saying
