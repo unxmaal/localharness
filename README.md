@@ -27,7 +27,7 @@ people are confident about lost.
 | | |
 |---|---|
 | `lh image "a red fox in falling snow"` | an image, ~19s |
-| `lh video "a fox running" --seconds 2` | a video with sound (slow; see below) |
+| `lh video "a fox running" --seconds 2` | a video with sound, ~40 min |
 | `lh svg "a settings gear icon"` | a real vector icon |
 | `lh web "a landing page for a coffee roaster"` | a self-contained HTML page |
 | `lh code "parse an ISO timestamp"` | code, to stdout |
@@ -50,19 +50,21 @@ costs electricity.
 **It does not rot.** A hosted model changes under you or is deprecated. Weights
 on your disk keep behaving the same way in a year.
 
-**It tells you which option is best.** This is the unusual part. Rather than
-trusting anyone's opinion, it runs the options against the same set of test jobs
-and scores the results. Some of what that turned up:
+**It tells you which option is best.** Rather than trusting anyone's opinion,
+it runs the options against the same test jobs and scores the results. Some of
+what that turned up:
 
-- for vector icons, **the language models are the wrong tool entirely**. Drawing
-  a picture and then tracing it beat every one of them, 4 out of 4 against 2 out
-  of 6 on identical requests.
-- **letting a model check its own work and try again is close to free**, and it
-  took code from 20 right out of 27 to 24, and icons from 6 out of 9 to 9.
-- the *faster* of two image models was also the better one, 19 seconds against
-  43, so there was no tradeoff to weigh.
-- a quality score that looked useless turned out to be fine; the experiment
-  measuring it had been set up wrong.
+- for vector icons the language models lose to a different method entirely.
+  Drawing a picture and tracing it scored 4 out of 4, against 2 out of 6 for the
+  best model, on identical requests.
+- letting a model check its own work and try again took code from 20 right out
+  of 27 to 24, and icons from 6 out of 9 to 9, at one extra attempt on average
+  and no extra download.
+- of two image models, quality came out a statistical tie, so the decision fell
+  to 19 seconds against 43 and 11.4 GiB against 13.7. Knowing it was a tie is
+  the useful part.
+- a quality score that looked useless turned out to work. The experiment
+  measuring it had compared two things that were never comparable.
 
 **It does not fall behind.** It reads the model registries and the places
 practitioners talk, on a schedule, and tells you what is new. See below.
@@ -85,10 +87,9 @@ Before you invest an afternoon:
 
 - **Apple Silicon only.** It is built on MLX and Metal. There is no Linux or
   Intel path and there is not going to be one.
-- **It needs disk.** Weights are tens of gigabytes.
-- **Video is slow here.** About 40 minutes a generation on an M2 Pro with 32 GB.
-  It works, and it is not something you will use casually. A faster machine is
-  the fix.
+- **It needs disk.** The models this uses run 4 GB to 31 GB each.
+- **Video takes about 40 minutes a generation** on an M2 Pro with 32 GB. It
+  works; it is not something you will use casually.
 - **It is a workshop, not a product.** There is no GUI, and some lanes are better
   than others.
 
@@ -129,8 +130,9 @@ spending a large one's context on a log.
 This is the unusual part, so here it is in full.
 
 Any tool like this is out of date the moment it ships. New models appear
-constantly, and so do new *techniques*: a way of chaining two steps, a small add-on file that makes a big model five times faster, a trick for
-running something that should not fit in your memory. Left alone, you keep using
+constantly, and so do new *techniques*: a way of chaining two steps, a 200 MB
+add-on file that makes a 20 GB model five times faster, a trick for running
+something that should not fit in memory. Left alone, you keep using
 whatever was good the week you set it up and never find out.
 
 So `lh` looks, on your behalf, in three steps.
@@ -158,7 +160,7 @@ useless for anything that is not a single model.
 
 `--feeds` is the interesting one. It reads community aggregation posts, because
 a registry can tell you a model exists but not that everyone has moved to a
-small add-on file that made generation five times faster. That is exactly what
+small add-on file that made generation five times faster. That is what
 it found on its first real run: a *MiniMax-H3-Turbo* LoRA claiming a 5x speedup,
 against a video lane that currently takes 40 minutes a generation. A registry
 query could never surface that, because it is not a property of any one model.
@@ -210,18 +212,24 @@ tools.
 claude mcp add --transport http localharness http://styx.local:8899/mcp
 ```
 
-That exposes `svg`, `web`, `code` and `image` to the assistant. Every tool shells out to `lh`, so the CLI, the eval suite and the
-MCP server run identical commands, so what gets measured is what ships.
+> **There is no authentication.** Anyone who can reach port 8899 can use this
+> machine's GPU. That is a deliberate choice for a home network. On any network
+> you do not control, bind to localhost instead: `TTS_HOST=127.0.0.1`.
+
+That exposes `svg`, `web`, `code` and `image` to the assistant. Every tool shells
+out to `lh`, so the CLI, the eval suite and the MCP server run identical
+commands, and what gets measured is what ships.
 
 `image` is queued: it holds 11.4 GiB and the inference server swaps models
 through a single queue, so it returns a job id and `job_status` carries the queue
 position and the artifact path. Artifacts stay here, in `~/localharness/out/mcp/`.
 
-Video and speech are not exposed. There is **no authentication**, which is a
-choice for a house LAN. Set `TTS_HOST=127.0.0.1` on an untrusted network.
-DNS-rebinding protection stays on with an allowlist (`MCP_ALLOW`), because that
-is a different threat: it needs someone here to open a web page, not the port to
-be reachable from outside.
+Video and speech are not exposed over MCP. Video needs more than a queue to be
+usable remotely, and speech was ruled out; both stay available locally.
+
+DNS-rebinding protection stays on, with an allowlist in `MCP_ALLOW`. It guards a
+different thing than the missing authentication does: rebinding needs only that
+someone here opens a web page, not that the port is reachable from outside.
 
 ---
 
