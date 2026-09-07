@@ -149,9 +149,47 @@ else
     || return 1 2>/dev/null || exit 1
 fi
 
+# WHERE WE LANDED LAST TIME.
+#
+# A reboot once brought this machine back WITHOUT the weights volume attached.
+# The loop above did exactly what it was designed to do: it skipped the missing
+# /Volumes/Models, found /Volumes/T7 with room to spare, and the services
+# started against an EMPTY CACHE. They listened, served nothing, and said
+# nothing about it -- the only trace was one differing line in a log nobody
+# reads until something is already wrong.
+#
+# Falling back is right on a fresh machine and wrong on a machine with 93GB of
+# weights sitting on a drive that happens to be unplugged. The difference is
+# whether we have been here before, so record it and refuse to move silently.
+HF_STATE_FILE="${HF_STATE_FILE:-$HOME/.localharness-hf-root}"
+if [ -f "$HF_STATE_FILE" ]; then
+  _hf_prev="$(cat "$HF_STATE_FILE" 2>/dev/null)"
+  if [ -n "$_hf_prev" ] && [ "$_hf_prev" != "$HF_ROOT" ] && [ "${HF_ALLOW_MOVE:-0}" != "1" ]; then
+    echo "FATAL: the weights cache moved." >&2
+    echo "       last time: $_hf_prev" >&2
+    echo "       this time: $HF_ROOT" >&2
+    echo >&2
+    if [ ! -d "$_hf_prev" ]; then
+      echo "       $_hf_prev is NOT PRESENT. If that is an external drive," >&2
+      echo "       it is unplugged, asleep, or failed to mount -- check the" >&2
+      echo "       cable and \`diskutil list external\` before doing anything" >&2
+      echo "       else. Starting on $HF_ROOT would serve from a cache with" >&2
+      echo "       none of your models in it." >&2
+    else
+      echo "       Both exist, so the candidate order or free space changed." >&2
+    fi
+    echo >&2
+    echo "       To move deliberately:  HF_ALLOW_MOVE=1 (once), or set HF_ROOT." >&2
+    unset _hf_prev
+    return 1 2>/dev/null || exit 1
+  fi
+  unset _hf_prev
+fi
+
 # Only now, once a location is chosen, do we create anything.
 mkdir -p "$HF_ROOT" || _hf_fatal "cannot create $HF_ROOT" \
   || return 1 2>/dev/null || exit 1
+printf '%s\n' "$HF_ROOT" > "$HF_STATE_FILE" 2>/dev/null || true
 
 # Cached weights should not depend on the network. mlx_lm.server issues a HEAD
 # to huggingface.co on every model switch even for local files, so a wifi blip
