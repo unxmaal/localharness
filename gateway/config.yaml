@@ -23,6 +23,50 @@ model_list:
       api_base: http://127.0.0.1:8081/v1
       api_key: not-needed
 
+  # ---- Qwen3 candidates (2026-09-06) --------------------------------------
+  # The Qwen2.5 aliases above were never chosen: 0.5B entered this repo as a
+  # smoke test proving mlx_lm.generate ran at all, and the family became the
+  # text stack for four lanes without anyone comparing it to anything. Qwen3
+  # has since superseded it. These are candidates, added ALONGSIDE the
+  # incumbents rather than replacing them, so the eval decides rather than a
+  # blog post:
+  #   uv run python -m evals.run --modality svg,web,code,extract --repeat 3 \
+  #     --candidates local-mid,local-large,q3-4b,q3-8b,q3-14b,q3-30b,q3-coder
+  #
+  # NOTE Qwen3-8B and Qwen3-14B are HYBRID THINKING models: they emit <think>
+  # blocks unless told not to. The -2507-Instruct and -Coder variants are not.
+  # That is a real difference for `extract`, whose whole value is one bare fact.
+  - model_name: q3-1.7b
+    litellm_params:
+      model: openai/mlx-community/Qwen3-1.7B-4bit
+      api_base: http://127.0.0.1:8081/v1
+      api_key: not-needed
+  - model_name: q3-4b
+    litellm_params:
+      model: openai/mlx-community/Qwen3-4B-Instruct-2507-4bit
+      api_base: http://127.0.0.1:8081/v1
+      api_key: not-needed
+  - model_name: q3-8b
+    litellm_params:
+      model: openai/mlx-community/Qwen3-8B-4bit
+      api_base: http://127.0.0.1:8081/v1
+      api_key: not-needed
+  - model_name: q3-14b
+    litellm_params:
+      model: openai/mlx-community/Qwen3-14B-4bit
+      api_base: http://127.0.0.1:8081/v1
+      api_key: not-needed
+  - model_name: q3-30b
+    litellm_params:
+      model: openai/mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit
+      api_base: http://127.0.0.1:8081/v1
+      api_key: not-needed
+  - model_name: q3-coder
+    litellm_params:
+      model: openai/mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
+      api_base: http://127.0.0.1:8081/v1
+      api_key: not-needed
+
 litellm_settings:
   drop_params: true
   # mlx_lm.server implements /v1/chat/completions but NOT /v1/responses.
