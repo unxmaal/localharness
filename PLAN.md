@@ -362,6 +362,11 @@ h3.c. Fallback only.
 
 ## 5. What is next, in order
 
+**Tracked as GitHub issues from 2026-09-07.**
+<https://github.com/unxmaal/localharness/issues> — #16 is the roadmap index.
+This section states the reasoning; the issues carry the state. When they
+disagree, the issues are current.
+
 ### The bar
 
 **Best effort, proven with real tests.** Two conditions, and they pull against
