@@ -191,7 +191,10 @@ def _check_svg(artifact, case: Case) -> CheckResult:
     drawn = render_check.check(extract(artifact, ("svg",)))
     out = CheckResult(drawn.ok, drawn.reason, r.warnings + drawn.warnings,
                       shape_count=r.shape_count, has_title=r.has_title)
-    out.metrics = drawn.metrics
+    out.metrics = dict(drawn.metrics)
+    # Issue #4: a traced icon is ~28KB where a hand-authored one is hundreds of
+    # bytes, and nothing reported it until someone opened the file.
+    out.metrics["svg_bytes"] = len(extract(artifact, ("svg",)).encode())
     return out
 
 
@@ -268,6 +271,9 @@ METRIC_DIRECTION = {
     # and was actually writing 2.7x as much, faster per token.
     "completion_tokens": "neutral",
     "code_pass": "higher",  # fraction of a code case's assertions that ran green
+    # NEUTRAL: a traced illustration is legitimately large and a UI glyph is
+    # legitimately small, so ranking on it would crown the blank document.
+    "svg_bytes": "neutral",
 }
 
 

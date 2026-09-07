@@ -49,6 +49,8 @@ PROCESS_ENGINES = ("mflux", "h3")
 #: The svg lane's second METHOD: draw a raster, then vectorize it. Written as
 #: `trace:<engine spec>` so the engine underneath stays the ordinary spec.
 TRACE_PREFIX = "trace"
+# candidate prefix -> vector.TRACE_PRESETS key
+TRACE_PREFIXES = {"trace": "illustration", "trace-icon": "icon"}
 #: Generate, check, repair. A WORKFLOW rather than a model: `local-large` and
 #: `repair:local-large` are different products. See evals/runners/repair.py.
 REPAIR_PREFIX = "repair"
@@ -69,8 +71,8 @@ def kind_of(candidate: str) -> str:
         return "process"
     if head in ("tts", "stt"):
         return head
-    if head == TRACE_PREFIX:
-        return TRACE_PREFIX
+    if head in TRACE_PREFIXES:
+        return head
     if head == REPAIR_PREFIX:
         return REPAIR_PREFIX
     if head in CHAIN_STAGES:
@@ -84,7 +86,7 @@ def modality_of(candidate: str) -> str | None:
     kind = kind_of(candidate)
     if kind in ("tts", "stt"):
         return kind
-    if kind == TRACE_PREFIX:
+    if kind in TRACE_PREFIXES:
         # It answers svg cases; the engine underneath makes images, which is
         # the whole point and would be the wrong modality to select on.
         return "svg"
@@ -236,18 +238,18 @@ def build_runner(candidate: str, gateway: str, outdir: Path | None,
         if outdir is None:
             raise SystemExit(f"{candidate} writes images; pass --out")
         return ChainRunner(engine, stage, outdir)
-    if kind == TRACE_PREFIX:
+    if kind in TRACE_PREFIXES:
         spec = candidate.partition(":")[2].strip()
         if not spec:
-            raise SystemExit("a trace candidate needs an engine, e.g. "
-                             "trace:mflux:flux2-klein-4b")
+            raise SystemExit(f"a {kind} candidate needs an engine, e.g. "
+                             f"{kind}:mflux:flux2-klein-4b")
         try:
             engine = resolve(spec)
         except ValueError as exc:
             raise SystemExit(str(exc)) from exc
         if outdir is None:
             raise SystemExit(f"{candidate} writes images; pass --out")
-        return TraceRunner(engine, outdir)
+        return TraceRunner(engine, outdir, preset=TRACE_PREFIXES[kind])
     try:
         engine = resolve(candidate)
     except ValueError as exc:
@@ -266,7 +268,7 @@ def cases_for(candidate: str, cases: list[Case]) -> list[Case]:
         return [c for c in cases if c.modality in TEXT_MODALITIES]
     picked = [c for c in cases if c.modality == modality]
     # A case may declare which methods it can fairly test. See Case.methods.
-    method = TRACE_PREFIX if kind_of(candidate) == TRACE_PREFIX else "llm"
+    method = TRACE_PREFIX if kind_of(candidate) in TRACE_PREFIXES else "llm"
     picked = [c for c in picked if not c.methods or method in c.methods]
     language = language_of(candidate)
     if language is not None:
