@@ -36,12 +36,11 @@ jobs:
         with:
           enable-cache: true
 
-      - name: librsvg
-        # Without it the whole SVG render module skips, which is the checker
-        # that catches well-formed markup that draws nothing. Cheap to install,
-        # and skipping it would mean CI reporting green for the check that
-        # earned its place.
-        run: brew install librsvg
+      - name: Tools make check needs
+        # shellcheck: `make lint` shells out to it and exits 127 without it.
+        # librsvg: without it the whole SVG render module skips, and that is
+        # the checker that catches well-formed markup which draws nothing.
+        run: brew install shellcheck librsvg
 
       - run: uv sync --python 3.12
 
