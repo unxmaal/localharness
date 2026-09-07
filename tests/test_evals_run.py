@@ -710,3 +710,25 @@ def test_a_normal_run_still_requires_its_arguments(tmp_path):
         main(["--modality", "svg"])          # no --candidates
     with pytest.raises(SystemExit):
         main(["--candidates", "local-mid"])  # no --modality
+
+
+def test_an_upscale_candidate_becomes_a_chain_runner(tmp_path):
+    from evals.runners.chain import ChainRunner
+    r = build_runner("upscale-seedvr2:mflux:flux2-klein-4b", "http://gw", tmp_path)
+    assert isinstance(r, ChainRunner)
+    assert r.candidate.startswith("upscale-seedvr2/")
+
+
+def test_a_chain_candidate_only_gets_image_cases(tmp_path):
+    from evals.run import cases_for
+    cases = [Case(id="i", modality="image", prompt="a fox",
+                  params={"width": 64, "height": 64}),
+             Case(id="s", modality="svg", prompt="a gear")]
+    got = cases_for("upscale-seedvr2:mflux:flux2-klein-4b", cases)
+    assert [c.id for c in got] == ["i"]
+
+
+def test_a_chain_candidate_needs_an_output_directory(tmp_path):
+    with pytest.raises(SystemExit) as e:
+        build_runner("upscale-seedvr2:mflux:flux2-klein-4b", "http://gw", None)
+    assert "--out" in str(e.value)
