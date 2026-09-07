@@ -404,7 +404,7 @@ of those.
    attached. Also fixed: the nudge named `mcp__knowledge__search`, which does
    not exist in this deployment.
 
-   **(b) TODO -- decide whether it should block.** It has never blocked
+   **(b) DONE 2026-09-07, mcm-engine ba706ed.** It had never blocked
    anything. RULE #61 records the reason as fail-open safety: a block would
    "dead-lock the agent exactly when the knowledge backend is unreachable, the
    one moment it cannot call a reset tool". **That reason does not hold**, tested
@@ -427,21 +427,13 @@ of those.
      Six edits is nothing during a refactor, and warn-at-3 is already noisy
      enough to fire twice inside one turn of read-only investigation.
 
-   So: not bad in principle, unusable as configured. Three changes make it safe:
-
-   1. **Raise the thresholds to what CLAUDE.md already claims** (warn 8, block
-      20). The document is the spec; the code drifted from it.
-   2. **Prefer `permissionDecision: "ask"` over a hard deny.** PreToolUse JSON
-      supports it. It turns the worst case from "the agent is stuck" into "Eric
-      clicks once", which is the right failure mode for an enforcement mechanism
-      still being tuned.
-   3. **Restricted-tool agents are then covered by (2)** -- a subagent with no
-      MCP tools cannot deadlock, because the human is the escape hatch.
-
-   Also outstanding: **CLAUDE.md overstates what exists.** It claims enforcement
-   "AT TWO LEVELS" with Edit/Write "BLOCKED after 20". Both halves were false --
-   level 2 never reached the agent, and per RULE #61 it never blocks at all. The
-   wording needs to match whatever (b) decides.
+   Shipped: thresholds raised to the advertised warn 8 / block 20, and a gap now
+   emits `permissionDecision: "ask"` so the human decides. The hook still never
+   denies, so a restricted-tool subagent cannot be stranded, and fail-open on the
+   hook's own errors is untouched (malformed payload and corrupt state both still
+   exit 0). Verified live: additionalContext at 7 edits, ask at 20. CLAUDE.md's
+   wording was corrected to match -- it had claimed a hard block that never
+   existed.
 
 2. **Make the eval report HOW a candidate fails, and say when two rows may not
    be compared at all.** Two gaps in the same instrument.
