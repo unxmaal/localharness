@@ -49,6 +49,15 @@ pulls it: 370MB installed rather than 1.1GB.
     lh voices
     lh hear  --seconds 5
 
+`lh discover` answers "what can this machine do that nobody has measured", by
+reading the receipts every eval run already writes. Built as a command rather
+than done by hand because the answer changes whenever anything is installed or
+any eval is run:
+
+    lh discover --gap            # only what has never been run
+    lh discover --lane image     # one modality
+    lh discover --json           # for an agent
+
 `lh voices` lists what can be spoken. **The default is `fr-male`**, which is
 cloned rather than picked from a table: Kokoro has five fixed voices and no accented English
 among them, while Chatterbox clones from a reference clip and clones ACROSS
