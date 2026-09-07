@@ -68,7 +68,10 @@ works. It is the lane for handing a cheap question to a small model instead of
 spending a large one's context on a log — though the eval had something to say
 about which model is actually cheap: see `evals/README.md`.
 
-Read `PLAN.md` for why it is shaped this way. `docs/validation-log.md` holds the
+Work is tracked in [issues](https://github.com/unxmaal/localharness/issues);
+[#16](https://github.com/unxmaal/localharness/issues/16) is the roadmap. Read
+`PLAN.md` for why it is shaped this way — it holds the reasoning, the issues
+hold the state, and the issues win when they disagree. `docs/validation-log.md` holds the
 evidence behind every claim in it, including conclusions that were wrong and how
 they were caught.
 
