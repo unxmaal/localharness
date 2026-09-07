@@ -444,3 +444,59 @@ def test_speaking_through_a_preset_sends_all_three_settings(tmp_path):
     assert sent["ref_audio"].endswith("fr-male.wav")
     assert "voice" not in sent
     assert "Chatterbox" in sent["model"]
+
+
+# ---- WhisperKit: a third backend, and the first non-MLX one ----------------
+# The stt lane had measured three models and never a RUNTIME: parakeet 0.6b,
+# parakeet 1.1b and whisper all run through MLX. WhisperKit is CoreML, shipped
+# as `whisperkit-cli` (brew), and is what EnviousWispr uses in production.
+
+def test_the_whisperkit_command_names_the_audio_and_the_model(tmp_path):
+    clip = tmp_path / "c.wav"
+    clip.write_bytes(wav_bytes())
+    argv = audio.whisperkit_argv(clip, model="large-v3", language="fr")
+    assert argv[0].endswith("whisperkit-cli")
+    assert argv[1] == "transcribe"
+    assert str(clip) in argv
+    assert "large-v3" in argv
+    assert "fr" in argv
+
+
+def test_no_language_means_no_language_flag(tmp_path):
+    """Passing an empty string would pin the decode to a language called ''."""
+    clip = tmp_path / "c.wav"
+    clip.write_bytes(wav_bytes())
+    assert "--language" not in audio.whisperkit_argv(clip, language="")
+
+
+def test_whisperkit_is_a_named_backend():
+    assert "whisperkit" in audio.STT_BACKENDS
+
+
+def test_the_transcriber_factory_builds_a_whisperkit_reader(tmp_path):
+    fn = audio.transcriber(backend="whisperkit", model="large-v3", language="fr")
+    assert fn.backend == "whisperkit"
+    assert "large-v3" in fn.label and "fr" in fn.label
+
+
+def test_whisperkit_output_is_stripped_of_the_cli_furniture(tmp_path, monkeypatch):
+    """The CLI prints timing and a banner around the transcript. Handing that
+    to a word error rate would score the tool's logging as speech."""
+    clip = tmp_path / "c.wav"
+    clip.write_bytes(wav_bytes())
+    noisy = ("Loading models...\n"
+             "[00:00.000 --> 00:03.120] Bonjour, la passerelle est en marche.\n"
+             "Transcription time: 1.2s\n")
+    monkeypatch.setattr(audio, "_run_whisperkit", lambda argv, timeout: noisy)
+    assert audio.transcribe_whisperkit(clip) == "Bonjour, la passerelle est en marche."
+
+
+def test_a_missing_whisperkit_binary_says_how_to_get_it(tmp_path, monkeypatch):
+    clip = tmp_path / "c.wav"
+    clip.write_bytes(wav_bytes())
+    def boom(argv, timeout):
+        raise FileNotFoundError("whisperkit-cli")
+    monkeypatch.setattr(audio, "_run_whisperkit", boom)
+    with pytest.raises(audio.AudioError) as e:
+        audio.transcribe_whisperkit(clip)
+    assert "brew install whisperkit-cli" in str(e.value)

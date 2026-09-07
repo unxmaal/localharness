@@ -533,7 +533,7 @@ of those.
 
    `video` stays at one case, refused on time: see the table below.
 
-5. **STT: two more METHODS, not just more models.** The lane compares parakeet
+5. **DONE 2026-09-07. STT: a second RUNTIME, not just more models.** The lane compared parakeet
    0.6b, parakeet 1.1b and whisper -- but all three run through MLX, so it has
    measured models and never measured a runtime.
    `~/projects/github/EnviousWispr` (Swift, 1767 commits, shipping on-device
@@ -556,9 +556,34 @@ of those.
    (`ear=whisper:fr`); they treat it as a solved problem. Closing that would
    remove the need for a caller to know what language it is about to hear.
 
-   Also in scope and cheap: parakeet-tdt-0.6b-v3 (2.3 GB, already downloaded).
-   Canary-Qwen-2.5B leads the Open ASR leaderboard but ships as NeMo with no MLX
-   port, which is a porting project rather than an eval.
+   MEASURED, same 40 LibriSpeech clips:
+
+   | candidate | runtime | corpus wer | median |
+   |---|---|---|---|
+   | parakeet-tdt-0.6b-v2 | MLX | **0.013** | **0.14s** |
+   | large-v3 (WhisperKit) | **CoreML** | 0.017 | 4.60s |
+   | whisper-large-v3-mlx | MLX | 0.022 | 1.14s |
+
+   THE RUNTIME MATTERS, which is the thing the lane had never asked. Same model
+   family, and CoreML reads it more accurately than MLX does: 0.017 against
+   0.022. Parakeet still wins the lane outright on both axes and stays the
+   default, so the ranking did not change -- but "whisper scores 0.022 here" was
+   a statement about mlx-whisper, not about whisper, and nothing in the suite
+   could have told the difference.
+
+   WhisperKit arrives as `brew install whisperkit-cli`, no Swift build. Its
+   4.60s is NOT comparable as latency: the CLI reloads the model on every clip
+   where EnviousWispr holds it in process. That is exactly why `comparable()`
+   excludes timing from the axes it compares.
+
+   parakeet-tdt-0.6b-v3 was measured and is WORSE, at 0.026 against v2's 0.013,
+   twice the error for the same speed. It is the multilingual release and that
+   appears to be what English accuracy paid for. A newer version number is not
+   a better model.
+
+   NOT DONE: FluidAudio (Swift Parakeet) has no CLI and would need a Swift
+   target written against it. Automatic language ID, which EnviousWispr ships
+   and this repo makes the caller supply, is also still open.
 
 6. **Measure the three aliases with zero runs:** `local-small` (Qwen2.5-0.5B)
    and `q3-1.7b` (0.9 GB). A defined alias nobody has run is a claim nobody has

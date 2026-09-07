@@ -12,6 +12,7 @@ Two failure modes are handled explicitly because both look like success:
 """
 from __future__ import annotations
 
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,7 +30,13 @@ DEFAULT_STT_MODEL = "mlx-community/parakeet-tdt-0.6b-v2"
 # ship weights.npz and config.json but no preprocessor_config.json, which the
 # server demands. mlx_whisper wants exactly what those repos hold.
 DEFAULT_WHISPER_MODEL = "mlx-community/whisper-large-v3-mlx"
-STT_BACKENDS = ("server", "whisper")
+DEFAULT_WHISPERKIT_MODEL = "large-v3"
+#: server   -- Parakeet on mlx-audio :8890, English, fastest.
+#: whisper  -- mlx-whisper in this process, multilingual.
+#: whisperkit -- CoreML via `whisperkit-cli` (brew). The first NON-MLX runtime
+#:   here, and what EnviousWispr ships in production. The lane had measured
+#:   three models and never a runtime.
+STT_BACKENDS = ("server", "whisper", "whisperkit")
 # Kokoro's own default is af_heart, which is NOT in this machine's cache: only
 # these five voice packs were pulled, and HF_HUB_OFFLINE=1 stops the server
 # fetching a sixth. Asking for an absent voice fails as a mid-stream close with
@@ -286,6 +293,68 @@ def transcribe_whisper(path: str | Path,
     return text.strip()
 
 
+_WK_TIMESTAMP = re.compile(r"^\[[\d:.]+\s*-+>\s*[\d:.]+\]\s*")
+#: Lines the CLI prints around the transcript. Scoring these as speech would
+#: measure the tool's logging.
+_WK_NOISE = ("loading", "transcription time", "model", "downloading",
+             "progress", "warning", "argmax", "compiling", "%")
+
+
+def whisperkit_argv(path, model: str = DEFAULT_WHISPERKIT_MODEL,
+                    language: str = "") -> list:
+    """The `whisperkit-cli transcribe` command line."""
+    argv = [shutil.which("whisperkit-cli") or "/opt/homebrew/bin/whisperkit-cli",
+            "transcribe", "--audio-path", str(path), "--model", model]
+    # Empty is not "no language": it would pin the decode to a language named
+    # the empty string, the same trap lang_code has.
+    if language:
+        argv += ["--language", language]
+    return argv
+
+
+def _run_whisperkit(argv: list, timeout: float) -> str:
+    import subprocess
+    r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    if r.returncode != 0:
+        raise AudioError(
+            f"whisperkit-cli exited {r.returncode}: "
+            f"{(r.stderr or r.stdout).strip()[-300:]}")
+    return r.stdout
+
+
+def transcribe_whisperkit(path, model: str = DEFAULT_WHISPERKIT_MODEL,
+                          language: str = "", timeout: float = 300.0) -> str:
+    """Transcribe with CoreML WhisperKit, shelling out to `whisperkit-cli`.
+
+    A THIRD RUNTIME, which is the point. parakeet-on-mlx_audio,
+    whisper-on-mlx and this are three implementations of two model families;
+    comparing only the first two measures models and never the runtime they
+    sit on.
+    """
+    path = Path(path)
+    if not path.exists():
+        raise AudioError(f"no audio file at {path}")
+    try:
+        raw = _run_whisperkit(whisperkit_argv(path, model, language), timeout)
+    except FileNotFoundError as exc:
+        raise AudioError(
+            f"whisperkit-cli is not installed: {exc} "
+            f"(brew install whisperkit-cli)") from exc
+    except OSError as exc:
+        raise AudioError(f"could not run whisperkit-cli: {exc}") from exc
+
+    lines = []
+    for line in raw.splitlines():
+        line = _WK_TIMESTAMP.sub("", line.strip())
+        if not line or any(m in line.lower() for m in _WK_NOISE):
+            continue
+        lines.append(line)
+    text = " ".join(lines).strip()
+    if not text:
+        raise AudioError(f"whisperkit-cli produced no transcript for {path.name}")
+    return text
+
+
 def transcriber(backend: str = "server", model: str = "", language: str = "",
                 base_url: str = DEFAULT_BASE_URL, timeout: float = 120.0):
     """Build the callable that reads audio back, as `check()` wants it.
@@ -299,7 +368,13 @@ def transcriber(backend: str = "server", model: str = "", language: str = "",
             f"unknown stt backend {backend!r}; "
             f"expected one of {', '.join(STT_BACKENDS)}")
 
-    if backend == "whisper":
+    if backend == "whisperkit":
+        model = model or DEFAULT_WHISPERKIT_MODEL
+
+        def _run(path):
+            return transcribe_whisperkit(path, model=model, language=language,
+                                         timeout=timeout)
+    elif backend == "whisper":
         model = model or DEFAULT_WHISPER_MODEL
 
         def _run(path):

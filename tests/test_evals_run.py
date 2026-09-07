@@ -574,3 +574,17 @@ def test_no_such_note_when_everyone_sat_the_same_exam(capsys):
     ])
     report(s)
     assert "different cases" not in capsys.readouterr().out.lower()
+
+
+def test_the_disagreement_note_needs_an_actual_disagreement(capsys):
+    """Caught live on the parakeet run: all three candidates passed 40/40 and
+    the note still announced that one 'passes more cases'. A tie on pass rate
+    cannot disagree with anything."""
+    s = summarize([
+        Result("a", "x", True, 1.0, 0, "", metrics={"wer": 0.01,
+                                                    "wer_errors": 1, "wer_words": 100}),
+        Result("a", "y", True, 1.0, 0, "", metrics={"wer": 0.05,
+                                                    "wer_errors": 5, "wer_words": 100}),
+    ])
+    report(s)
+    assert "disagree" not in capsys.readouterr().out.lower()

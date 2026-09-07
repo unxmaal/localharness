@@ -405,6 +405,14 @@ def _note_ranking_disagreements(summary: dict, metric_names: list) -> None:
     by_rate = [n for n, _ in sorted(summary.items(),
                                     key=lambda kv: -kv[1]["pass_rate"])]
     for metric in metric_names:
+        # A TIE on pass rate cannot disagree with anything. Three parakeets all
+        # scored 40/40 and the note still announced that one "passes more
+        # cases", which is not a disagreement, it is the note describing sort
+        # order noise.
+        rates = {s["pass_rate"] for s in summary.values()}
+        if len(rates) < 2:
+            continue
+
         # A metric computed over a DIFFERENT NUMBER OF CASES per candidate is
         # not a ranking, and this note was making exactly that comparison: on
         # its first live run it announced that local-mid scored better on ink,
