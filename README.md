@@ -5,7 +5,7 @@
 **Make pictures, video, speech and code on your own Mac. Nothing leaves the machine.**
 
 One command, `lh`, generates an image, a short video, an SVG icon, a web page,
-some code, or speech in a voice you chose — and transcribes what you say back.
+some code, or speech in a voice you chose. It also transcribes what you say.
 No account, no API key, no per-token bill, no rate limit, and no model quietly
 retired out from under you.
 
@@ -14,20 +14,20 @@ ways to do its own job, and then proves whether they are better.**
 
 This field moves weekly. A model or a technique that was best when this was
 written is probably not best now. So `lh discover` reads the model registries
-and the places practitioners actually talk, finds things that did not exist
-yesterday, and hands you the exact command that would test each one against
-what you are already using. You run it, and the numbers decide.
+and the places practitioners talk, finds things that did not exist yesterday,
+and hands you the command that would test each one against what you already
+use. You run it, and the numbers decide.
 
 Nothing here was adopted because it was popular. Every model and method earned
-its place by winning a run, on this hardware, against real cases — and a few
-things people are confident about lost.
+its place by winning a run, on this hardware, against real cases. A few things
+people are confident about lost.
 
 ## What it does
 
 | | |
 |---|---|
 | `lh image "a red fox in falling snow"` | an image, ~19s |
-| `lh video "a fox running" --seconds 2` | a video with sound (slow — see below) |
+| `lh video "a fox running" --seconds 2` | a video with sound, ~40 min |
 | `lh svg "a settings gear icon"` | a real vector icon |
 | `lh web "a landing page for a coffee roaster"` | a self-contained HTML page |
 | `lh code "parse an ISO timestamp"` | code, to stdout |
@@ -40,7 +40,7 @@ Everything lands in `~/localharness/out/`.
 
 ## Why bother
 
-**It is yours.** The prompts, the logs you pipe into it, the voice clips — none
+**It is yours.** The prompts, the logs you pipe into it, the voice clips: none
 of it is uploaded anywhere. For anything touching work, health or family that is
 the whole argument.
 
@@ -50,23 +50,24 @@ costs electricity.
 **It does not rot.** A hosted model changes under you or is deprecated. Weights
 on your disk keep behaving the same way in a year.
 
-**It tells you what is actually best.** This is the unusual part. Rather than
-trusting anyone's opinion, it runs the options against the same set of test jobs
-and scores the results. Some of what that turned up:
+**It tells you which option is best.** Rather than trusting anyone's opinion,
+it runs the options against the same test jobs and scores the results. Some of
+what that turned up:
 
-- for vector icons, **the language models are the wrong tool entirely**. Drawing
-  a picture and then tracing it beat every one of them, 4 out of 4 against 2 out
-  of 6 on identical requests.
-- **letting a model check its own work and try again is close to free**, and it
-  took code from 20 right out of 27 to 24, and icons from 6 out of 9 to 9.
-- the *faster* of two image models was also the better one — 19 seconds against
-  43 — so there was no tradeoff to agonise over.
-- a quality score that looked useless turned out to be fine; the experiment
-  measuring it had been set up wrong. Worth more than the score itself.
+- for vector icons the language models lose to a different method entirely.
+  Drawing a picture and tracing it scored 4 out of 4, against 2 out of 6 for the
+  best model, on identical requests.
+- letting a model check its own work and try again took code from 20 right out
+  of 27 to 24, and icons from 6 out of 9 to 9, at one extra attempt on average
+  and no extra download.
+- of two image models, quality came out a statistical tie, so the decision fell
+  to 19 seconds against 43 and 11.4 GiB against 13.7. Knowing it was a tie is
+  the useful part.
+- a quality score that looked useless turned out to work. The experiment
+  measuring it had compared two things that were never comparable.
 
 **It does not fall behind.** It reads the model registries and the places
-practitioners actually talk, on a schedule, and tells you what is new and worth
-testing. See below — it is the most useful thing here.
+practitioners talk, on a schedule, and tells you what is new. See below.
 
 ## Try it
 
@@ -82,14 +83,13 @@ run `lh say "hello"`.
 
 ## What it is not
 
-Worth knowing before you invest an afternoon:
+Before you invest an afternoon:
 
 - **Apple Silicon only.** It is built on MLX and Metal. There is no Linux or
   Intel path and there is not going to be one.
-- **It needs disk.** Weights are tens of gigabytes.
-- **Video is slow here.** About 40 minutes a generation on an M2 Pro with 32 GB.
-  It works, and it is not something you will use casually. A faster machine is
-  the fix.
+- **It needs disk.** The models this uses run 4 GB to 31 GB each.
+- **Video takes about 40 minutes a generation** on an M2 Pro with 32 GB. It
+  works; it is not something you will use casually.
 - **It is a workshop, not a product.** There is no GUI, and some lanes are better
   than others.
 
@@ -127,12 +127,12 @@ spending a large one's context on a log.
 
 ## Keeping up with a field that moves weekly
 
-This is the part that is unusual, so it is worth explaining properly.
+This is the unusual part, so here it is in full.
 
 Any tool like this is out of date the moment it ships. New models appear
-constantly, and more importantly so do new *techniques* — a way of chaining two
-steps, a small add-on file that makes a big model five times faster, a trick for
-running something that should not fit in your memory. Left alone, you keep using
+constantly, and so do new *techniques*: a way of chaining two steps, a 200 MB
+add-on file that makes a 20 GB model five times faster, a trick for running
+something that should not fit in memory. Left alone, you keep using
 whatever was good the week you set it up and never find out.
 
 So `lh` looks, on your behalf, in three steps.
@@ -155,12 +155,12 @@ lh discover --external --lane image   # ask the model registries
 lh discover --feeds                   # read where practitioners talk
 ```
 
-`--external` queries the HuggingFace registry — good for "what models exist",
+`--external` queries the HuggingFace registry. Good for "what models exist",
 useless for anything that is not a single model.
 
 `--feeds` is the interesting one. It reads community aggregation posts, because
 a registry can tell you a model exists but not that everyone has moved to a
-small add-on file that made generation five times faster. That is exactly what
+small add-on file that made generation five times faster. That is what
 it found on its first real run: a *MiniMax-H3-Turbo* LoRA claiming a 5x speedup,
 against a video lane that currently takes 40 minutes a generation. A registry
 query could never surface that, because it is not a property of any one model.
@@ -180,11 +180,10 @@ Run that, and it competes against what you already use on identical cases. That
 is the whole loop: **it looks, it proposes with evidence, you measure, the
 numbers decide.**
 
-Two rules keep it honest. A feed is a *popularity* signal and never a
-measurement — being talked about a lot is not evidence of being good. And a name
-someone typed in a sentence is only a claim that something exists, so it is
-checked against the registry before it is ever offered to you; a stranger's
-typo is no more trustworthy than an invented name.
+Two rules keep it useful. A feed measures popularity, and popularity is not
+quality: plenty of things get talked about because they are new. And a name
+someone typed in a sentence might be a typo or might not exist at all, so every
+one is checked against the registry before it reaches you.
 
 Discovery goes stale, which defeats the point, so `lh` tracks when it last
 looked and tells you in ordinary `lh discover` output when it has been too long.
@@ -194,17 +193,17 @@ Default is 30 days, set `$LOCALHARNESS_DISCOVERY_DAYS` to change it.
 lh discover --sources        # which places it reads, and when it last looked
 ```
 
-It also watches for **new places worth reading**, since the site everyone uses
+It also watches for **new places to read**, since the site everyone uses
 in a year may not be the one they use now. When a feed keeps pointing somewhere
-`lh` does not read, it says so and waits for you to add it — deliberately never
-automatic, because a web address suggested by a stranger should need a human to
-agree before this thing starts fetching it on a timer. Places it reads live in
+`lh` does not read, it says so and waits for you to add it. Never automatic: a
+web address suggested by a stranger should need a human to agree before this
+thing starts fetching it on a timer. Places it reads live in
 `~/localharness/discovery-sources.json`; edit that file freely.
 
 ## Letting another computer use this one
 
 If you use an AI coding assistant on a laptop, it can hand work to this machine
-instead of doing it itself — the laptop asks for an image, this Mac makes it.
+instead of doing it itself. The laptop asks for an image, this Mac makes it.
 That is done over MCP, a small standard for letting an assistant call outside
 tools.
 
@@ -213,19 +212,24 @@ tools.
 claude mcp add --transport http localharness http://styx.local:8899/mcp
 ```
 
-That exposes `svg`, `web`, `code` and `image` to the assistant. Every tool shells out to `lh`, so the CLI, the eval suite and the
-MCP server run identical commands — which is how the thing being measured stays
-the thing that ships.
+> **There is no authentication.** Anyone who can reach port 8899 can use this
+> machine's GPU. That is a deliberate choice for a home network. On any network
+> you do not control, bind to localhost instead: `TTS_HOST=127.0.0.1`.
+
+That exposes `svg`, `web`, `code` and `image` to the assistant. Every tool shells
+out to `lh`, so the CLI, the eval suite and the MCP server run identical
+commands, and what gets measured is what ships.
 
 `image` is queued: it holds 11.4 GiB and the inference server swaps models
 through a single queue, so it returns a job id and `job_status` carries the queue
 position and the artifact path. Artifacts stay here, in `~/localharness/out/mcp/`.
 
-Video and speech are deliberately not exposed. There is **no authentication** —
-this is a house LAN by choice. Set `TTS_HOST=127.0.0.1` on an untrusted network.
-DNS-rebinding protection stays on with an allowlist (`MCP_ALLOW`), because that
-is a different threat: it needs someone here to open a web page, not the port to
-be reachable from outside.
+Video and speech are not exposed over MCP. Video needs more than a queue to be
+usable remotely, and speech was ruled out; both stay available locally.
+
+DNS-rebinding protection stays on, with an allowlist in `MCP_ALLOW`. It guards a
+different thing than the missing authentication does: rebinding needs only that
+someone here opens a web page, not that the port is reachable from outside.
 
 ---
 
@@ -249,7 +253,7 @@ scripts use. It has to: on PATH it runs with nothing sourced, and an unset
 `HF_HOME` sends huggingface_hub off to re-download what is already on the volume.
 
 The install carries no torch. `mlx-whisper` needs it unconditionally, so the
-multilingual ear lives in the `whisper` dependency group — 370MB installed
+multilingual ear lives in the `whisper` dependency group: 370MB installed
 rather than 1.1GB.
 
 ## Keeping the services up
@@ -265,7 +269,7 @@ Installed as launchd agents, so the machine comes back serving after a reboot:
 **Run `probe` first, always.** macOS TCC denies `/Volumes` to launchd jobs, and
 the failure is horrible unprepared: the volume stats fine, reports free space and
 appears in `/Volumes`, so nothing looks wrong until mlx_lm hangs forever inside
-`os.listdir` — accepting connections, answering none, logging nothing, at 0% CPU.
+`os.listdir`, accepting connections, answering none, logging nothing, at 0% CPU.
 
 The fix is granting Full Disk Access to **`/bin/bash`** (System Settings →
 Privacy & Security → Full Disk Access, then Cmd+Shift+G to reach `/bin`). TCC
@@ -307,13 +311,13 @@ not make.
 
 ## Measuring things yourself
 
-Three words show up throughout, so plainly:
+Three words show up throughout:
 
-- a **lane** is one kind of job — image, video, svg, web, code, extract, speech,
+- a **lane** is one kind of job: image, video, svg, web, code, extract, speech,
   transcription. Each has its own test cases and its own way of being scored.
 - a **candidate** is one contender in a lane: usually a model, sometimes a
   *method*. Candidates in a lane compete on identical cases.
-- **measured** means a candidate has actually been run here and has a score.
+- **measured** means a candidate has been run here and has a score.
   Untested is the default, which is what `lh discover` exists to make visible
   rather than letting it be assumed.
 
@@ -328,8 +332,8 @@ A candidate is written as a short spec: a model nickname for text
 (`local-large`), `mflux:<model>` for anything that runs as a separate program, or
 `tts:<model>,voice=<name>` for speech.
 
-A candidate can also be a **method** — a way of working rather than a model, and
-a method can beat a better model:
+A candidate can also be a **method**, a way of working rather than a model. A
+method can beat a better model:
 
 ```bash
 --candidates trace:mflux:flux2-klein-4b        # draw a picture, then trace it to vector
@@ -337,12 +341,13 @@ a method can beat a better model:
 --candidates repair:q3-4b                      # generate, check it, fix it, repeat
 ```
 
-`repair` is worth understanding, because it is free. Everything here already
-checks its own output — it runs the code it wrote, draws the SVG to see whether
-anything is actually visible, opens the web page in a browser. All of that was
+`repair` costs nothing extra, so it is the one to understand. Everything already
+checks its own output. It runs the code it wrote, draws the SVG to see whether
+anything is visible, opens the web page in a browser. All of that was
 being used to *score*, and never to *improve*. `repair` simply asks the same
 model again with the complaint attached: "this failed, here is why, try again."
-Same model, no new download, markedly better results.
+It uses the same model and downloads nothing, and the scores above are what it
+bought.
 
 To put two finished runs side by side:
 
@@ -352,8 +357,7 @@ uv run python -m evals.run --compare a/results.json b/results.json
 
 It will refuse if the two runs are not fairly comparable, and tell you which
 difference disqualified them. Comparing a run from before a settings change
-against one from after is comparing two different exams, and the refusal is the
-feature.
+against one from after compares two different exams, so it stops you.
 
 ## Developing
 
@@ -364,10 +368,10 @@ make smoke     # end-to-end, REQUIRES the services running
 ```
 
 CI runs `make check` on an Apple Silicon runner for every push and pull request,
-and reports which tests it skipped and why — a silently skipped test reports
+and reports which tests it skipped and why. A skipped test otherwise reports
 green for something it never checked.
 
-Every safety check here has been deliberately broken to confirm its test then
+Every safety check here has been broken on purpose to confirm its test then
 fails. A test that passes against known-broken code is testing nothing, and the
 only way to know the difference is to try it.
 
@@ -386,4 +390,4 @@ by default. The opt-out is in both `gateway/config.yaml` and
 
 LiteLLM's `/health/readiness` returns 200 before the proxy can serve. Never
 conclude anything from a request made in that window, and when restarting, wait
-for port 4000 to actually free before probing or you will test the dying process.
+for port 4000 to free before probing or you will test the dying process.
