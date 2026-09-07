@@ -9,10 +9,18 @@ some code, or speech in a voice you chose — and transcribes what you say back.
 No account, no API key, no per-token bill, no rate limit, and no model quietly
 retired out from under you.
 
-The part that makes it more than a pile of scripts: **it measures.** Every model
-and every method here earned its place by winning a run against the others, on
-this hardware, on real cases. When something new appears, `lh discover` proposes
-it and the eval suite settles it. Nothing gets adopted because it was trending.
+The part that makes it more than a pile of scripts: **it goes looking for better
+ways to do its own job, and then proves whether they are better.**
+
+This field moves weekly. A model or a technique that was best when this was
+written is probably not best now. So `lh discover` reads the model registries
+and the places practitioners actually talk, finds things that did not exist
+yesterday, and hands you the exact command that would test each one against
+what you are already using. You run it, and the numbers decide.
+
+Nothing here was adopted because it was popular. Every model and method earned
+its place by winning a run, on this hardware, against real cases — and a few
+things people are confident about lost.
 
 ## What it does
 
@@ -42,19 +50,23 @@ costs electricity.
 **It does not rot.** A hosted model changes under you or is deprecated. Weights
 on your disk keep behaving the same way in a year.
 
-**It tells you what is actually best.** This is the unusual part. The suite runs
-candidates against the same cases and reports pass rates and quality metrics, and
-it refuses to rank two runs that were not comparable. Some of what that has
-found:
+**It tells you what is actually best.** This is the unusual part. Rather than
+trusting anyone's opinion, it runs the options against the same set of test jobs
+and scores the results. Some of what that turned up:
 
-- for SVG, **tracing beats every language model** — draw a raster, then
-  vectorize it: 4/4 against 2/6 on the same cases
-- **checking your own output and trying again works**: code 20/27 → 24/27, SVG
-  6/9 → 9/9
-- the fast image model was also the better one, at 19.4s against 42.6s, with
-  nothing traded away
-- a speaker-similarity metric that looked broken was fine, and the *experiment*
-  was wrong
+- for vector icons, **the language models are the wrong tool entirely**. Drawing
+  a picture and then tracing it beat every one of them, 4 out of 4 against 2 out
+  of 6 on identical requests.
+- **letting a model check its own work and try again is close to free**, and it
+  took code from 20 right out of 27 to 24, and icons from 6 out of 9 to 9.
+- the *faster* of two image models was also the better one — 19 seconds against
+  43 — so there was no tradeoff to agonise over.
+- a quality score that looked useless turned out to be fine; the experiment
+  measuring it had been set up wrong. Worth more than the score itself.
+
+**It does not fall behind.** It reads the model registries and the places
+practitioners actually talk, on a schedule, and tells you what is new and worth
+testing. See below — it is the most useful thing here.
 
 ## Try it
 
@@ -113,37 +125,95 @@ make test 2>&1 | lh extract "which test failed, and why?"
 That is the lane for handing a cheap question to a small model instead of
 spending a large one's context on a log.
 
-## Finding what to try next
+## Keeping up with a field that moves weekly
+
+This is the part that is unusual, so it is worth explaining properly.
+
+Any tool like this is out of date the moment it ships. New models appear
+constantly, and more importantly so do new *techniques* — a way of chaining two
+steps, a small add-on file that makes a big model five times faster, a trick for
+running something that should not fit in your memory. Left alone, you keep using
+whatever was good the week you set it up and never find out.
+
+So `lh` looks, on your behalf, in three steps.
+
+**1. It works out what you have and what you have never tried.**
 
 ```bash
-lh discover                  # what is here, and what has never been measured
-lh discover --gap            # only the gaps
-lh discover --external --lane image   # ask the model registries
-lh discover --feeds          # read the community feeds
-lh discover --sources        # which feeds, last read when
+lh discover           # everything available here, and whether it has been tested
+lh discover --gap     # just the untested things
 ```
 
-`--feeds` reads aggregation posts, because a registry can tell you a model
-exists but not that everyone has moved to a LoRA that made generation five times
-faster. Feeds are a **popularity signal, never a measurement**: they propose
-candidates with a URL and a date, and the eval decides. Names lifted from prose
-are checked against the registry before they are offered, because a name a
-stranger typed is no more verified than one a language model invented.
+It reads your installed tools, your downloaded models and the results of every
+past test run. Nothing is hand-maintained, so the answer is right whenever you
+ask rather than as of whenever someone last updated a list.
 
-Sources live in `~/localharness/discovery-sources.json`. They go stale after 30
-days (`$LOCALHARNESS_DISCOVERY_DAYS`), and a stale source is reported by plain
-`lh discover` rather than waiting to be asked about. New sources the feeds point
-at are proposed and never auto-enabled.
-
-## Serving it to another machine
+**2. It goes out and finds what exists now.**
 
 ```bash
-./scripts/serve-mcp.sh      # MCP on 0.0.0.0:8899
+lh discover --external --lane image   # ask the model registries
+lh discover --feeds                   # read where practitioners talk
+```
+
+`--external` queries the HuggingFace registry — good for "what models exist",
+useless for anything that is not a single model.
+
+`--feeds` is the interesting one. It reads community aggregation posts, because
+a registry can tell you a model exists but not that everyone has moved to a
+small add-on file that made generation five times faster. That is exactly what
+it found on its first real run: a *MiniMax-H3-Turbo* LoRA claiming a 5x speedup,
+against a video lane that currently takes 40 minutes a generation. A registry
+query could never surface that, because it is not a property of any one model.
+
+**3. You measure, and the result decides.**
+
+Discovery never concludes anything. It hands you proposals, each with a source
+URL, a date, and the command that would test it:
+
+```
+  inclusionAI/LLaDA-Image
+    linked from: LLaDA-Image: a unified 6B image/edit model has been released
+    -> uv run python -m evals.run --modality image --candidates ...
+```
+
+Run that, and it competes against what you already use on identical cases. That
+is the whole loop: **it looks, it proposes with evidence, you measure, the
+numbers decide.**
+
+Two rules keep it honest. A feed is a *popularity* signal and never a
+measurement — being talked about a lot is not evidence of being good. And a name
+someone typed in a sentence is only a claim that something exists, so it is
+checked against the registry before it is ever offered to you; a stranger's
+typo is no more trustworthy than an invented name.
+
+Discovery goes stale, which defeats the point, so `lh` tracks when it last
+looked and tells you in ordinary `lh discover` output when it has been too long.
+Default is 30 days, set `$LOCALHARNESS_DISCOVERY_DAYS` to change it.
+
+```bash
+lh discover --sources        # which places it reads, and when it last looked
+```
+
+It also watches for **new places worth reading**, since the site everyone uses
+in a year may not be the one they use now. When a feed keeps pointing somewhere
+`lh` does not read, it says so and waits for you to add it — deliberately never
+automatic, because a web address suggested by a stranger should need a human to
+agree before this thing starts fetching it on a timer. Places it reads live in
+`~/localharness/discovery-sources.json`; edit that file freely.
+
+## Letting another computer use this one
+
+If you use an AI coding assistant on a laptop, it can hand work to this machine
+instead of doing it itself — the laptop asks for an image, this Mac makes it.
+That is done over MCP, a small standard for letting an assistant call outside
+tools.
+
+```bash
+./scripts/serve-mcp.sh      # listen on 0.0.0.0:8899
 claude mcp add --transport http localharness http://styx.local:8899/mcp
 ```
 
-Exposes `svg`, `web`, `code` and `image`, so another machine's agent can borrow
-this one's GPU. Every tool shells out to `lh`, so the CLI, the eval suite and the
+That exposes `svg`, `web`, `code` and `image` to the assistant. Every tool shells out to `lh`, so the CLI, the eval suite and the
 MCP server run identical commands — which is how the thing being measured stays
 the thing that ships.
 
@@ -216,7 +286,7 @@ Or run them by hand, from a terminal that already has the access:
 ./scripts/serve-mlx.sh       # inference engine on :8081
 ./scripts/serve-gateway.sh   # gateway on :4000, the only address clients use
 ./scripts/serve-tts.sh       # Kokoro TTS + Parakeet STT on :8890
-./scripts/smoke.sh           # assert the seam still holds
+./scripts/smoke.sh           # check the whole chain still works end to end
 ```
 
 ## Where things land
@@ -235,32 +305,55 @@ anywhere, so a relative `out/` scattered artifacts into whatever directory the
 caller was standing in, and a generation you cannot find is a generation you did
 not make.
 
-## Measuring candidates
+## Measuring things yourself
+
+Three words show up throughout, so plainly:
+
+- a **lane** is one kind of job — image, video, svg, web, code, extract, speech,
+  transcription. Each has its own test cases and its own way of being scored.
+- a **candidate** is one contender in a lane: usually a model, sometimes a
+  *method*. Candidates in a lane compete on identical cases.
+- **measured** means a candidate has actually been run here and has a score.
+  Untested is the default, which is what `lh discover` exists to make visible
+  rather than letting it be assumed.
+
+To run two candidates against each other:
 
 ```bash
 uv run python -m evals.run --modality image --out .logs/img \
   --candidates mflux:flux2-klein-4b,mflux:z-image-turbo
 ```
 
-A candidate is a gateway alias for text, an engine spec for anything that runs as
-a process, or `tts:<model>,voice=<name>` for speech. A candidate can also be a
-**workflow** rather than a model:
+A candidate is written as a short spec: a model nickname for text
+(`local-large`), `mflux:<model>` for anything that runs as a separate program, or
+`tts:<model>,voice=<name>` for speech.
+
+A candidate can also be a **method** — a way of working rather than a model, and
+a method can beat a better model:
 
 ```bash
---candidates trace:mflux:flux2-klein-4b        # raster, then vectorize
+--candidates trace:mflux:flux2-klein-4b        # draw a picture, then trace it to vector
 --candidates trace-icon:mflux:flux2-klein-4b   # same, tuned small: 3.2x fewer bytes
---candidates repair:q3-4b                      # generate, check, repair
+--candidates repair:q3-4b                      # generate, check it, fix it, repeat
 ```
 
-`repair` closes a loop that was always available and never used: every checker
-here is an automated verifier — it executes generated code, rasterizes SVG,
-renders HTML in a browser — and none of them was fed back into generation. Same
-model, asked again with the checker's own complaint attached.
+`repair` is worth understanding, because it is free. Everything here already
+checks its own output — it runs the code it wrote, draws the SVG to see whether
+anything is actually visible, opens the web page in a browser. All of that was
+being used to *score*, and never to *improve*. `repair` simply asks the same
+model again with the complaint attached: "this failed, here is why, try again."
+Same model, no new download, markedly better results.
 
-Compare two finished runs with `--compare a/results.json b/results.json`. It
-refuses runs that are not comparable and names the axis that differs, because
-ranking a run from before a sampling change against one from after is comparing
-two different exams.
+To put two finished runs side by side:
+
+```bash
+uv run python -m evals.run --compare a/results.json b/results.json
+```
+
+It will refuse if the two runs are not fairly comparable, and tell you which
+difference disqualified them. Comparing a run from before a settings change
+against one from after is comparing two different exams, and the refusal is the
+feature.
 
 ## Developing
 
@@ -274,8 +367,9 @@ CI runs `make check` on an Apple Silicon runner for every push and pull request,
 and reports which tests it skipped and why — a silently skipped test reports
 green for something it never checked.
 
-Tests are red-proofed by mutation: every guard has been broken deliberately and
-the corresponding test confirmed to fail.
+Every safety check here has been deliberately broken to confirm its test then
+fails. A test that passes against known-broken code is testing nothing, and the
+only way to know the difference is to try it.
 
 Work is tracked in [issues](https://github.com/unxmaal/localharness/issues);
 [#16](https://github.com/unxmaal/localharness/issues/16) is the roadmap.
