@@ -33,6 +33,7 @@ from evals.core import (MODALITIES, Case, Receipt, direction_of,
                         load_cases, summarize)
 from evals.environment import capture
 from evals.runners.process import ProcessRunner
+from evals.runners.repair import RepairRunner
 from evals.runners.speech import SpeechRunner
 from evals.runners.trace import TraceRunner
 from evals.runners.text import CompletionRunner
@@ -47,6 +48,10 @@ PROCESS_ENGINES = ("mflux", "h3")
 #: The svg lane's second METHOD: draw a raster, then vectorize it. Written as
 #: `trace:<engine spec>` so the engine underneath stays the ordinary spec.
 TRACE_PREFIX = "trace"
+#: Generate, check, repair. A WORKFLOW rather than a model: `local-large` and
+#: `repair:local-large` are different products. See evals/runners/repair.py.
+REPAIR_PREFIX = "repair"
+REPAIR_OPTIONS = {"attempts"}
 TTS_OPTIONS = {"voice", "ref_audio", "lang_code", "ear"}
 STT_OPTIONS = {"backend", "language"}
 
@@ -62,6 +67,8 @@ def kind_of(candidate: str) -> str:
         return head
     if head == TRACE_PREFIX:
         return TRACE_PREFIX
+    if head == REPAIR_PREFIX:
+        return REPAIR_PREFIX
     return "gateway"
 
 
@@ -75,6 +82,10 @@ def modality_of(candidate: str) -> str | None:
         # It answers svg cases; the engine underneath makes images, which is
         # the whole point and would be the wrong modality to select on.
         return "svg"
+    if kind == REPAIR_PREFIX:
+        # A text candidate wearing a loop: it runs every text lane, same as
+        # the model it wraps.
+        return None
     if kind == "process":
         engine = engine_for(candidate)
         return engine.modality if engine else None
@@ -188,6 +199,23 @@ def build_runner(candidate: str, gateway: str, outdir: Path | None,
         return _speech_runner(candidate, outdir)
     if kind == "stt":
         return _transcription_runner(candidate)
+    if kind == REPAIR_PREFIX:
+        _, _, rest = candidate.partition(":")
+        model, _, optstr = rest.partition(",")
+        try:
+            options = parse_options(optstr, candidate)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        unknown = set(options) - REPAIR_OPTIONS
+        if unknown:
+            raise SystemExit(
+                f"unknown repair option(s) {', '.join(sorted(unknown))}; "
+                f"allowed: {', '.join(sorted(REPAIR_OPTIONS))}")
+        if not model.strip():
+            raise SystemExit("a repair candidate needs a model, e.g. "
+                             "repair:local-large")
+        return RepairRunner(gateway, model.strip(),
+                            attempts=int(options.get("attempts", 3)))
     if kind == TRACE_PREFIX:
         spec = candidate.partition(":")[2].strip()
         if not spec:

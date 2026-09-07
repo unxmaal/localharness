@@ -605,3 +605,29 @@ def test_a_run_gets_its_own_directory_without_being_told(monkeypatch, tmp_path):
 def test_an_explicit_out_is_still_honoured(monkeypatch, tmp_path):
     from evals.run import resolve_outdir
     assert resolve_outdir(str(tmp_path / "here"), "svg") == tmp_path / "here"
+
+
+def test_a_repair_candidate_becomes_a_repair_runner(tmp_path):
+    from evals.runners.repair import RepairRunner
+    r = build_runner("repair:local-large", "http://gw", tmp_path)
+    assert isinstance(r, RepairRunner)
+    assert r.candidate == "repair/local-large"
+
+
+def test_the_repair_budget_is_settable(tmp_path):
+    r = build_runner("repair:local-large,attempts=5", "http://gw", tmp_path)
+    assert r.attempts == 5
+
+
+def test_a_repair_candidate_gets_the_text_lanes(tmp_path):
+    from evals.run import cases_for
+    cases = [Case(id="s", modality="svg", prompt="a gear"),
+             Case(id="i", modality="image", prompt="a fox",
+                  params={"width": 64, "height": 64})]
+    assert [c.id for c in cases_for("repair:local-large", cases)] == ["s"]
+
+
+def test_an_unknown_repair_option_is_named(tmp_path):
+    with pytest.raises(SystemExit) as e:
+        build_runner("repair:local-large,tries=5", "http://gw", tmp_path)
+    assert "tries" in str(e.value)
