@@ -371,3 +371,92 @@ def external(lane: str, limit: int = 8) -> list[Capability]:
                 note=f"registry last modified {when or 'unknown'}; "
                      f"{m.get('downloads', 0):,} downloads"))
     return out[:limit]
+
+
+def _hf_exists(name: str) -> str:
+    """Resolve a name lifted from prose to a real repo id, or "" if it is not one."""
+    for m in _hf_models(name, 3):
+        repo = (m.get("id") or "")
+        if repo.split("/")[-1].lower() == name.split("/")[-1].lower():
+            return repo
+    return ""
+
+
+def from_feeds(sources=None, reader=None, verify=True,
+               limit: int = 25) -> list[Capability]:
+    """Candidates the community is talking about that nothing here has measured.
+
+    A LINKED repo is already an id. A name lifted from prose is a claim, and is
+    resolved against the registry before it is offered -- the same bar a
+    language model's suggestions are held to.
+    """
+    from harness import feeds
+
+    sources = feeds.load_sources() if sources is None else sources
+    reader = reader or feeds.read
+    done = measured()
+    out: list[Capability] = []
+    seen: set[str] = set()
+
+    for src in sources:
+        if not src.enabled:
+            continue
+        try:
+            entries = reader(src)
+        except Exception as exc:  # noqa: BLE001
+            out.append(Capability(
+                "feed", src.name, src.lane, src.url,
+                "check the URL, or the network", present=False,
+                blocked=f"could not read: {str(exc)[:160]}"))
+            continue
+
+        for p in feeds.candidates(entries, src.name):
+            repo = p.name
+            if p.kind == "tool":
+                # A github repo is something to read, not an mflux candidate.
+                if repo.lower() in seen:
+                    continue
+                seen.add(repo.lower())
+                out.append(Capability(
+                    "proposal", repo, src.lane, p.url or src.url,
+                    f"https://github.com/{repo}",
+                    note=f"{p.why[:120]} [{src.name} {p.when}]"))
+                continue
+            if p.kind != "repo":
+                if not verify:
+                    continue
+                repo = _hf_exists(p.name)
+                if not repo:
+                    continue      # prose that names nothing real
+            if repo.lower() in seen or _was_measured(repo, done):
+                continue
+            seen.add(repo.lower())
+            out.append(Capability(
+                "proposal", repo, src.lane, p.url or src.url,
+                _HOW.get(src.lane, "--candidates {id}").format(id=repo),
+                note=f"{p.why[:120]} [{src.name} {p.when}]"))
+    return out[:limit]
+
+
+def feed_sources(sources=None, reader=None) -> list[Capability]:
+    """Sources the feeds point at that this harness does not read.
+
+    Never auto-enabled. A source URL lifted from untrusted prose needs a human
+    nod before the harness starts fetching it on a schedule.
+    """
+    from harness import feeds
+
+    sources = feeds.load_sources() if sources is None else sources
+    reader = reader or feeds.read
+    entries = []
+    for src in sources:
+        if not src.enabled:
+            continue
+        try:
+            entries.extend(reader(src))
+        except Exception:  # noqa: BLE001
+            continue
+    return [Capability("source", p.name, "all", p.url,
+                       "add it to discovery-sources.json to start reading it",
+                       present=False, note=p.why)
+            for p in feeds.candidate_sources(entries, sources)]
