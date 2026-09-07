@@ -2,7 +2,7 @@
 
 Local media generation and voice, on Apple Silicon, in a command line.
 
-Last rewritten 2026-09-05, against a working tree. Numbers here were measured
+Last rewritten 2026-09-07, against a working tree. Numbers here were measured
 on this machine; `docs/validation-log.md` holds the evidence, including
 conclusions that were wrong and how they were caught.
 
@@ -15,12 +15,20 @@ locally. That is the whole goal, and `lh` is the product:
     lh video "a fox running" --seconds 2
     lh svg   "a settings gear icon"
     lh web   "a landing page for a coffee roaster"
-    lh say   "the tests all passed"
+    lh code  "a python function that parses an ISO timestamp"
+    lh extract --file build.log "how many tests failed?"
+    lh say   "the tests all passed"          # cloned, French accent
+    lh voices
     lh hear  --seconds 5
 
-Two lanes exist in the eval suite but not yet as CLI verbs: `code`, which runs
-the generated code against assertions, and `extract`, which hands a log or grep
-output to a small fast model instead of spending a large one's context on it.
+Installed with `uv tool install --python 3.12 --editable .`, which puts `lh` on
+PATH in its own venv and touches nothing the system Python can see.
+
+**The primary caller is an agent, not a person.** Eric asks Claude Code for an
+SVG; Claude Code runs `lh`. That is not a fallback for the CLI, it is the point
+of it, and it is why the verbs print paths and exit non-zero on a bad artifact
+rather than being chatty. A second machine's agent reaches the same commands
+over MCP (section 3).
 
 An earlier version of this plan opened by saying the product was intelligent
 routing between local and cloud models. It is not, and the phases that followed
@@ -74,17 +82,21 @@ reason that actually matters, and it will not refuse the Studio's.
 ## 3. Architecture
 
 ```
-        lh (harness/cli.py)                 evals/run.py
-              |                                   |
-              +---------------+-------------------+
-                              |
-                        harness/
-     engines.py    proc.py    completion.py    audio.py    checks/
-          |           |             |             |
-      mflux, h3   subprocess    gateway :4000   mlx_audio :8890
-                  + peak mem         |
-                                 mlx_lm :8081
+   lh (harness/cli.py)      evals/run.py      harness/mcp_server.py :8899
+          |                       |                    |
+          +-----------+-----------+--------------------+
+                      |                          (shells out to `lh`)
+                   harness/
+  engines.py  proc.py  completion.py  audio.py  checks/  jobs.py  memory.py  env.py
+       |         |           |            |                 |        |         |
+   mflux, h3  subprocess  gateway     mlx_audio      one-at-a-time  will it   where the
+              + peak mem   :4000        :8890           queue        fit?     weights are
+                             |
+                         mlx_lm :8081
 ```
+
+`jobs.py`, `memory.py` and `env.py` are all consequences of things that went
+wrong; each is described in section 6.
 
 The rule is that **the CLI and the eval suite run identical commands**. They
 import the same engine specs, the same system prompts and the same process
@@ -98,6 +110,25 @@ LiteLLM on `127.0.0.1:4000` fronts `mlx_lm.server` on `:8081`. Its value is that
 swapping what is under test costs a string in a config file rather than a code
 change, and that it speaks both `/v1/chat/completions` and Anthropic's
 `/v1/messages`. It is bound to loopback and nothing else.
+
+### Serving the other machine
+
+`scripts/serve-mcp.sh` exposes `svg`, `web`, `code` and `image` over MCP on
+`0.0.0.0:8899`, so another person's Claude Code on another machine can use this
+one's GPU. `claude mcp add --transport http localharness http://styx.local:8899/mcp`
+is the whole client setup.
+
+Every tool SHELLS OUT TO `lh`. The CLI, the eval suite and the MCP server run
+identical commands, which is the same rule as everywhere else in this repo and
+the reason a third caller cannot quietly drift from the product.
+
+`image` is queued and returns a job id; the rest answer in seconds. Video and
+the speech verbs are deliberately not exposed: video needs job semantics past a
+queue, and speech over the LAN was ruled out. Both stay reachable locally.
+
+Scoped from a real requirement rather than guessed: svg, image and some code
+generation are what the second user actually wants, and none of it is needed
+until after the Studio migration.
 
 ### Engines are data
 
@@ -141,19 +172,39 @@ first voice comparison medianed 0.000 for two voices that were not equal.
 
 ## 4. What is built and measured
 
-All measured 2026-09-05 unless noted. Versions: uv 0.12.5, mlx 0.32.2,
-mlx-lm 0.31.3, mflux 0.19.1.
+All measured 2026-09-05 to 09-07. Versions: uv 0.12.5, mlx 0.32.2,
+mlx-lm 0.31.3, mflux 0.19.1, mcp 2.1.1.
 
 | Lane | State |
 |---|---|
-| Text (svg, web) | mlx_lm behind the gateway. Working; needs 7B+ to be much good. |
+| Text (svg, web) | mlx_lm behind the gateway. Working, and weak: see the SVG note below. |
 | Code | mlx_lm behind the gateway. The eval RUNS the generated code. |
 | Extract | The delegate-to-a-small-model lane: a log in, one fact out. |
-| Image | mflux. `flux2-klein-4b` at ~19s per 512² warm. Working. |
-| Video | antirez/h3.c. 512×512×22 frames in 40.5 min, 9.48 GiB peak, zero swap. Working, and Studio-gated by time not memory. |
-| Speech out | Kokoro-82M via mlx-audio on :8890. 0.4s generation, 12-13× realtime. |
-| Speech in | Parakeet TDT 0.6b v2, same server. 0.1s. English only. |
+| Image | mflux. `flux2-klein-4b` at ~19s per 512² warm, ~54s cold. Working. |
+| Video | antirez/h3.c. 512×512×22 frames in 40.5 min, 9.48 GiB peak. Working, and Studio-gated by time not memory. |
+| Speech out | Kokoro-82M via mlx-audio on :8890, plus Chatterbox for cloned voices. |
+| Speech in | Parakeet (English, fast) or mlx-whisper in-process (multilingual). |
 | Voice UI | `voicemode` (MCP, 1349★) is the front end. Not ours, deliberately. |
+| Serving | Four launchd agents; survives reboot and crash. MCP on :8899 for the second machine. |
+
+### The SVG lane is the wrong tool, and this is settled
+
+`lh svg` asks a general chat model to write bezier coordinates it cannot see.
+Asked for "a cartoon frog holding a coffee mug", Qwen2.5-7B emitted eighty
+near-identical `<path>` elements and hit the token ceiling mid-attribute; with
+sampling fixed it produced a complete, valid document of coloured blobs. Asked
+for two concentric gears it drew two offset squares. The default at the time,
+Qwen2.5-1.5B, produced valid SVG in which every path was `M256 256 L256 256` --
+a zero-length line, `ink=0.0000`, structurally perfect and visually empty.
+
+**Generate a raster and vectorize it instead.** `lh image` produces a good
+cartoon frog in 54s; `vtracer` turns it into real vector paths in **0.05s**,
+`ink=0.2605`. That is a complete answer to a question an LLM cannot do at any
+size available here, and no amount of a better chat model changes it.
+
+Not yet wired into `lh` as a pipeline. When it is, the dedicated text-to-SVG
+models (OmniSVG, StarVector) are the other candidate worth measuring against
+it; both are torch on MPS rather than MLX.
 
 **Video fits in 32 GB, which this plan once said it would not.** Only the DiT
 streams from SSD, and prompt encoding and the two VAEs run in separate phases,
@@ -185,6 +236,61 @@ h3 builds clean under its own `-Wall -Wextra -Wpedantic -Wconversion` and passes
 FFprobe required.
 
 ### Decisions taken
+
+**The text models were never chosen, and now they have been.** Qwen2.5-0.5B
+entered this repo as a smoke test proving `mlx_lm.generate` ran at all. The
+family then served four lanes for a month while the words "SOTA", "surveyed"
+and "leaderboard" appeared nowhere in 671 lines of validation log. Measured
+2026-09-07 against Qwen3, five candidates that fit in 32 GB, `--repeat 3` on the
+stochastic lanes:
+
+| lane | winner | runner-up | previous default |
+|---|---|---|---|
+| svg | local-large 7/9 @ 4.7s | q3-14b 7/9 @ 10.0s | local-mid **2/9** |
+| web | local-large 6/6 @ 21s | q3-14b 6/6 @ 61s | local-mid **3/6** |
+| code | **q3-4b** 6/9 @ 2.9s | q3-8b 6/9 @ 130s | local-large 5/9 |
+| extract | local-large 9/10 @ 0.8s | q3-14b 9/10 @ 13.4s | local-large |
+
+Only `code` moved. **Qwen2.5-7B keeps svg, web and extract on merit**: equal
+accuracy to Qwen3-14B and two to seventeen times faster. A generation behind is
+not the same as wrong for the job.
+
+What disqualifies Qwen3-8B and Qwen3-14B is not their scores, which look fine.
+They are hybrid THINKING models, and Qwen3-4B-Instruct-2507 is not. Asked to
+"reply with exactly: OK" they spend 140-152 completion tokens against 2. mlx_lm
+puts the reasoning in a separate `reasoning_content` field so nothing leaks into
+the artifact -- which is why it is easy to miss -- and what it does instead is
+eat the token budget. On an SVG the whole 4000 goes to reasoning and `content`
+returns NULL. `lh svg` timed out twice at 180s before anyone looked at the
+response shape, and q3-8b scored 0/9 on svg, every run a timeout.
+
+**A pass rate says how often something fails, never how.** q3-14b's svg row read
+7/9 at a 9.96s median and looked like a winner. Check the response shape.
+
+The 30B candidates (Qwen3-30B-A3B and Qwen3-Coder-30B-A3B, 16 GB each) are
+unmeasured. 16 GB of weights against a 24 GB Metal working set is what took the
+machine down; see section 6.
+
+**The default voice is `fr-male`, a cloned French accent.** Chatterbox clones
+ACROSS languages: the reference clip speaks French, the output speaks English,
+and the accent comes with the voice. That is why no accented-English corpus was
+needed. About 2.4s a line against Kokoro's 0.3s, which is the price of the
+default being the voice that was wanted; `--voice bm_george` is the fast one.
+Two reference clips ship in `harness/voices/` (google/fleurs, CC-BY-4.0).
+The reference clip is a first-class variable: three clips from the same corpus,
+same language, same gender, scored 0.122, 0.144 and 0.578 corpus WER.
+
+**French TTS, scored by whisper pinned to fr:** Kokoro `ff_siwis` 5/5 at 0.34s,
+wer 0.044, beating every Chatterbox clone. But ff_siwis is the ONLY French voice
+Kokoro has and it is female, so the table's winner is not the whole decision.
+Chatterbox's dominant failure is invented trailing speech, not mispronunciation.
+
+**Multilingual STT is mlx-whisper called IN-PROCESS**, bypassing mlx_audio's
+server, which cannot load it: the mlx whisper repos ship weights.npz and
+config.json without the `preprocessor_config.json` the server demands, and
+mlx_whisper wants exactly what they do ship. English LibriSpeech 40/40, corpus
+wer 0.022 at 1.14s median, against parakeet-1.1b's 0.011 at 0.18s. Whisper is
+the multilingual ear; parakeet stays the English one.
 
 **`flux2-klein-4b` is the image engine,** and the suite now supports that choice
 rather than deferring to taste. Over 4 seeds x 3 cases with PickScore:
@@ -256,32 +362,29 @@ h3.c. Fallback only.
 
 ## 5. What is next, in order
 
-1. **Prompt adherence, and it needs a decision.** This is the one axis that
-   would let the suite rank two image models. Neither `ink` nor OCR separated
-   FLUX.2 klein from Z-Image Turbo — both scored a clean 0.000 — so "does the
-   picture match the words" is what is missing. PickScore and HPSv2 both do it
-   well, and both are torch models with a ~4 GB checkpoint, in a repo that is
-   otherwise MLX-only and on a machine with 32 GB. **Not taken unilaterally:**
-   it roughly doubles the dependency footprint to add one metric. The
-   alternatives are an MLX CLIP port (Apple's `mlx-examples/clip` is a
-   reference implementation, not a package, so this means carrying ~400 lines
-   of someone else's model code) or a blind contact sheet, which is a person
-   rather than a metric and is genuinely fine for a two-way choice.
-2. **Rank STT on its own.** The speech metric is joint: it scores a TTS model
-   and the STT model reading it together and cannot separate them. Holding one
-   side fixed still orders the other, which is what the tts eval does, but
-   ranking STT itself needs reference audio with a human transcript — ~200
-   utterances of LibriSpeech test-clean. Candidates, all served by mlx_audio:
-   Canary-Qwen 2.5B leads Open ASR on accuracy, Parakeet on speed at ~30×.
-3. **More voices than the five cached.** Chatterbox and Qwen3-TTS against
-   Kokoro. Deferred and not to be restarted unprompted: a male French-accented
-   voice, which needs a Chatterbox clone and a reference clip.
-4. **Rasterize HTML.** SVG is done with rsvg-convert, which was already
-   installed. HTML needs a browser engine — Playwright is the obvious one and a
-   much larger dependency — and the checks that matter most for a page
-   (self-containment, no external URLs) are structural anyway. Low priority.
-5. **launchd units.** The services are pinned now (`scripts/versions.sh`) but
-   still started by hand.
+Everything the previous list held is done: prompt adherence, STT ranked on its
+own, more voices, HTML rasterization, launchd. What follows is what those turned
+up.
+
+1. **Wire the vectorize pipeline into `lh svg`.** Section 4 settles that an LLM
+   is the wrong tool and that image-then-vectorize works in 0.05s. It is not
+   wired up. Measure it against OmniSVG and StarVector in the same run, since
+   those are the only other real candidates and neither has been tried.
+2. **Make the eval report HOW a candidate fails, not just how often.** A pass
+   rate hid a model returning null content behind a 7/9 score. A column
+   distinguishing "wrong answer" from "no answer" would have caught it, and
+   would have caught the whisper-scores-zero bug earlier too.
+3. **The candidate set is still unexamined in three lanes.** The image head to
+   head compared two SPEED models, flux2-klein and z-image-turbo, while the
+   quality leaders FLUX.1-dev and Qwen-Image were never run -- and mflux already
+   supports both. Kokoro exposes 54 voices and five are cached, so "the best
+   male voice" was chosen from three. STT never ran Canary-Qwen-2.5B or
+   parakeet-v3, both named in an earlier version of this list.
+4. **CLI verbs for the remaining lanes**, and a `--json` mode, since the primary
+   caller is an agent parsing output rather than a person reading it.
+5. **Smaller:** more STT scale (`evals/corpora.py --limit 200`); a fleurs-fr
+   generator so French STT is ranked the way English is; pushing to a GitHub
+   remote, deferred.
 
 ## 6. Traps this repo exists to remember
 
@@ -293,7 +396,18 @@ h3.c. Fallback only.
   once built on one.
 - `mlx_lm.server` serializes through a single queue and swaps models per
   request, so any concurrent client inserts a full model load into your timings.
-  Measurement isolation is assumed, not enforced.
+  `harness/jobs.py` now enforces one generation at a time; before it, that
+  isolation was assumed.
+- **An abandoned request stays queued.** A readiness loop that fires every
+  second and gives up after N seconds does not retry, it enqueues. 120 of them
+  once wedged all three services. Two of them were enough to make `lh svg` look
+  like a broken model when the server was simply working through my own
+  timeouts. After any tool timeout, check for survivors before concluding
+  anything: `lsof -nP -iTCP:8081 | grep -c ESTABLISHED`.
+- **A background process started in one shell is not `%1` in the next.** Twice
+  I "restarted" a server, tested, and concluded a code change had not worked --
+  while the original process still held the port. Kill by match or by port and
+  verify the port is clear before rebinding.
 - `uv tool install` picks an interpreter silently. mflux installed against
   Python 3.9 and every entry point died on `int | None`. Use `--python 3.12`;
   the tell was 2 executables instead of 37.
@@ -308,15 +422,61 @@ h3.c. Fallback only.
 - Kokoro's own default voice, `af_heart`, is not in this machine's cache. An
   absent voice fails as a mid-stream close, which reads exactly like a server
   that is down.
+- **32 GB is a hard ceiling and there is no warning before it.** An eval sweep
+  reached a 16 GB model while a 7.8 GB one was still resident and a Docker VM
+  held 7.2 GB. The machine stopped: no panic report, no jetsam entry, just a log
+  ending mid-line. `harness/memory.py` budgets against the Metal working set
+  (24 GB of 32, per `tools/h3probe`), assumes the hot-swapping server still
+  holds the outgoing model, and reserves 6 GB for everything else. An unknown
+  size WARNS rather than reading as zero, because zero means "fits easily".
+  Sweeping several >12 GB models through one server is unsafe even with it.
+- **macOS TCC denies launchd agents access to `/Volumes`.** The volume stats
+  fine and appears in `/Volumes`; `mlx_lm` then hangs forever inside
+  `os.listdir`, serving nothing and logging nothing at 0% CPU. Fixed by granting
+  Full Disk Access to `/bin/bash`, which TCC propagates to children. Verify with
+  `./scripts/launchd.sh probe`, which bootstraps a real throwaway agent --
+  checking from your shell proves nothing, because the shell has consent the
+  agent can never be prompted for.
+- **`env.sh` used to relocate the cache silently.** A reboot came back without
+  the weights drive, so it walked its candidate list, found the T7 with room,
+  and started every service against an empty cache. They listened, served
+  nothing, and said nothing. `HF_HUB_OFFLINE=1` is the only reason that was a
+  confusing hour rather than a 93 GB re-download onto the wrong disk. It now
+  remembers where it landed and refuses to move; when the old root is absent it
+  says so and points at the cable, because an unplugged drive is a cable problem.
+- **A detached drive once failed 600 tests that never touch a disk**, because a
+  module about `code` cases loaded the whole case tree and the generated `stt`
+  cases reference audio on the volume. Scope a test's data load to its own lane.
+- **An eval median is a WARM number.** The suite sequences by candidate so the
+  model load amortises across cases; a one-shot `lh` command pays a cold load
+  every time the resident model differs. Do not quote one as CLI latency.
+- **MCP SDK 2.x moved everything.** `FastMCP` is `MCPServer`, host and port are
+  `run()` kwargs rather than settings, the client names went snake_case, and
+  DNS-rebinding protection defaults ON with an EMPTY allowlist -- so binding
+  `0.0.0.0` is not enough and `Host: styx.local` is refused before it reaches a
+  tool. That guard stays on with an allowlist: "no LAN auth" is about who can
+  reach the port, and rebinding only needs someone here to open a web page.
 
 ## 7. Studio prep
 
 - `env.sh` is ready: the free-space rule replaced the categorical refusal of
   internal disks, and the candidate list now ends at `~/.cache/huggingface`.
-- Topology is undecided. `127.0.0.1` and fixed ports are hardcoded in
-  `gateway/config.yaml`, `voicemode.env` and every script, all assuming one host
-  forever. The likely shape is Studio serves, mini is a client, which needs LAN
-  auth on the gateway that does not exist.
+- Topology is settled in shape and parameterized in code. Every service binds
+  `${*_HOST:-0.0.0.0}`, so Studio-serves/mini-is-a-client is a config change
+  rather than a rewrite. There is deliberately NO LAN auth: this is a house
+  network, the models are local, and the point of the machine is that other
+  machines on it can use the GPU. (DNS-rebinding protection on the MCP server is
+  a different threat and stays on; see section 6.)
+- The launchd units port as-is, but the Full Disk Access grant is per-machine
+  and has to be redone. `./scripts/launchd.sh probe` before anything else.
+- **The 30B models are the reason to want the Studio.** Qwen3-30B-A3B and
+  Qwen3-Coder-30B-A3B are 16 GB each against a 24 GB Metal working set here, and
+  attempting one is what took this mini down. On 96 GB they are comfortable, and
+  they are the strongest local coding models available. Re-run the section 4
+  comparison there before assuming they win.
+- Re-run every lane. The whole point of the eval suite is that a hardware change
+  invalidates a ranking, and several current answers turn on speed and memory
+  rather than quality -- exactly the axes that move.
 - h3's int8 path switches on itself. Expect roughly 36.30s → 25.80s on the
   operations where it applies, and `--ssd-streaming` becomes optional rather
   than mandatory.
