@@ -74,3 +74,25 @@ def test_the_metric_direction_is_declared():
     `motion` were both ranked backwards before the registry existed."""
     from evals.core import direction_of
     assert direction_of("speaker_similarity") == "higher"
+
+
+def test_the_negative_control_is_documented_as_failing():
+    """The control that should have been run first: two different men score
+    0.827, a clone against its own reference 0.855-0.904. A 0.05 gap is not a
+    discriminator, and this module must not read as though it were one."""
+    import inspect
+
+    from harness.checks import similarity as mod
+    doc = inspect.getdoc(mod)
+    assert "0.827" in doc
+    assert "NEGATIVE CONTROL" in doc
+
+
+def test_two_different_men_score_close_to_a_correct_pair():
+    """The actual measurement, kept as a test so it cannot quietly stop being
+    true. If a future encoder separates these, this test fails and the module
+    docstring needs rewriting -- which is the point."""
+    same = similarity.compare(REF_A, REF_A)
+    different = similarity.compare(REF_A, REF_B)
+    assert different > 0.6, "two French men should not be near-orthogonal"
+    assert same - different > 0.05, "there is at least SOME separation"

@@ -626,7 +626,8 @@ of those.
    some verbs accept is worse than no flag, because the caller cannot rely on it
    without first knowing which.
 
-8. **PARTLY DONE 2026-09-07. Verify a cloned voice resembles its reference.**
+8. **ATTEMPTED AND RETRACTED 2026-09-07. Verify a cloned voice resembles its
+   reference.**
    WER measures intelligibility and says nothing about identity, so an
    intelligible clone in a completely different voice scores a perfect 0.000.
    Every French voice number in this repo was an intelligibility number.
@@ -636,25 +637,32 @@ of those.
    the tts lane whenever a candidate was given a `ref_audio`, with a declared
    metric direction.
 
-   MEASURED over the French clones:
+   AND IT DOES NOT WORK ON THIS DATA. The control that should have been run
+   first: **two genuinely different men, both real recordings, score 0.827
+   against each other**, while a clone against its own reference scores
+   0.855-0.904. A gap of ~0.05 between "same person" and "different person" is
+   inside the spread of everything else -- one wrong-speaker pair scored 0.881,
+   above a correct pair at 0.742.
 
-   | pair | range | mean |
-   |---|---|---|
-   | clone vs ITS OWN reference | 0.742 - 0.949 | 0.878 |
-   | clone vs a DIFFERENT speaker | 0.703 - 0.881 | 0.781 |
+   So the earlier reading of these numbers (clone-vs-own 0.878, clone-vs-other
+   0.781, "separation but overlapping") is RETRACTED. Without knowing what two
+   different people score, 0.878 said nothing at all.
 
-   READ THAT AS WEAK, NOT AS A RESULT. The means separate; the RANGES OVERLAP
-   badly. One wrong-speaker pair scored 0.881, higher than a correct pair at
-   0.742, so the metric cannot reliably attribute a clip to a speaker. Three
-   French men reading the same corpus is close to its hardest case.
+   THE LESSON, and it cost a set of confident numbers: **a similarity metric is
+   meaningless without a negative control.** Run the same-versus-different check
+   BEFORE quoting any figure from it.
 
-   THE HONEST LIMIT: NOBODY HAS LISTENED. A cosine between speaker embeddings
-   is a model's opinion about identity, not an ear. The metric is validated only
-   in the narrow sense that it scores a clip against itself at 1.0 and separates
-   the two shipped clips, who are two different men. Whether these clones
-   actually sound like their references is unresolved and cannot be resolved
-   from inside the suite. `./scripts/audition.sh` plays reference and clone back
-   to back; that is still the only ground truth available.
+   The code stays because the QUESTION is right. A working answer needs a
+   stronger embedding -- a WavLM x-vector or ECAPA-TDNN rather than
+   resemblyzer's small old encoder -- validated against that control first. The
+   failing control is pinned in the module docstring and in a test, so it cannot
+   quietly stop being true.
+
+   UNTIL THEN THE ONLY EVIDENCE IS A HUMAN EAR. `./scripts/audition.sh` plays
+   reference and clone back to back. Note also that French clips are the wrong
+   thing to audition for this project's actual use case, which is French-ACCENTED
+   ENGLISH: `.logs/fr-accent/` holds three clones of three different men saying
+   one English sentence, which is the comparison worth making.
 
 9. **A defect sweep of the codebase**, standing rather than one-off.
 
