@@ -384,7 +384,7 @@ of those.
 | lane | measured | verdict |
 |---|---|---|
 | web, code, extract | 5 models each | met |
-| stt | parakeet 0.6b, 1.1b, whisper | met |
+| stt | parakeet 0.6b, 1.1b, whisper | met on models, NOT on methods -- all three run through MLX; see item 5 |
 | tts | Kokoro (3 quantisations + 2 voices), Qwen3-TTS, Chatterbox (3 refs) | met |
 | image | flux2-klein, z-image-turbo | met, though both are the SPEED picks |
 | **svg** | 5 models but ONE METHOD | **not met** -- see item 3 |
@@ -443,10 +443,35 @@ of those.
    level 2 never reached the agent, and per RULE #61 it never blocks at all. The
    wording needs to match whatever (b) decides.
 
-2. **Make the eval report HOW a candidate fails, not just how often.** A pass
-   rate hid Qwen3-14B returning null content behind a 7/9 score, and hid whisper
-   scoring a perfect 0.0 by failing every case. Separate "wrong answer" from "no
-   answer". Before any further survey, or the survey inherits the blind spot.
+2. **Make the eval report HOW a candidate fails, and say when two rows may not
+   be compared at all.** Two gaps in the same instrument.
+
+   **(a) How, not just how often.** A pass rate hid Qwen3-14B returning null
+   content behind a 7/9 score, and hid whisper scoring a perfect 0.0 by failing
+   every case. Separate "wrong answer" from "no answer".
+
+   **(b) Comparability.** Borrowed from EnviousWispr
+   (`scripts/eval/model_registry.py::comparable()`), which is further along than
+   this suite: an explicit authority on whether two evaluations may be ranked
+   TOGETHER. It enumerates every axis off the run receipt -- corpus and case
+   count, rubric identity, judge identity, grading system, blinding, prompt
+   variant -- and ARGUES each field it excludes, so an exclusion can be
+   challenged rather than discovered later. Its docstring carries a RETRACTED
+   argument, left visible, after review falsified it. Their registry also states
+   "Numbers are read from score receipts, never typed."
+
+   This suite has no such notion and the absence has already cost us. Rows have
+   been ranked across runs with different sampling, different candidate sets and
+   different warm/cold conditions; a warm eval median was quoted as CLI latency;
+   and `local-mid`'s svg `ink` of 0.564 was computed over the two cases it passed
+   and printed beside numbers computed over nine. A run should carry a receipt,
+   and the report should refuse to put two incomparable rows in one table.
+
+   Also worth stealing: their `TailBenchmarkHarness` runs every candidate from
+   ONE frozen checkpoint so the comparison is PAIRED, where `--repeat` here
+   averages unpaired samples.
+
+   Both halves before any further survey, or the surveys inherit the blind spots.
 
 3. **Give the svg lane its second method.** Wire image-then-vectorize into
    `lh svg` and measure it against the LLM path on the same cases. Proven at
@@ -457,10 +482,32 @@ of those.
 4. **Widen `web` from two cases.** The best candidate scores 6/6, so the lane
    discriminates between nothing. Cheap: cases are text.
 
-5. **Second STT candidate that is not a quantisation:** parakeet-tdt-0.6b-v3
-   (2.3 GB, already downloaded). Canary-Qwen-2.5B leads the Open ASR
-   leaderboard but ships as NeMo with no MLX port, which is a porting project,
-   not an eval.
+5. **STT: two more METHODS, not just more models.** The lane compares parakeet
+   0.6b, parakeet 1.1b and whisper -- but all three run through MLX, so it has
+   measured models and never measured a runtime.
+   `~/projects/github/EnviousWispr` (Swift, 1767 commits, shipping on-device
+   dictation, GPLv3) runs the same two model families on entirely different
+   stacks:
+
+   | family | EnviousWispr | localharness |
+   |---|---|---|
+   | Whisper | **WhisperKit** (CoreML) | mlx-whisper (MLX) |
+   | Parakeet | **FluidAudio** (Swift) | mlx_audio (MLX) |
+
+   Worth saying before the work rather than after: its `ASRManager.swift` sets
+   `activeBackendType = .parakeet`, so it defaults to Parakeet with WhisperKit as
+   the alternative -- independently the same conclusion this repo reached from 40
+   clips. That is real corroboration, and it also lowers the expected value of
+   re-running the comparison.
+
+   It also ships `LanguageDetector.swift` / `LIDObservation.swift`: automatic
+   language ID. This repo treats pinning the language as a CONSTRAINT
+   (`ear=whisper:fr`); they treat it as a solved problem. Closing that would
+   remove the need for a caller to know what language it is about to hear.
+
+   Also in scope and cheap: parakeet-tdt-0.6b-v3 (2.3 GB, already downloaded).
+   Canary-Qwen-2.5B leads the Open ASR leaderboard but ships as NeMo with no MLX
+   port, which is a porting project rather than an eval.
 
 6. **Measure the three aliases with zero runs:** `local-small` (Qwen2.5-0.5B)
    and `q3-1.7b` (0.9 GB). A defined alias nobody has run is a claim nobody has
