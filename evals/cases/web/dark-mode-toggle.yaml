@@ -1,0 +1,14 @@
+# Persisting a preference is a small but real amount of state, and the failure
+# mode is a page that toggles and forgets. `localStorage` in the source is the
+# cheapest check that it was even attempted.
+id: dark-mode-toggle
+modality: web
+prompt: |
+  Write a complete self-contained HTML page with a light/dark theme toggle
+  button. Use CSS custom properties for the palette, switch by setting a
+  data-theme attribute on the root element, and remember the choice in
+  localStorage so it survives a reload. Include a heading and two paragraphs of
+  sample content. Inline CSS and JavaScript.
+assert:
+  must_contain: ["localStorage", "data-theme", "--"]
+  must_not_contain: ["https://", "http://"]

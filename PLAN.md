@@ -509,8 +509,29 @@ of those.
    few hundred bytes. Right for illustration, wrong for a 24x24 UI glyph.
    OmniSVG and StarVector remain unmeasured -- both are torch on MPS.
 
-4. **Widen `web` from two cases.** The best candidate scores 6/6, so the lane
-   discriminates between nothing. Cheap: cases are text.
+4. **DONE 2026-09-07. Widen `web` from two cases.** At two cases the best
+   candidate scored 6/6 and the lane discriminated between nothing. Three cases
+   added, each aimed at where a small model actually stops short: interactive
+   form validation (behaviour that must agree between markup and script),
+   accessible navigation (aria-expanded, landmarks, a skip link -- the
+   attributes a model omits while emitting the visible furniture), and a
+   persisted dark-mode toggle (a small amount of real state).
+
+   IT CHANGED THE ANSWER, which is the point of widening a saturated lane:
+
+   | candidate | pass | median |
+   |---|---|---|
+   | **q3-4b** | **5/5** | 21.5s |
+   | local-large | 3/5 | 19.1s |
+   | local-mid | 1/5 | 4.5s |
+
+   At two cases local-large and q3-4b were indistinguishable and speed decided.
+   At five, q3-4b wins outright at the same speed -- and the OTHER way from svg,
+   where local-large still leads. So `DEFAULT_TEXT_MODEL` split into
+   `DEFAULT_SVG_MODEL` and `DEFAULT_WEB_MODEL`: one default could only ever have
+   been wrong for one of the two lanes.
+
+   `video` stays at one case, refused on time: see the table below.
 
 5. **STT: two more METHODS, not just more models.** The lane compares parakeet
    0.6b, parakeet 1.1b and whisper -- but all three run through MLX, so it has

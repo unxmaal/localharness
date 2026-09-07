@@ -1,0 +1,14 @@
+# Interactive state, not just markup. The two original cases could be answered
+# by a model that only knows page furniture; this one needs behaviour that has
+# to be consistent between the HTML and the script.
+id: form-validation
+modality: web
+prompt: |
+  Write a complete self-contained HTML page with a signup form: email,
+  password, confirm password, and a submit button. Validate with inline
+  JavaScript on submit: the email must contain an @, the password must be at
+  least 8 characters, and the two passwords must match. Show one error message
+  per failing field, and do not submit while any field is invalid. Inline CSS.
+assert:
+  must_contain: ["<form", "<script", "addEventListener", "type=\"password\""]
+  must_not_contain: ["https://", "http://"]

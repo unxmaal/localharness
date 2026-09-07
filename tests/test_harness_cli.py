@@ -525,3 +525,14 @@ def test_a_trace_failure_is_reported_not_raised(spy, tmp_path, monkeypatch):
 def test_an_unknown_method_is_rejected_by_the_parser(tmp_path):
     with pytest.raises(SystemExit):
         cli.main(["svg", "a gear", "--method", "magic"])
+
+
+def test_svg_and_web_have_their_own_defaults():
+    """They shared one until the web lane was widened past saturation. At two
+    cases local-large and q3-4b both scored 6/6 and speed decided; at five
+    cases q3-4b wins 5/5 to 3/5 while svg still goes the other way. One
+    'DEFAULT_TEXT_MODEL' could only ever be wrong for one of them."""
+    p = cli.build_parser()
+    assert p.parse_args(["svg", "x"]).model == cli.DEFAULT_SVG_MODEL
+    assert p.parse_args(["web", "x"]).model == cli.DEFAULT_WEB_MODEL
+    assert cli.DEFAULT_SVG_MODEL != cli.DEFAULT_WEB_MODEL

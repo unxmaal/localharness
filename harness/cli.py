@@ -44,7 +44,13 @@ DEFAULT_VIDEO_ENGINE = "h3"
 #
 #   lane     winner       runner-up            why
 #   svg      local-large  q3-14b               7/9 both; 4.7s vs 10.0s
-#   web      local-large  q3-14b               6/6 both; 21s vs 61s
+#   web      q3-4b        local-large          5/5 vs 3/5 at 21.5s vs 19.1s
+#
+# svg and web had ONE default until the web lane was widened from two cases to
+# five. At two cases local-large and q3-4b both scored 6/6, the lane
+# discriminated nothing, and speed decided. At five they separate cleanly and
+# they separate the OTHER WAY from svg -- so a single default could only ever
+# have been wrong for one of the two lanes.
 #
 # q3-14b scores marginally better ink on both and is NOT used, because it is a
 # hybrid THINKING model: it answers "reply with exactly: OK" in 152 completion
@@ -61,7 +67,8 @@ DEFAULT_VIDEO_ENGINE = "h3"
 #
 # Qwen2.5-1.5B (local-mid) was the default for svg and web and scored 2/9 and
 # 3/6. That was the single worst consequence of never having compared anything.
-DEFAULT_TEXT_MODEL = "local-large"  # svg, web
+DEFAULT_SVG_MODEL = "local-large"
+DEFAULT_WEB_MODEL = "q3-4b"
 DEFAULT_CODE_MODEL = "q3-4b"
 DEFAULT_EXTRACT_MODEL = "local-large"
 OUTDIR = Path("out")
@@ -358,7 +365,9 @@ def build_parser() -> argparse.ArgumentParser:
         p = sub.add_parser(name, help=help_)
         p.add_argument("prompt")
         p.add_argument("-o", "--output")
-        p.add_argument("-m", "--model", default=DEFAULT_TEXT_MODEL,
+        p.add_argument("-m", "--model",
+                       default=DEFAULT_SVG_MODEL if name == "svg"
+                       else DEFAULT_WEB_MODEL,
                        help="gateway alias")
         p.add_argument("--gateway", default=completion.DEFAULT_GATEWAY)
         p.set_defaults(func=func)

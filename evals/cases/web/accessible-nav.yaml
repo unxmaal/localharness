@@ -1,0 +1,14 @@
+# Accessibility is where a small model reliably stops short: it emits the
+# visible furniture and omits the attributes that make it usable, which the
+# structural checks alone would pass.
+id: accessible-nav
+modality: web
+prompt: |
+  Write a complete self-contained HTML page with a top navigation bar of four
+  links and a mobile hamburger toggle driven by inline JavaScript. The toggle
+  button must have an aria-label and aria-expanded that updates when it opens
+  and closes, the nav must be a <nav> landmark, and there must be a skip link
+  to the main content. Inline CSS.
+assert:
+  must_contain: ["<nav", "aria-expanded", "aria-label", "skip"]
+  must_not_contain: ["https://", "http://"]
