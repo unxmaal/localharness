@@ -362,78 +362,91 @@ h3.c. Fallback only.
 
 ## 5. What is next, in order
 
-Everything the previous list held is done: prompt adherence, STT ranked on its
-own, more voices, HTML rasterization, launchd, MCP. What follows is the full set
-of gaps a status review on 2026-09-07 turned up, in execution order.
+### The bar
 
-**This is a list to complete, not a menu to choose from.** Ordering is about
-sequence, not priority: items 1 and 7 come early because they change how
-everything after them is measured. Nothing here is optional, and nothing gets
-quietly dropped for being further down.
+**Best effort, proven with real tests.** Two conditions, and they pull against
+each other on purpose:
 
-### Enforcement and instruments first
+- **Every lane must have at least two models or methods actually measured.** One
+  candidate is not a comparison, and a lane with one candidate has never been
+  asked whether it should exist in its current form.
+- **Do not spend hours on a job this machine makes slow.** A 32 GB ceiling and a
+  40-minute video run are facts, not obstacles to push through. Where a
+  candidate is refused for size or time, the refusal is recorded with the number
+  that caused it, so it reads as a measurement rather than an omission.
 
-1. **Fix the mcm-engine PreToolUse hook.** It is registered, runs in 0.33s
-   against a 2s timeout, and counts correctly -- and writes its nudge to stderr
-   with **exit 0**, which Claude Code treats as approval and never shows the
-   model. Zero nudges reached the agent across several hundred Bash calls in a
-   full session, so the "blocked after 20 edits" guarantee has never once fired.
-   Exit 2 instead. Also: the nudge text names `mcp__knowledge__search` when the
-   tool is `mcp__mcm-engine__search`, and `.claude/knowledge.db` (last written
-   2026-07-04, no nudge tables) is not where the counters persist. Not this
-   repo's code, but this repo's contract depends on it.
+Above both: **the codebase should be defect free.** A ranking produced by a
+broken instrument is worse than no ranking, and this repo has now shipped three
+of those.
+
+### Where each lane stands against "at least two"
+
+| lane | measured | verdict |
+|---|---|---|
+| web, code, extract | 5 models each | met |
+| stt | parakeet 0.6b, 1.1b, whisper | met |
+| tts | Kokoro (3 quantisations + 2 voices), Qwen3-TTS, Chatterbox (3 refs) | met |
+| image | flux2-klein, z-image-turbo | met, though both are the SPEED picks |
+| **svg** | 5 models but ONE METHOD | **not met** -- see item 3 |
+| **video** | h3.c alone | **not met**, and blocked: see below |
+
+### The work, in order
+
+1. **Fix the mcm-engine PreToolUse hook.** Registered, runs in 0.33s against a
+   2s timeout, counts correctly -- and writes its nudge to stderr with **exit
+   0**, which Claude Code treats as approval and never shows the model. Zero
+   nudges reached the agent across several hundred Bash calls in a full session,
+   so the "blocked after 20 edits" guarantee has never once fired. Exit 2
+   instead. Also: the nudge names `mcp__knowledge__search` when the tool is
+   `mcp__mcm-engine__search`, and the counters are not persisting in
+   `.claude/knowledge.db` (last written 2026-07-04, no nudge tables). First,
+   because it is the thing meant to catch the agent drifting.
 
 2. **Make the eval report HOW a candidate fails, not just how often.** A pass
    rate hid Qwen3-14B returning null content behind a 7/9 score, and hid whisper
-   scoring a perfect 0.0 by failing every case. A column separating "wrong
-   answer" from "no answer" catches both. **Do this before the surveys below**,
-   or they inherit the same blind spot.
+   scoring a perfect 0.0 by failing every case. Separate "wrong answer" from "no
+   answer". Before any further survey, or the survey inherits the blind spot.
 
-### Fix the lane that does not work
+3. **Give the svg lane its second method.** Wire image-then-vectorize into
+   `lh svg` and measure it against the LLM path on the same cases. Proven at
+   0.05s producing a recognisable frog, where five language models produced
+   coloured blobs. This is the only lane where the winning method is currently
+   not implemented.
 
-3. **Wire image-then-vectorize into `lh svg`.** Section 4 settles that an LLM is
-   the wrong tool and that vtracer turns a generated raster into real paths in
-   0.05s. It is proven and not wired up. Measure it against OmniSVG and
-   StarVector in the same run -- those are the only other real candidates and
-   neither has been tried.
+4. **Widen `web` from two cases.** The best candidate scores 6/6, so the lane
+   discriminates between nothing. Cheap: cases are text.
 
-### Make the small lanes able to measure anything
+5. **Second STT candidate that is not a quantisation:** parakeet-tdt-0.6b-v3
+   (2.3 GB, already downloaded). Canary-Qwen-2.5B leads the Open ASR
+   leaderboard but ships as NeMo with no MLX port, which is a porting project,
+   not an eval.
 
-4. **Widen `video` (1 case) and `web` (2 cases).** One case cannot rank; it is a
-   smoke test wearing a lane's clothes. `web` is worse: the best candidate scores
-   6/6, so the lane no longer discriminates between anything.
+6. **Measure the three aliases with zero runs:** `local-small` (Qwen2.5-0.5B)
+   and `q3-1.7b` (0.9 GB). A defined alias nobody has run is a claim nobody has
+   checked. `q3-coder` is 16 GB and refused; see below.
 
-### Survey the candidate sets that were never surveyed
+7. **`--json` on every verb.** The primary caller is an agent parsing stdout.
 
-The Qwen2.5 audit fixed the text lane. The same defect -- choosing from whatever
-was already installed -- is still live in three more.
+8. **Verify a cloned voice resembles its reference.** WER measures
+   intelligibility and says nothing about identity, which is the whole point of
+   cloning. A speaker-embedding similarity (resemblyzer, WavLM x-vector) is a
+   small model and a real test; `./scripts/audition.sh` is the human fallback.
 
-5. **image:** the head to head compared flux2-klein and z-image-turbo, both of
-   which are the SPEED picks. FLUX.1-dev and Qwen-Image are the quality leaders
-   and mflux already supports both. Never run.
-6. **tts voices:** mlx-audio exposes 54 Kokoro voices; five are cached. "The best
-   male voice" was chosen from three.
-7. **stt:** Canary-Qwen-2.5B and parakeet-tdt-0.6b-v3, both named in an earlier
-   version of this list and never run.
-8. **The three aliases with zero measurements:** `local-small`, `q3-1.7b`,
-   `q3-coder`. A defined alias nobody has run is a claim nobody has checked.
+9. **A defect sweep of the codebase**, standing rather than one-off.
 
-### Product surface
+### Refused, with the number that refused it
 
-9. **`--json` output on every verb.** The primary caller is an agent parsing
-   stdout, not a person reading it.
-10. **Verify a cloned voice resembles its reference.** WER measures
-    intelligibility and says nothing about identity, which is the entire point of
-    cloning. Needs a speaker-embedding metric (resemblyzer, a WavLM x-vector) or
-    a human listen via `./scripts/audition.sh`.
+Not deferred, not forgotten -- measured against this machine and found not worth
+the hours. Revisit every one on the Studio.
 
-### Blocked on things outside this repo
-
-11. **Exercise MCP from a genuine second machine.** Only ever driven by a client
-    on this host. Needs Rachel's box.
-12. **The quality ceilings.** Best local `code` is 6/9; `svg` is structurally
-    valid and semantically empty. These are model limits, and the 30B candidates
-    that might move them are 16 GB against a 24 GB Metal working set. Studio.
+| item | number |
+|---|---|
+| Qwen-Image-2512-4bit (image quality leader) | **24.1 GB** vs an 18 GB safe budget |
+| Qwen3-30B-A3B, Qwen3-Coder-30B-A3B | **16 GB** each; attempting one crashed the machine |
+| A second video engine | **40 min** per generation here; the lane costs hours per candidate |
+| The other 49 Kokoro voices | Eric's call: the lane already has enough to rank |
+| Canary-Qwen-2.5B | NeMo format, no MLX port |
+| MCP from a real second machine | Needs the second machine |
 
 ## 6. Traps this repo exists to remember
 
