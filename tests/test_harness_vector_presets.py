@@ -1,10 +1,16 @@
 """Issue #4: a traced icon was 28KB with nothing reporting the size."""
+import shutil
 from pathlib import Path
 
 import pytest
 
 from evals.run import TRACE_PREFIXES, kind_of, modality_of
 from harness import vector
+
+# The ink check shells out to rsvg-convert. Without the guard these fail on a
+# machine that simply does not have it, which reads as a code defect.
+needs_rsvg = pytest.mark.skipif(shutil.which("rsvg-convert") is None,
+                                reason="needs rsvg-convert (brew install librsvg)")
 from harness.vector import TRACE_PRESETS, VectorError, trace
 
 
@@ -38,6 +44,7 @@ def test_the_icon_preset_is_substantially_smaller(src):
     assert len(small.encode()) < len(big.encode()) * 0.7
 
 
+@needs_rsvg
 def test_the_icon_preset_still_draws_the_picture(src):
     """Smaller is easy if you are allowed to draw nothing."""
     from harness.checks import render

@@ -1,0 +1,63 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    # Apple Silicon, and standard runners are free for public repos. Larger
+    # runners are NOT free, so this label must stay standard.
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refuse to run on x86
+        # mlx and mflux are Apple Silicon only. If macos-latest ever moves back
+        # to Intel, fail here saying so rather than 400 lines down in a resolve
+        # error.
+        run: |
+          arch="$(uname -m)"
+          echo "runner arch: $arch"
+          [ "$arch" = "arm64" ] || {
+            echo "::error::this suite needs Apple Silicon; runner is $arch"
+            exit 1
+          }
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Tools make check needs
+        # shellcheck: `make lint` shells out to it and exits 127 without it.
+        # librsvg: without it the whole SVG render module skips, and that is
+        # the checker that catches well-formed markup which draws nothing.
+        run: brew install shellcheck librsvg
+
+      - run: uv sync --python 3.12
+
+      - name: make check
+        # The same command a person runs locally. CI running something else is
+        # how a repo gets a green badge and a broken checkout.
+        run: set -o pipefail && make check 2>&1 | tee /tmp/check.log
+
+      - name: What did not run
+        # A test that silently skips reports green for something it never
+        # checked. Say so in the job summary, every run, pass or fail.
+        if: always()
+        run: |
+          {
+            echo "### Skipped on this runner"
+            echo
+            echo '```'
+            grep -E '^SKIPPED' /tmp/check.log || echo 'nothing skipped'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

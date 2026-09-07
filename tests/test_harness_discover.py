@@ -286,7 +286,16 @@ def test_methods_lists_the_workflows_that_exist_not_a_stale_pair():
 def test_a_broken_stage_carries_its_reason_and_is_not_a_gap():
     """BROKEN is a third state. `present` is about installation and `measured`
     is about history; upscale-seedvr2 is installed, HAS been measured (0/3,
-    because it crashes), and must not read as either fine or absent."""
+    because it crashes), and must not read as either fine or absent.
+
+    Needs mflux: the refusal is pinned to the versions it was measured broken
+    against, so with mflux absent there is no version to match and nothing is
+    blocked. That is the guard behaving correctly, not a failure.
+    """
+    from harness.stages import tool_versions
+    tool_versions.cache_clear()
+    if not tool_versions().get("mflux"):
+        pytest.skip("mflux is not installed here")
     ms = {c.name: c for c in discover.methods()}
     seed = ms["upscale-seedvr2"]
     assert seed.blocked and "#27" in seed.blocked

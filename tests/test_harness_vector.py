@@ -8,11 +8,17 @@ model draws the frog in 54s and vtracer turns it into real paths in 0.05s.
 This module is that second step. It is deliberately thin: the value is the
 PIPELINE, and vtracer is someone else's Rust that already works.
 """
+import shutil
 from pathlib import Path
 
 import pytest
 
 from harness import vector
+
+# The ink check shells out to rsvg-convert. Without the guard these fail on a
+# machine that simply does not have it, which reads as a code defect.
+needs_rsvg = pytest.mark.skipif(shutil.which("rsvg-convert") is None,
+                                reason="needs rsvg-convert (brew install librsvg)")
 
 
 def png(path, size=64):
@@ -31,6 +37,7 @@ def test_a_raster_becomes_an_svg_document(tmp_path):
     assert "<path" in out
 
 
+@needs_rsvg
 def test_the_svg_actually_draws_something(tmp_path):
     """A vectorizer that returns a well-formed empty document is the same
     failure the language models had."""
@@ -38,6 +45,7 @@ def test_the_svg_actually_draws_something(tmp_path):
     assert render.ink(vector.trace(png(tmp_path / "a.png"))) > 0.05
 
 
+@needs_rsvg
 def test_a_blank_image_is_reported_rather_than_returned_empty(tmp_path):
     """A uniform image traces to nothing. Returning that as a success would
     hand the caller an empty document with a clean exit."""
