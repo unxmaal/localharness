@@ -33,6 +33,7 @@ from evals.core import (MODALITIES, Case, Receipt, comparable, direction_of,
                         load_cases, summarize)
 from evals.environment import capture
 from evals.runners.process import ProcessRunner
+from evals.runners.chain import ChainRunner
 from evals.runners.repair import RepairRunner
 from evals.runners.speech import SpeechRunner
 from evals.runners.trace import TraceRunner
@@ -52,6 +53,9 @@ TRACE_PREFIX = "trace"
 #: `repair:local-large` are different products. See evals/runners/repair.py.
 REPAIR_PREFIX = "repair"
 REPAIR_OPTIONS = {"attempts"}
+#: Two-stage image workflows, named for their second stage. See
+#: evals/runners/chain.py -- this is the ComfyUI vocabulary mflux already ships.
+from evals.runners.chain import STAGES as CHAIN_STAGES  # noqa: E402
 TTS_OPTIONS = {"voice", "ref_audio", "lang_code", "ear"}
 STT_OPTIONS = {"backend", "language"}
 
@@ -69,6 +73,8 @@ def kind_of(candidate: str) -> str:
         return TRACE_PREFIX
     if head == REPAIR_PREFIX:
         return REPAIR_PREFIX
+    if head in CHAIN_STAGES:
+        return "chain"
     return "gateway"
 
 
@@ -86,6 +92,8 @@ def modality_of(candidate: str) -> str | None:
         # A text candidate wearing a loop: it runs every text lane, same as
         # the model it wraps.
         return None
+    if kind == "chain":
+        return "image"
     if kind == "process":
         engine = engine_for(candidate)
         return engine.modality if engine else None
@@ -216,6 +224,18 @@ def build_runner(candidate: str, gateway: str, outdir: Path | None,
                              "repair:local-large")
         return RepairRunner(gateway, model.strip(),
                             attempts=int(options.get("attempts", 3)))
+    if kind == "chain":
+        stage, _, spec = candidate.partition(":")
+        if not spec.strip():
+            raise SystemExit(f"{candidate} needs a base engine, e.g. "
+                             f"{stage}:mflux:flux2-klein-4b")
+        try:
+            engine = resolve(spec.strip())
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        if outdir is None:
+            raise SystemExit(f"{candidate} writes images; pass --out")
+        return ChainRunner(engine, stage, outdir)
     if kind == TRACE_PREFIX:
         spec = candidate.partition(":")[2].strip()
         if not spec:

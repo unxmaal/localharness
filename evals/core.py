@@ -58,14 +58,23 @@ class Case:
     source: Path | None = None
 
 
-def _check_image(artifact, case: Case, adherence: str | None = None) -> CheckResult:
+def _check_image(artifact, case: Case, adherence: str | None = None,
+                 expect_size: tuple | None = None) -> CheckResult:
     """Honouring the requested size IS the check, so it reads from params.
 
     Width and height used to live under `assert:` and do both jobs at once,
     which meant the engine was reading the assertion block.
     """
     p = case.params
-    expect = (p["width"], p["height"]) if p.get("width") and p.get("height") else None
+    # A WORKFLOW may legitimately change the resolution: an upscaler produces
+    # a different size than the case asked to be generated, and failed every
+    # case for doing exactly its job. The case says what to GENERATE; a runner
+    # that scales says what it INTENDED.
+    if expect_size:
+        expect = tuple(expect_size)
+    else:
+        expect = ((p["width"], p["height"])
+                  if p.get("width") and p.get("height") else None)
     r = image_check.check(artifact, expect=expect)
     # Pixels first, always. "no text found" is a true and useless diagnosis for
     # a uniform grey square, and it would send you looking at the wrong thing.
@@ -193,7 +202,8 @@ FPS = 24
 
 def _check_video(artifact, case: Case) -> CheckResult:
     p = case.params
-    expect = (p["width"], p["height"]) if p.get("width") and p.get("height") else None
+    expect = ((p["width"], p["height"])
+              if p.get("width") and p.get("height") else None)
     frames = p.get("frames")
     if frames is None and p.get("seconds"):
         frames = int(p["seconds"]) * FPS
@@ -225,7 +235,8 @@ def _check_web(artifact, case: Case) -> CheckResult:
 CHECKERS = {
     "svg": lambda a, c, **kw: _check_svg(a, c),
     "web": lambda a, c, **kw: _check_web(a, c),
-    "image": lambda a, c, **kw: _check_image(a, c, kw.get("adherence")),
+    "image": lambda a, c, **kw: _check_image(a, c, kw.get("adherence"),
+                                            kw.get("expect_size")),
     "video": lambda a, c, **kw: _check_video(a, c),
     "code": lambda a, c, **kw: _check_code(a, c),
     "extract": lambda a, c, **kw: _check_extract(a, c),
@@ -344,6 +355,12 @@ _ERROR_MARKS = ("timed out", "timeout", "unreachable", "not installed",
                 "[metal]", "out of memory", "traceback")
 
 
+#: A subprocess that exits NON-ZERO crashed; it did not produce a bad
+#: artifact. `exited 0 but left no output` is deliberately excluded by the
+#: digit class, because that tool ran fine and simply wrote nothing.
+_NONZERO_EXIT = re.compile(r"exited [1-9]")
+
+
 def failure_kind(detail: str) -> str:
     """"" | "wrong" | "empty" | "error" for one failure's detail line.
 
@@ -357,7 +374,7 @@ def failure_kind(detail: str) -> str:
     low = detail.lower()
     # Order matters: an instrument failure often also produced nothing, and the
     # broken instrument is the more useful of the two readings.
-    if any(m in low for m in _ERROR_MARKS):
+    if _NONZERO_EXIT.search(low) or any(m in low for m in _ERROR_MARKS):
         return "error"
     if any(m in low for m in _EMPTY_MARKS):
         return "empty"

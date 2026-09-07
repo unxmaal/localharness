@@ -1059,3 +1059,44 @@ def test_a_neutral_metric_is_not_used_to_rank(capsys):
     # Ranked on ink, so the terse one leads despite writing far less.
     assert out.index("terse") < out.index("windy")
     assert "completion_tokens" in out, "still reported, just not ranked on"
+
+
+def test_a_scaling_workflow_can_declare_the_size_it_meant_to_produce():
+    """The image check asserts the output matches the case's width/height. An
+    upscaler deliberately produces a different size, so it failed every case
+    for doing its job -- the same shape as chart-bars asserting <text>, which
+    a vectorizer can never emit. The case says what to GENERATE; a workflow
+    that scales says what it INTENDED."""
+    from pathlib import Path
+    import tempfile
+    from PIL import Image, ImageDraw
+    from evals.core import score
+
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "big.png"
+        im = Image.new("RGB", (128, 128), "white")
+        ImageDraw.Draw(im).ellipse((8, 8, 120, 120), fill="green")
+        im.save(p)
+        c = Case(id="fox", modality="image", prompt="a fox",
+                 params={"width": 64, "height": 64})
+        # Without the override the case's 64x64 is the expectation and this
+        # fails for being the wrong size.
+        assert not score(c, p).passed
+        assert score(c, p, expect_size=(128, 128)).passed
+
+
+def test_a_tool_exiting_non_zero_is_an_instrument_failure():
+    """Third time this classifier has been too narrow. A subprocess that exits
+    non-zero CRASHED; it did not produce a bad artifact. Counting it as a wrong
+    answer scores a broken tool against the model's quality."""
+    from evals.core import failure_kind
+    assert failure_kind("upscale-seedvr2 (stage 2) exited 1: are supported: "
+                        "repeat(array, repeats: int, axis)") == "error"
+    assert failure_kind("mflux/x exited 3: something") == "error"
+
+
+def test_exit_zero_with_no_output_is_still_empty_not_error():
+    """The tool ran fine and produced nothing, which is a different thing and
+    the ordering has to keep them apart."""
+    from evals.core import failure_kind
+    assert failure_kind("mflux exited 0 but left no output at /tmp/x.png") == "empty"
