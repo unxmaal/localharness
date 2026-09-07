@@ -45,12 +45,14 @@ def test_engines_come_from_the_installed_entry_points(tmp_path):
     for n in ("mflux-generate-flux2", "mflux-generate-qwen", "mflux-concept",
               "python", "hf"):
         (b / n).touch()
-    names = {c.name for c in discover.image_engines(b)}
-    assert "mflux-generate-flux2" in names
-    assert "mflux-generate-qwen" in names
-    # Not a generator; listing it would invite someone to evaluate it.
-    assert "mflux-concept" not in names
-    assert "python" not in names
+    found = {c.name: c for c in discover.image_engines(b)}
+    assert found["mflux-generate-flux2"].kind == "engine"
+    assert found["mflux-generate-qwen"].kind == "engine"
+    # `concept` produces an image from a reference rather than a prompt, so it
+    # is a workflow primitive rather than an engine. It used to be dropped
+    # entirely, which hid it.
+    assert found["mflux-concept"].kind == "workflow"
+    assert "python" not in found
 
 
 def test_external_tools_report_whether_they_are_present(monkeypatch):
@@ -110,3 +112,164 @@ def test_receipts_are_found_at_any_depth(tmp_path, monkeypatch):
         {"summary": {"local-large": {"total": 3}}}))
     monkeypatch.setattr(discover.paths, "runs", lambda: tmp_path / "runs")
     assert discover.measured() == {"parakeet-tdt-0.6b-v2", "local-large"}
+
+
+# ---- looking outward -------------------------------------------------------
+# Everything this project got wrong about candidate selection was the world
+# moving while nothing here noticed: Qwen2.5 served four lanes for four months
+# while Qwen3 shipped, and ComfyUI was dismissed in a paragraph.
+#
+# This asks REGISTRIES, not a language model. A model would produce plausible
+# names for things that do not exist, and this repo has a rule about not
+# asserting specifics from pretrained memory. An API answer is a fact with a
+# URL and a date on it.
+
+def test_external_candidates_come_from_a_registry_not_a_guess(monkeypatch):
+    calls = []
+
+    def fake_get(url, params=None, timeout=None):
+        calls.append((url, params))
+        class R:
+            status_code = 200
+            def json(self):
+                return [{"id": "mlx-community/Some-New-Model-4bit",
+                         "downloads": 9999, "lastModified": "2026-09-01"}]
+            def raise_for_status(self): pass
+        return R()
+
+    monkeypatch.setattr(discover.httpx, "get", fake_get)
+    out = discover.external("text", limit=5)
+    assert calls, "nothing was queried"
+    assert "huggingface.co" in calls[0][0]
+    assert out[0].name == "mlx-community/Some-New-Model-4bit"
+    assert "huggingface.co" in out[0].source, "a claim must be checkable"
+
+
+def test_an_external_candidate_says_how_to_measure_it(monkeypatch):
+    monkeypatch.setattr(discover, "_hf_models",
+                        lambda q, limit: [{"id": "mlx-community/X",
+                                           "downloads": 1, "lastModified": "2026-09-01"}])
+    for c in discover.external("stt", limit=3):
+        assert c.how and "candidates" in c.how
+
+
+def test_what_is_already_measured_is_not_proposed(monkeypatch):
+    monkeypatch.setattr(discover, "_hf_models",
+                        lambda q, limit: [
+                            {"id": "mlx-community/parakeet-tdt-0.6b-v2",
+                             "downloads": 1, "lastModified": "2026-01-01"},
+                            {"id": "mlx-community/brand-new",
+                             "downloads": 1, "lastModified": "2026-09-01"}])
+    monkeypatch.setattr(discover, "measured",
+                        lambda: {"parakeet-tdt-0.6b-v2"})
+    names = [c.name for c in discover.external("stt", limit=5)]
+    assert "mlx-community/brand-new" in names
+    assert not any("parakeet-tdt-0.6b-v2" in n for n in names)
+
+
+def test_being_offline_is_a_message_not_a_crash(monkeypatch):
+    def boom(*a, **k):
+        raise discover.httpx.ConnectError("no network")
+    monkeypatch.setattr(discover.httpx, "get", boom)
+    out = discover.external("text", limit=3)
+    assert out == [], "offline discovery returns nothing rather than raising"
+
+
+def test_results_are_dated_so_staleness_is_visible(monkeypatch):
+    monkeypatch.setattr(discover, "_hf_models",
+                        lambda q, limit: [{"id": "mlx-community/X",
+                                           "downloads": 1,
+                                           "lastModified": "2026-09-01"}])
+    c = discover.external("text", limit=1)[0]
+    assert "2026-09-01" in c.note, "an undated proposal cannot be judged stale"
+
+
+def test_an_unknown_lane_is_refused_rather_than_queried_blindly():
+    with pytest.raises(ValueError) as e:
+        discover.external("telepathy")
+    assert "telepathy" in str(e.value)
+
+
+def test_measured_matching_does_not_fire_on_a_substring(monkeypatch):
+    """A capability named `X` was treated as measured because some candidate
+    row was called `Chatterbox-Multilingual-MLX-v2-Q8` and "X" appears inside
+    "MLX". Substring matching silently marks things done that never ran, which
+    is the direction that hides work rather than duplicating it."""
+    monkeypatch.setattr(discover, "measured",
+                        lambda: {"Chatterbox-Multilingual-MLX-v2-Q8/ref-1"})
+    caps = [discover.Capability("model", "mlx-community/X", "tts", "s", "how")]
+    assert discover.gaps(caps), "X was wrongly considered measured"
+
+
+def test_a_real_match_still_counts(monkeypatch):
+    monkeypatch.setattr(discover, "measured", lambda: {"parakeet-tdt-0.6b-v2"})
+    caps = [discover.Capability("model", "mlx-community/parakeet-tdt-0.6b-v2",
+                                "stt", "s", "how")]
+    assert not discover.gaps(caps)
+
+
+def test_a_workflow_prefix_still_matches_its_model(monkeypatch):
+    """`trace/mflux/flux2-klein-4b-q8` in a results table means the engine
+    behind it has been run."""
+    monkeypatch.setattr(discover, "measured",
+                        lambda: {"trace/mflux/flux2-klein-4b-q8"})
+    caps = [discover.Capability("engine", "flux2-klein-4b-q8", "image", "s", "how")]
+    assert not discover.gaps(caps)
+
+
+def test_the_registry_is_asked_for_the_fields_we_print(monkeypatch):
+    """The list endpoint omits lastModified unless asked, so every proposal
+    printed "last modified ;" with a blank date -- and an undated proposal is
+    exactly what this was built to avoid."""
+    seen = {}
+
+    def fake_get(url, params=None, timeout=None):
+        seen.update(params or {})
+        class R:
+            status_code = 200
+            def json(self): return []
+            def raise_for_status(self): pass
+        return R()
+
+    monkeypatch.setattr(discover.httpx, "get", fake_get)
+    discover._hf_models("q", 3)
+    assert seen.get("full") or seen.get("expand"), "did not ask for the detail"
+
+
+def test_a_missing_date_says_unknown_rather_than_nothing(monkeypatch):
+    monkeypatch.setattr(discover, "_hf_models",
+                        lambda q, limit: [{"id": "mlx-community/X",
+                                           "downloads": 5}])
+    monkeypatch.setattr(discover, "measured", lambda: set())
+    assert "unknown" in discover.external("text", limit=1)[0].note.lower()
+
+
+# ---- workflow primitives must not be hidden --------------------------------
+# The first version dropped every entry point needing an input image, because
+# they cannot answer a plain-prompt image case. That silently hid the most
+# important gap in the project: mflux ships controlnet, depth, fill, redux,
+# in-context, kontext and two upscalers -- the whole ComfyUI-style workflow
+# vocabulary, natively in MLX -- and NONE of them has been measured.
+
+def test_workflow_primitives_are_reported_not_dropped(tmp_path):
+    b = tmp_path / "bin"
+    b.mkdir()
+    for n in ("mflux-generate-flux2", "mflux-generate-controlnet",
+              "mflux-upscale-seedvr2", "mflux-generate-depth", "mflux-info"):
+        (b / n).touch()
+    found = {c.name: c for c in discover.image_engines(b)}
+    assert "mflux-generate-flux2" in found
+    assert found["mflux-generate-flux2"].kind == "engine"
+    # Present, and marked as a different KIND so nobody drops one into the
+    # plain image lane and reports a failure that means nothing.
+    assert found["mflux-generate-controlnet"].kind == "workflow"
+    assert found["mflux-upscale-seedvr2"].kind == "workflow"
+    assert "mflux-info" not in found
+
+
+def test_a_workflow_primitive_says_what_it_needs(tmp_path):
+    b = tmp_path / "bin"
+    b.mkdir()
+    (b / "mflux-generate-controlnet").touch()
+    c = discover.image_engines(b)[0]
+    assert "input" in c.note.lower() or "runner" in c.note.lower()

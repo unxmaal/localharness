@@ -387,10 +387,34 @@ wants a HuggingFace processor the mlx-community repo does not ship.
 tuning flags. Still installed, with no models. llama.cpp remains a second lane
 for GGUF-only architectures MLX has not ported; not installed.
 
-**ComfyUI is not a lane.** `ComfyUI_MiniMax_H3_Extender` has a Motion Context
-feature the hosted API does not expose, carrying a clip's sampled latent forward
-rather than a last-frame still. It is a ComfyUI plugin and does not compose with
-h3.c. Fallback only.
+**ComfyUI: the reason to want it is already installed.** (Issue #20.)
+
+The previous version of this paragraph rejected ComfyUI because one plugin,
+`ComfyUI_MiniMax_H3_Extender`, did not compose with h3.c. That is a
+compatibility note about a single extension, dressed as a decision about an
+ecosystem, and nothing was measured.
+
+Reopened and answered properly. **The reason to want ComfyUI is workflows, not
+models** -- ControlNet, depth, inpainting, reference and in-context
+conditioning, upscale and refiner passes, LoRA. And mflux already ships every
+one of them, natively in MLX:
+
+    generate-controlnet   generate-depth        generate-fill
+    generate-redux        generate-kontext      generate-in-context
+    generate-qwen-edit    generate-flux2-edit   upscale-seedvr2
+    upscale-controlnet    concept-from-image    lora-library / train
+
+**Nineteen workflow primitives, and not one has ever been measured here.**
+`lh discover --lane image --gap` prints them. That is the real gap, and it was
+invisible for months while the argument was about ComfyUI.
+
+What ComfyUI would ADD on this machine is a torch/MPS runtime and a server with
+a UI. Published figures put MPS 3-5x behind CUDA and MLX 50-70% ahead of MPS on
+Apple Silicon, which is the wrong direction on a machine chosen for MLX, and it
+is a server where this project is a CLI whose primary caller is an agent.
+
+So: not adopted, and now for a reason that survives contact with the question.
+Reopen if a workflow turns out to exist there and nowhere in mflux.
 
 ## 5. What is next, in order
 
