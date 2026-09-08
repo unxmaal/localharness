@@ -563,10 +563,12 @@ def _report_inspect(a) -> int:
                 ms.record(store, ms.Seen(
                     name=model_id, source="inspect", kind="weights",
                     url=f"https://huggingface.co/{model_id}",
-                    resolved=model_id, why=f"named by {repo}"))
+                    resolved=model_id, lane=fit.lanes.get(model_id, ""),
+                    why=f"named by {repo}"))
                 ms.link(store, repo, model_id, "needs")
                 ms.decide(store, model_id, "queued", tier="inspect",
-                          detail=f"bytes={size} named by {repo}")
+                          detail=f"bytes={size} lane={fit.lanes.get(model_id) or '-'} "
+                                 f"named by {repo}")
     finally:
         store.close()
     if getattr(a, "judge", False):
@@ -604,13 +606,24 @@ def cmd_fetch(a) -> int:
             print("nothing queued. `lh discover --inspect` fills the queue.")
             return 0
         if not a.run:
-            print(f"\n{len(rows)} queued, {fetching.free_bytes() / fetching.GIB:.0f} "
-                  f"GiB free. --run to start, one at a time. The score is the "
-                  f"judged score of the repo that named the weight.")
-            for r in rows[:20]:
+            testable = [r for r in rows if r.get("lane")]
+            orphans = [r for r in rows if not r.get("lane")]
+            print(f"\n{len(testable)} queued, "
+                  f"{fetching.free_bytes() / fetching.GIB:.0f} GiB free. "
+                  f"--run to start, one at a time. The score is the judged "
+                  f"score of the repo that named the weight.")
+            for r in testable[:20]:
                 size = fetching.size_of(r)
                 gib = f"{size / fetching.GIB:5.1f} GiB" if size else "  no size"
-                print(f"  {r['score'] or 0:>4.0f}  {gib}  {r['resolved'] or r['name']}")
+                print(f"  {r['score'] or 0:>4.0f}  {gib}  {r['lane']:6s} "
+                      f"{r['resolved'] or r['name']}")
+            if orphans:
+                print(f"\n{len(orphans)} named but NOT queued: nothing here can "
+                      f"measure them. Not a verdict on the model -- the eval "
+                      f"suite has no case, runner or metric for this kind of "
+                      f"thing, and building one is sometimes the work.")
+                for r in orphans[:10]:
+                    print(f"        {r['resolved'] or r['name']}")
             return 0
         sizes = {(r["resolved"] or r["name"]): fetching.size_of(r)
                  for r in rows[:a.limit]}

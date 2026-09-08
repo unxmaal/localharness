@@ -94,10 +94,17 @@ def have(model_id: str, root: Path | None = None) -> bool:
     return (home / "hub" / f"models--{model_id.replace('/', '--')}").exists()
 
 
-def queued(conn, tiers=FETCHABLE_TIERS, kind: str = FETCHABLE_KIND) -> list[dict]:
-    """Weights the inspect tier queued, best score first."""
+def queued(conn, tiers=FETCHABLE_TIERS, kind: str = FETCHABLE_KIND,
+           needs_lane: bool = True) -> list[dict]:
+    """Weights the inspect tier queued, best score first.
+
+    A weight NO LANE CAN TEST is returned but never counted as fetchable:
+    downloading is only justified by a measurement that follows it, and an
+    automated loop would otherwise fill the disk with models that are
+    unmeasurable by construction. Issue #81.
+    """
     rows = conn.execute("""
-        SELECT p.name, p.resolved, p.kind,
+        SELECT p.name, p.resolved, p.kind, p.lane,
                (SELECT v.outcome FROM verdicts v WHERE v.proposal_id = p.id
                  ORDER BY v.id DESC LIMIT 1) AS outcome,
                (SELECT v.tier FROM verdicts v WHERE v.proposal_id = p.id
@@ -178,6 +185,8 @@ def run(conn, sizes: dict[str, int], *, limit: int = 1, snapshot=None,
     done = []
     fetched = 0
     for row in queued(conn):
+        if not row.get("lane"):
+            continue      # nothing here could measure it, so nothing fetches it
         # `limit` bounds DOWNLOADS, not decisions. Counting refusals against it
         # let one unsized entry at the head of the queue consume the whole
         # budget, so nothing was ever fetched.

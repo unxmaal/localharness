@@ -182,7 +182,7 @@ def test_a_known_size_is_answered_from_cache_without_asking():
         calls.append(url)
         return '{"siblings": [{"size": 5}]}'
 
-    cache = {"org/x": 4242}
+    cache = {"org/x": {"size": 4242, "lane": "stt"}}
     assert ins.hf_size("org/x", fetch=fetch, cache=cache) == 4242
     assert calls == []
 
@@ -196,10 +196,23 @@ def test_a_rate_limit_is_not_cached_as_a_permanent_unknown():
 
 
 def test_a_real_size_is_kept_so_the_next_sweep_is_free():
+    """Size and lane come out of ONE registry call and are cached together:
+    the registry rate-limits, so asking twice for one model is a request spent
+    on nothing."""
     cache = {}
     ins.hf_size("org/x", fetch=lambda url: '{"siblings": [{"size": 7}]}',
                 cache=cache)
-    assert cache == {"org/x": 7}
+    assert cache == {"org/x": {"size": 7, "lane": ""}}
+
+
+def test_an_older_size_only_cache_entry_is_upgraded_not_trusted():
+    """Trusting it reported every already-sized model as unmeasurable: the
+    first real run showed 0 queued and 14 orphans, several plainly STT and
+    image models. A size-only entry predates lanes, so it is refetched."""
+    got = ins.hf_facts("org/x", cache={"org/x": 99},
+                       fetch=lambda url: '{"siblings": [{"size": 99}],'
+                                         ' "pipeline_tag": "text-to-speech"}')
+    assert got == {"size": 99, "lane": "tts"}
 
 
 def test_an_mlx_project_is_not_disqualified_by_an_optional_cuda_build(tmp_path):
@@ -307,3 +320,37 @@ def test_the_fit_carries_the_repo_description(tmp_path):
     got = ins.inspect("a/b", tmp_path, meta={"size": 10, "description": "a tool"},
                       run=run, sizer=lambda m, cache=None: -1)
     assert got.description == "a tool"
+
+
+# ---- issue #81: a weight no lane can test ---------------------------------
+
+def test_the_registrys_own_task_label_names_the_lane():
+    assert ins.lane_for({"pipeline_tag": "automatic-speech-recognition"}) == "stt"
+    assert ins.lane_for({"pipeline_tag": "text-to-audio"}) == "tts"
+
+
+def test_free_text_tags_are_read_when_the_task_label_is_missing():
+    """pipeline_tag was absent on three of six real models checked."""
+    assert ins.lane_for({"pipeline_tag": None, "tags": ["mlx", "asr"]}) == "stt"
+
+
+def test_a_model_nothing_here_can_measure_has_no_lane():
+    """silero-vad and MossFormer2 are both good models and neither can be
+    scored by anything in this repo. Empty is a fact about the harness, not a
+    rejection of the model."""
+    assert ins.lane_for({"pipeline_tag": "audio-classification",
+                         "tags": ["mlx", "vad"]}) == ""
+    assert ins.lane_for({}) == ""
+
+
+def test_the_lane_travels_with_the_weight(tmp_path):
+    def run(argv, cwd=None, timeout=180.0):
+        d = tmp_path / "a__b"
+        d.mkdir(exist_ok=True)
+        (d / "m.py").write_text('load("org/ears")')
+        return "2026-01-01T00:00:00+00:00"
+
+    got = ins.inspect("a/b", tmp_path, meta={"size": 10}, run=run,
+                      facts=lambda m, cache=None: {"size": 2 * ins.GIB,
+                                                   "lane": "stt"})
+    assert got.lanes["org/ears"] == "stt"
