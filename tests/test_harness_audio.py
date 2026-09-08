@@ -500,3 +500,69 @@ def test_a_missing_whisperkit_binary_says_how_to_get_it(tmp_path, monkeypatch):
     with pytest.raises(audio.AudioError) as e:
         audio.transcribe_whisperkit(clip)
     assert "brew install whisperkit-cli" in str(e.value)
+
+
+# ---- issue #9: FluidAudio, a Swift/CoreML Parakeet -------------------------
+
+def test_fluidaudio_is_a_known_backend():
+    assert "fluidaudio" in audio.STT_BACKENDS
+
+
+def test_the_version_is_pinned_to_the_one_mlx_runs():
+    """FluidAudio carries its own CoreML conversions of v2, v3 and 110m, and
+    defaults to v3. v3 is already measured as WORSE than v2, so comparing the
+    default would confound the runtime with a known model regression."""
+    assert audio.DEFAULT_FLUIDAUDIO_MODEL == "v2"
+    assert "--model-version" in audio.fluidaudio_argv("/tmp/a.flac")
+    assert "v2" in audio.fluidaudio_argv("/tmp/a.flac")
+
+
+def test_an_empty_language_is_not_passed(tmp_path):
+    """Empty is not "no language": it would pin the decode to a language named
+    the empty string, the same trap lang_code has."""
+    assert "--language" not in audio.fluidaudio_argv("/tmp/a.flac")
+    assert "--language" in audio.fluidaudio_argv("/tmp/a.flac", language="en")
+
+
+def test_the_transcript_is_read_from_json_never_stdout(tmp_path, monkeypatch):
+    """fluidaudiocli writes CoreML runtime errors to STDOUT, unprefixed and on
+    the SAME LINE as the transcript. Reading stdout measured a corpus WER of
+    1.016 with a worst case of 10.5, which reads as a broken model rather than
+    a broken reader."""
+    import json as _json
+
+    def fake_run(argv, timeout):
+        out = Path(argv[argv.index("--output-json") + 1])
+        out.write_text(_json.dumps({"text": "the real transcript"}))
+        return ("E5RT encountered an STL exception... zero shape error."
+                "the real transcript")
+
+    monkeypatch.setattr(audio, "_run_whisperkit", fake_run)
+    clip = tmp_path / "a.flac"
+    clip.write_bytes(b"x")
+    assert audio.transcribe_fluidaudio(clip) == "the real transcript"
+
+
+def test_json_that_never_appeared_is_an_error_not_an_empty_transcript(tmp_path,
+                                                                      monkeypatch):
+    """An empty transcript scores as a total miss and would be recorded as a
+    measurement of the model."""
+    monkeypatch.setattr(audio, "_run_whisperkit", lambda argv, timeout: "")
+    clip = tmp_path / "a.flac"
+    clip.write_bytes(b"x")
+    with pytest.raises(audio.AudioError):
+        audio.transcribe_fluidaudio(clip)
+
+
+def test_the_binary_is_found_by_env_then_path_then_our_own_bin(monkeypatch):
+    monkeypatch.setenv(audio.FLUIDAUDIO_CLI_ENV, "/somewhere/fluidaudiocli")
+    assert audio.fluidaudio_cli() == "/somewhere/fluidaudiocli"
+    monkeypatch.delenv(audio.FLUIDAUDIO_CLI_ENV)
+    assert audio.fluidaudio_cli().endswith("fluidaudiocli")
+
+
+def test_the_ear_says_which_runtime_produced_the_number():
+    """A WER from Parakeet-on-MLX and one from Parakeet-on-CoreML are not the
+    same number even at the same model version."""
+    assert audio.transcriber(backend="fluidaudio", model="v2").label == \
+        "fluidaudio:v2"

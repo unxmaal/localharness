@@ -36,7 +36,11 @@ DEFAULT_WHISPERKIT_MODEL = "large-v3"
 #: whisperkit -- CoreML via `whisperkit-cli` (brew). The first NON-MLX runtime
 #:   here, and what EnviousWispr ships in production. The lane had measured
 #:   three models and never a runtime.
-STT_BACKENDS = ("server", "whisper", "whisperkit")
+STT_BACKENDS = ("server", "whisper", "whisperkit", "fluidaudio")
+#: FluidAudio ships its own CLI as a product, so nothing needed writing.
+#: Built from source; `swift build -c release --product fluidaudiocli`.
+FLUIDAUDIO_CLI_ENV = "FLUIDAUDIO_CLI"
+DEFAULT_FLUIDAUDIO_MODEL = "v2"
 # Kokoro's own default is af_heart, which is NOT in this machine's cache: only
 # these five voice packs were pulled, and HF_HUB_OFFLINE=1 stops the server
 # fetching a sixth. Asking for an absent voice fails as a mid-stream close with
@@ -324,6 +328,62 @@ _WK_NOISE = ("loading", "transcription time", "model", "downloading",
              "progress", "warning", "argmax", "compiling", "%")
 
 
+def fluidaudio_cli() -> str:
+    """Where the built binary lives. Env first, then PATH, then our own bin."""
+    import os
+
+    from harness import paths
+    return (os.environ.get(FLUIDAUDIO_CLI_ENV)
+            or shutil.which("fluidaudiocli")
+            or str(paths.home() / "bin" / "fluidaudiocli"))
+
+
+def fluidaudio_argv(path, model: str = DEFAULT_FLUIDAUDIO_MODEL,
+                    language: str = "", json_out=None) -> list:
+    """The `fluidaudiocli transcribe` command line.
+
+    `model` is the parakeet VERSION (v2, v3, 110m), not a HuggingFace id: this
+    runtime carries its own CoreML conversions. v2 by default because that is
+    the version the MLX path runs, and matching it is what makes the comparison
+    about the RUNTIME rather than about the model.
+    """
+    argv = [fluidaudio_cli(), "transcribe", str(path),
+            "--model-version", model]
+    if json_out:
+        argv += ["--output-json", str(json_out)]
+    # Empty is not "no language", the same trap lang_code has.
+    if language:
+        argv += ["--language", language]
+    return argv
+
+
+def transcribe_fluidaudio(path, model: str = DEFAULT_FLUIDAUDIO_MODEL,
+                          language: str = "", timeout: float = 300.0) -> str:
+    """Transcribe with FluidAudio, a Swift/CoreML Parakeet.
+
+    A FOURTH RUNTIME, and the one combination the lane was missing. Parakeet
+    is measured here on MLX and Whisper on both MLX and CoreML, so the runtime
+    gap has only ever been observed in one family. This is the other half.
+    """
+    path = Path(path)
+    if not path.exists():
+        raise AudioError(f"no audio file at {path}")
+    # READ THE JSON, NOT STDOUT. This CLI writes CoreML runtime errors to
+    # stdout, unprefixed and on the SAME LINE as the transcript:
+    #   ...zero shape error.The dull light fell more faintly upon the page
+    # Taking stdout verbatim measured a corpus WER of 1.016 with a worst case
+    # of 10.5, which reads as a broken model rather than a broken reader.
+    import json
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "t.json"
+        _run_whisperkit(fluidaudio_argv(path, model, language, out), timeout)
+        try:
+            return str(json.loads(out.read_text()).get("text") or "").strip()
+        except (OSError, ValueError) as exc:
+            raise AudioError(f"fluidaudiocli wrote no usable json: {exc}") from exc
+
+
 def whisperkit_argv(path, model: str = DEFAULT_WHISPERKIT_MODEL,
                     language: str = "") -> list:
     """The `whisperkit-cli transcribe` command line."""
@@ -392,7 +452,13 @@ def transcriber(backend: str = "server", model: str = "", language: str = "",
             f"unknown stt backend {backend!r}; "
             f"expected one of {', '.join(STT_BACKENDS)}")
 
-    if backend == "whisperkit":
+    if backend == "fluidaudio":
+        model = model or DEFAULT_FLUIDAUDIO_MODEL
+
+        def _run(path):
+            return transcribe_fluidaudio(path, model=model, language=language,
+                                         timeout=timeout)
+    elif backend == "whisperkit":
         model = model or DEFAULT_WHISPERKIT_MODEL
 
         def _run(path):
