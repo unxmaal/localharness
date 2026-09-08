@@ -109,26 +109,51 @@ def recency(pushed: str, now: float | None = None,
 
 
 def cohort(seeds=DEFAULT_SEEDS, client: github.Client | None = None, *,
-           per_repo: int = 12, follow: bool = True, limit: int = 250
-           ) -> list[str]:
-    """People to ask, from the repos this project runs.
+           per_repo: int = 12, follow: bool = True, hops: int = 1,
+           limit: int = 250, min_degree: int = 2) -> list[str]:
+    """People to ask, grown from the repos this project runs.
 
-    Contributors first, then who those people follow. The second hop is what
-    turns a handful of maintainers into a community: it reaches the people they
-    read, which is where a technique shows up before it reaches a subreddit.
+    Contributors first, then who they follow. Each further hop reaches the
+    people THEY read, which is where a technique appears before it reaches a
+    subreddit.
 
-    Deterministic order, so two sweeps are comparable.
+    EXPANSION IS TOWARD CONSENSUS, NOT OUTWARD, and that is the whole design.
+    A naive second hop is 250 people following a hundred each: up to 25,000
+    candidates, almost all of them a random walk away from the subject. Hop one
+    already drags in an unrelated neuroscience cluster because one contributor
+    follows academics, and a second hop multiplies it.
+
+    So every candidate carries an IN-DEGREE: how many people already in the
+    crowd follow them. That separates someone the community reads from someone
+    one person happens to follow. Hop one is ordered by it; every hop after
+    REQUIRES it, so a distant person joins only on several existing members'
+    agreement. Same idea as the repo ranking in #58, applied to people.
+
+    Deterministic throughout, so two sweeps are comparable.
+
+    ONE HOP IS THE DEFAULT BECAUSE TWO WAS MEASURED AND LOST. At the 250 cap a
+    second hop changes NOTHING: the crowd fills from hop one alone, so hops=2
+    returned a byte-identical ranking and spent zero extra requests. Raising
+    the cap to 450 does reach further -- eight repos one hop never surfaced,
+    including two MLX serving projects -- but the ranking then FAILS its
+    control, and no value of POPULATION between 5e6 and 1e8 recovers it. A
+    bigger crowd raises `shared` for popular repos faster than the enrichment
+    term divides it out. Leads from that configuration are leads, never
+    rankings. See issue #75.
     """
     client = client or github.Client()
     people: list[str] = []
     seen: set[str] = set()
 
-    def add(login):
-        if login and login not in seen and not login.endswith("[bot]"):
+    def add(login) -> bool:
+        if (login and login not in seen and not login.endswith("[bot]")
+                and len(people) < limit):
             seen.add(login)
             people.append(login)
+            return True
+        return False
 
-    core = []
+    core: list[str] = []
     for repo in seeds:
         try:
             found = client.contributors(repo)[:per_repo]
@@ -137,15 +162,28 @@ def cohort(seeds=DEFAULT_SEEDS, client: github.Client | None = None, *,
         for login in found:
             add(login)
             core.append(login)
-    if follow:
-        for login in core:
+    if not follow:
+        return people[:limit]
+
+    frontier = list(dict.fromkeys(core))
+    for hop in range(max(1, hops)):
+        degree: Counter = Counter()
+        for login in frontier:
             if len(people) >= limit:
                 break
             try:
                 for other in client.following(login):
-                    add(other)
+                    if other not in seen:
+                        degree[other] += 1
             except github.GitHubError:
                 continue
+        # Ties broken by name so the order does not depend on dict iteration.
+        ranked = sorted(degree.items(), key=lambda kv: (-kv[1], kv[0]))
+        floor = 1 if hop == 0 else min_degree
+        added = [name for name, d in ranked if d >= floor and add(name)]
+        if not added:
+            break
+        frontier = added
     return people[:limit]
 
 
