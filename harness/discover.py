@@ -446,18 +446,29 @@ def from_feeds(sources=None, reader=None, verify=True,
             continue
 
         for p in feeds.candidates(entries, src.name):
+            # Every drop is RECORDED. Without the thrown-away names there is no
+            # denominator, and a store holding only survivors can report that
+            # 100% of proposals resolved, which is true and means nothing.
+            # Issue #49.
+            def drop(reason, name=None):
+                if store is not None:
+                    ms.reject(store, name or p.name, src.name, reason)
+
             if min_relevance is not None and p.relevance < min_relevance:
+                drop("below-relevance")
                 continue
             repo = p.name
             if p.kind == "tool":
                 # A github repo is something to read, not an mflux candidate.
                 if repo.lower() in seen:
+                    drop("duplicate")
                     continue
                 seen.add(repo.lower())
                 # A repo name in prose is a claim, held to the same bar as a
                 # model name. Fails OPEN: only a definite 404 drops it, so an
                 # unreachable API cannot silently empty a sweep.
                 if verify and not _gh_exists(repo, client=gh):
+                    drop("not-a-repo")
                     continue
                 out.append(Capability(
                     "proposal", repo, src.lane, p.url or src.url,
@@ -469,8 +480,13 @@ def from_feeds(sources=None, reader=None, verify=True,
                     continue
                 repo = _hf_exists(p.name)
                 if not repo:
+                    drop("unresolvable")
                     continue      # prose that names nothing real
-            if repo.lower() in seen or _was_measured(repo, done):
+            if repo.lower() in seen:
+                drop("duplicate", repo)
+                continue
+            if _was_measured(repo, done):
+                drop("already-measured", repo)
                 continue
             seen.add(repo.lower())
             if store is not None:
@@ -482,6 +498,7 @@ def from_feeds(sources=None, reader=None, verify=True,
                     lane=src.lane, resolved=repo))
             if repo in settled:
                 suppressed += 1
+                drop("settled", repo)
                 continue
             tag = f" [apple silicon +{p.relevance}]" if p.relevance > 0 else ""
             out.append(Capability(

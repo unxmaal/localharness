@@ -468,11 +468,13 @@ def _report_recurrence(a) -> int:
         rows = ms.recurrence(conn, minimum=2)
         stats = ms.precision(conn)
         per_source = ms.by_source(conn)
+        extract = ms.extraction(conn)
     finally:
         conn.close()
     if a.json:
         print(json.dumps({"recurrence": rows, "totals": stats,
-                          "by_source": per_source}, indent=2))
+                          "by_source": per_source,
+                          "extraction": extract}, indent=2))
         return 0
     if not rows:
         print("nothing seen more than once yet. Run `lh discover --feeds`.")
@@ -491,6 +493,15 @@ def _report_recurrence(a) -> int:
         for r in per_source:
             print(f"  {r['source']:24} {r['proposals']:8d} "
                   f"{r['resolved']:8d} {r['settled']:8d}")
+    if extract:
+        print("\nextraction precision: of the names pulled out of prose, how "
+              "many were real")
+        print(f"  {'source':24} {'kept':>6} {'dropped':>8} {'precision':>10}")
+        for r in extract:
+            reasons = ", ".join(f"{k} {v}" for k, v in
+                                sorted(r["reasons"].items(), key=lambda kv: -kv[1]))
+            print(f"  {r['source']:24} {r['kept']:6d} {r['dropped']:8d} "
+                  f"{r['precision']:10.2f}   {reasons}")
     return 0
 
 
@@ -535,8 +546,12 @@ def _report_inspect(a) -> int:
             # which wants a HuggingFace id, and every one of them 401'd.
             if fit.verdict != "fits":
                 continue
-            for model_id, size in sorted(fit.weights.items(),
-                                         key=lambda kv: kv[1])[:3]:
+            # In HEADLINE order, not smallest-first: the smallest named
+            # weight is almost always a tokenizer or a helper, and the first
+            # queue built that way filled with them. Issue #68.
+            ranked = [m for m in fit.headline if m in fit.weights][:3]
+            for model_id in ranked:
+                size = fit.weights[model_id]
                 if size > ins.MEMORY_CEILING:
                     continue
                 ms.record(store, ms.Seen(
@@ -548,6 +563,8 @@ def _report_inspect(a) -> int:
                           detail=f"bytes={size} named by {repo}")
     finally:
         store.close()
+    if getattr(a, "judge", False):
+        _judge_fits(out, store_path=None)
     if a.json:
         print(json.dumps({"inspected": [vars(f) for f in out]}, indent=2))
         return 0
@@ -590,6 +607,50 @@ def cmd_fetch(a) -> int:
                  for r in rows[:a.limit]}
         for got in fetching.run(store, sizes, limit=a.limit):
             print(f"  {'OK  ' if got['ok'] else 'skip'} {got['repo']}: {got['why']}")
+    finally:
+        store.close()
+    return 0
+
+
+def _judge_fits(fits, store_path=None) -> int:
+    """Score inspected candidates with the facts the clone produced. #69.
+
+    Ordering matters: INSPECT runs before JUDGE now. Cheapest-first was never
+    the real justification for the old order -- inspect costs seconds and the
+    judge costs about a second -- and the judge scoring a generic description
+    3/10 while the inspect tier had already proved the thing MLX-native was the
+    tier with more evidence losing to the tier with less.
+    """
+    from harness import judge
+    from harness import memory_store as ms
+    try:
+        rubric = judge.load()
+    except judge.JudgeError as exc:
+        return err(str(exc))
+    store = ms.connect(store_path)
+    try:
+        print("\n  judged, with the source read first:")
+        for f in fits:
+            weights = (f"{f.smallest / (1024**3):.1f} to "
+                       f"{f.largest / (1024**3):.1f} GiB" if f.largest else "")
+            item = judge.describe(
+                f.repo, why=f.description, source="github-crowd",
+                inspected=f"{f.verdict}: {f.why}",
+                platform=("MLX-native" if f.mlx else
+                          "torch/MPS" if f.mps else ""),
+                weights=weights)
+            try:
+                score, why = judge.score(item, rubric)
+            except Exception as exc:  # noqa: BLE001
+                err(f"{f.repo}: {exc}")
+                continue
+            print(f"    {score:2d}/10  {f.repo:36.36s} {why[:56]}")
+            try:
+                ms.decide(store, f.repo, "queued", tier="judge", score=score,
+                          rubric=rubric.identity, judge=rubric.model,
+                          detail=why[:200])
+            except KeyError:
+                pass
     finally:
         store.close()
     return 0
@@ -682,10 +743,16 @@ def _judge_neighbors(found, store):
     print("\n  judged:")
     for n in found:
         why = f"{n.description} [{n.language}; {', '.join(n.topics[:6])}]"
+        row = store.execute(
+            "SELECT v.detail FROM verdicts v JOIN proposals p "
+            "ON p.id = v.proposal_id WHERE p.name = ? AND v.tier = 'inspect' "
+            "ORDER BY v.id DESC LIMIT 1", (n.repo,)).fetchone()
         try:
             score, reason = judge.score(
                 judge.describe(n.repo, why=why, source="github-crowd",
-                               times_seen=n.shared), rubric)
+                               times_seen=n.shared,
+                               inspected=(row["detail"] if row else "")),
+                rubric)
         except Exception as exc:  # noqa: BLE001
             err(f"{n.repo}: {exc}")
             continue

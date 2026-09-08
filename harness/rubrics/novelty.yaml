@@ -1,4 +1,4 @@
-version: 1
+version: 2
 name: novelty
 model: q3-4b
 scale: [1, 10]
@@ -21,6 +21,9 @@ what_scores_high:
   - A technique, workflow or method rather than another model.
   - Something that makes an existing job CHEAPER, because measurement time is
     the scarce resource here.
+  - Its source has already been read and found to run here. A line saying it
+    is MLX-native with weights that fit is worth more than any description,
+    because it was measured rather than claimed.
 
 what_scores_low:
   - Another model in an already crowded family, with no claim distinguishing it.
@@ -32,6 +35,10 @@ what_scores_low:
   - A rename, a re-upload, or a quantisation of something already known here,
     unless the quantisation itself is the interesting part.
   - Vague capability claims with no way to check them.
+  - Work in a domain this project does not touch. The lanes here are images,
+    video, speech, transcription, vector graphics, web pages and code. A
+    well-built tool for cell segmentation, genomics or robotics scores LOW no
+    matter how good it is, because nothing here can measure it.
 
 instructions: >-
   Reply with a single integer from 1 to 10 on the first line, then one sentence

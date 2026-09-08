@@ -79,12 +79,19 @@ def parse_score(text: str, low: int = 1, high: int = 10) -> tuple[int, str]:
 
 
 def describe(name: str, why: str = "", source: str = "", times_seen: int = 0,
-             relevance: int = 0) -> str:
+             relevance: int = 0, inspected: str = "", platform: str = "",
+             weights: str = "") -> str:
     """What the model is shown.
 
     Provenance goes in alongside the prose deliberately: a judge given only a
     description is partly scoring copywriting, and the recap entries this reads
     are one-line marketing blurbs.
+
+    THE INSPECT RESULT GOES IN TOO, and that fixed a real disagreement. The
+    judge scored apple/coreai-models 3/10 off a generic description while the
+    inspect tier had already cloned it and established it was MLX-native with
+    weights that fit. The tier holding more evidence lost to the tier holding
+    less. These fields are facts read from a source tree, not prose. Issue #69.
     """
     bits = [f"NAME: {name}"]
     if why:
@@ -95,6 +102,12 @@ def describe(name: str, why: str = "", source: str = "", times_seen: int = 0,
         bits.append(f"TIMES SEEN: {times_seen}")
     if relevance:
         bits.append(f"APPLE SILICON RELEVANCE: {relevance:+d}")
+    if inspected:
+        bits.append(f"READ FROM ITS SOURCE: {inspected}")
+    if platform:
+        bits.append(f"RUNTIME: {platform}")
+    if weights:
+        bits.append(f"WEIGHTS IT NAMES: {weights}")
     return "\n".join(bits)
 
 

@@ -91,6 +91,8 @@ class Fit:
     #: Weights it names that could not be sized. Kept apart from naming none
     #: at all: "unknown" and "none" are different answers.
     unsized: list[str] = field(default_factory=list)
+    #: Named weights ranked by how likely each is the thing the repo is FOR.
+    headline: list[str] = field(default_factory=list)
     #: CUDA named in code but NOT in any dependency file. Weaker evidence: a
     #: `torch.cuda.is_available()` guard is compatible with running elsewhere.
     cuda_mentioned: list[str] = field(default_factory=list)
@@ -141,6 +143,8 @@ def scan(tree: Path) -> dict:
     required: set[str] = set()
     mentioned: set[str] = set()
     ids: set[str] = set()
+    counts: dict[str, int] = {}
+    in_readme: set[str] = set()
     mlx = mps = False
     entries: list[str] = []
     for p in files(tree):
@@ -156,9 +160,16 @@ def scan(tree: Path) -> dict:
         mlx = mlx or bool(MLX_MARKERS.search(text))
         mps = mps or bool(MPS_MARKERS.search(text))
         rel = p.relative_to(tree).as_posix()
-        if p.suffix in (".py", ".json", ".yaml", ".yml", ".toml", ".swift"):
-            ids |= {m.group(1) for m in HF_ID.finditer(text)
-                    if m.group(1).split("/")[0].lower() not in NOT_WEIGHTS}
+        readme = p.name.lower().startswith("readme")
+        if readme or p.suffix in (".py", ".json", ".yaml", ".yml", ".toml",
+                                  ".swift"):
+            found = [m.group(1) for m in HF_ID.finditer(text)
+                     if m.group(1).split("/")[0].lower() not in NOT_WEIGHTS]
+            for i in found:
+                counts[i] = counts.get(i, 0) + 1
+                if readme:
+                    in_readme.add(i)
+            ids |= set(found)
         if rel == "pyproject.toml" and "[project.scripts]" in text:
             entries.append("pyproject scripts")
         if "__main__" in text and p.suffix == ".py":
@@ -166,8 +177,8 @@ def scan(tree: Path) -> dict:
         if p.name in ("Package.swift", "setup.py", "Makefile"):
             entries.append(rel)
     return {"cuda": sorted(required), "cuda_mentioned": sorted(mentioned - required),
-            "hf_ids": sorted(ids), "mlx": mlx, "mps": mps,
-            "entry_points": sorted(set(entries))[:8]}
+            "hf_ids": sorted(ids), "counts": counts, "in_readme": sorted(in_readme),
+            "mlx": mlx, "mps": mps, "entry_points": sorted(set(entries))[:8]}
 
 
 def _sizes_path() -> Path:
@@ -182,6 +193,31 @@ def _size_cache() -> dict:
         return json.loads(_sizes_path().read_text())
     except (OSError, ValueError):
         return {}
+
+
+def headline(repo: str, ids, counts: dict, in_readme) -> list[str]:
+    """The models a repo is FOR, best first, separated from the ones it merely
+    touches.
+
+    The first queue built from "smallest named weight" filled with tokenizers,
+    speaker-embedding helpers and a 0.6B somebody used in a test, because the
+    smallest id in a repo is almost never the headline. Three signals, none
+    conclusive alone:
+
+      README        a model named where the project introduces itself
+      repetition    the model a repo is ABOUT is named again and again
+      name overlap  mlx-video naming Lightricks/LTX-2 beats it naming umt5
+
+    A ranking, not a filter: everything is still returned, in order.
+    """
+    want = {t for t in re.split(r"[^a-z0-9]+", repo.lower()) if len(t) > 2}
+    readme = set(in_readme)
+
+    def score(i: str) -> tuple:
+        tokens = {t for t in re.split(r"[^a-z0-9]+", i.lower()) if len(t) > 2}
+        return (3 * (i in readme) + min(counts.get(i, 1), 5)
+                + 2 * bool(tokens & want), -len(i))
+    return sorted(ids, key=score, reverse=True)
 
 
 def hf_size(model_id: str, fetch=None, cache: dict | None = None) -> int:
@@ -309,15 +345,21 @@ def inspect(repo: str, workdir: Path, *, meta: dict | None = None,
     fit.cuda_mentioned = found["cuda_mentioned"]
     cache = _size_cache()
     before = len(cache)
-    # Shortest ids first: an id like "org/model" is far likelier to be the
-    # thing it runs than a long variant name buried in a catalogue.
-    for model_id in sorted(found["hf_ids"], key=len)[:SIZE_LIMIT]:
+    fit.headline = headline(repo, found["hf_ids"], found.get("counts") or {},
+                            found.get("in_readme") or [])
+    # HALF the budget to the smallest ids and half to the headline ones. The
+    # smallest decide whether anything here can run at all; the headline ones
+    # decide what is worth downloading, and they are rarely the same models.
+    half = max(1, SIZE_LIMIT // 2)
+    picked = list(dict.fromkeys(
+        sorted(found["hf_ids"], key=len)[:half] + fit.headline[:half]))
+    for model_id in picked:
         size = sizer(model_id, cache=cache) if _takes_cache(sizer) else sizer(model_id)
         if size > 0:
             fit.weights[model_id] = size
         else:
             fit.unsized.append(model_id)
-    fit.unsized += found["hf_ids"][SIZE_LIMIT:] if len(found["hf_ids"]) > SIZE_LIMIT else []
+    fit.unsized += [i for i in found["hf_ids"] if i not in picked]
     if len(cache) > before:
         try:
             _sizes_path().write_text(json.dumps(cache, indent=1, sort_keys=True))

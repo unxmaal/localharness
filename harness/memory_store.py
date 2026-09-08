@@ -17,7 +17,7 @@ from pathlib import Path
 
 from harness import paths
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 #: Outcomes a proposal can reach. TERMINAL ones suppress re-proposal.
 VERDICTS = ("measured", "declined", "broken", "queued", "ignored", "screened")
@@ -74,6 +74,18 @@ CREATE TABLE IF NOT EXISTS edges (
     UNIQUE (src, dst, relation)
 );
 
+-- Names pulled out of prose and REJECTED. Without these there is no
+-- denominator: every proposal in the store resolved to something real, so
+-- "100% resolved" was arithmetic, not precision. Issue #49.
+CREATE TABLE IF NOT EXISTS extractions (
+    id          INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    reason      TEXT NOT NULL,
+    at          REAL NOT NULL,
+    UNIQUE (name, source, reason)
+);
+
 CREATE INDEX IF NOT EXISTS ix_sight_prop ON sightings(proposal_id);
 CREATE INDEX IF NOT EXISTS ix_verdict_prop ON verdicts(proposal_id);
 CREATE INDEX IF NOT EXISTS ix_edges_src ON edges(src);
@@ -107,7 +119,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
             f"discovery.db is schema {have}, this code speaks {SCHEMA_VERSION}. "
             f"Refusing to touch a newer store.")
     # Future migrations land here, keyed on `have`. The DDL above is
-    # CREATE IF NOT EXISTS, so v0 -> v1 needs nothing beyond the stamp.
+    # CREATE IF NOT EXISTS, so v0 -> v1 and v1 -> v2 (which only adds the
+    # extractions table) need nothing beyond the stamp.
     conn.execute("INSERT OR REPLACE INTO meta VALUES ('schema', ?)",
                  (str(SCHEMA_VERSION),))
     conn.commit()
@@ -240,6 +253,52 @@ def precision(conn: sqlite3.Connection) -> dict:
                           "WHERE score IS NOT NULL").fetchone()["c"]
     return {"proposals": total, "resolved": resolved, "judged": judged,
             **{f"verdict_{k}": v for k, v in counts.items()}}
+
+
+#: Why a name pulled out of prose did not become a proposal.
+REJECTIONS = ("unresolvable", "not-a-repo", "duplicate", "already-measured",
+              "below-relevance", "settled")
+
+
+def reject(conn: sqlite3.Connection, name: str, source: str, reason: str,
+           at: float | None = None) -> None:
+    """Record a name that was extracted and thrown away.
+
+    The thrown-away ones are the whole measurement. A store holding only what
+    survived can report that 100% of proposals resolved, which is true and
+    means nothing.
+    """
+    if reason not in REJECTIONS:
+        raise ValueError(f"unknown rejection {reason!r}, known: "
+                         f"{', '.join(REJECTIONS)}")
+    conn.execute("INSERT OR IGNORE INTO extractions (name, source, reason, at) "
+                 "VALUES (?,?,?,?)",
+                 (name[:200], source, reason,
+                  time.time() if at is None else at))
+    conn.commit()
+
+
+def extraction(conn: sqlite3.Connection) -> list[dict]:
+    """Per source: how many extracted names survived, and why the rest did not.
+
+    Issue #49 asked for extraction precision. This is the number.
+    """
+    kept = {r["source"]: r["n"] for r in conn.execute(
+        "SELECT source, COUNT(DISTINCT proposal_id) n FROM sightings "
+        "GROUP BY source")}
+    out = []
+    for source in sorted(set(kept) | {r["source"] for r in conn.execute(
+            "SELECT DISTINCT source FROM extractions")}):
+        reasons = {r["reason"]: r["n"] for r in conn.execute(
+            "SELECT reason, COUNT(*) n FROM extractions WHERE source=? "
+            "GROUP BY reason", (source,))}
+        dropped = sum(reasons.values())
+        k = kept.get(source, 0)
+        out.append({"source": source, "kept": k, "dropped": dropped,
+                    "extracted": k + dropped,
+                    "precision": (k / (k + dropped)) if (k + dropped) else 0.0,
+                    "reasons": reasons})
+    return sorted(out, key=lambda r: -r["extracted"])
 
 
 def by_source(conn: sqlite3.Connection) -> list[dict]:

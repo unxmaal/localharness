@@ -134,3 +134,35 @@ def test_the_control_never_tells_the_model_the_answer():
     for name, why, outcome in judge.CONTROL:
         assert outcome not in why.lower()
         assert "won" not in why.lower() and "beat" not in why.lower()
+
+
+# ---- issue #69: the judge was working from less than the inspect tier ------
+
+def test_the_inspect_result_reaches_the_judge():
+    """apple/coreai-models scored 3/10 off a generic description while the
+    inspect tier had already established it was MLX-native with weights that
+    fit. The tier holding more evidence lost to the tier holding less."""
+    d = describe("apple/coreai-models", why="Model export recipes",
+                 inspected="fits: MLX-native", platform="MLX-native",
+                 weights="1.4 to 15.3 GiB")
+    assert "READ FROM ITS SOURCE: fits: MLX-native" in d
+    assert "RUNTIME: MLX-native" in d
+    assert "WEIGHTS IT NAMES: 1.4 to 15.3 GiB" in d
+
+
+def test_a_candidate_never_inspected_still_describes_cleanly():
+    assert describe("x", why="y") == "NAME: x\nDESCRIPTION: y"
+
+
+def test_the_rubric_scores_an_out_of_domain_tool_low():
+    """CellSeg3D, a napari plugin for 3D cell segmentation, scored 7/10.
+    Genuinely good software, and nothing here can measure it."""
+    p = load().prompt.lower()
+    assert "domain" in p
+    assert "segmentation" in p or "genomics" in p or "robotics" in p
+
+
+def test_changing_what_the_judge_sees_bumps_the_rubric_version():
+    """Two runs under different rubrics are different exams, so a scored run
+    from before this change must not be ranked against one from after."""
+    assert load().version >= 2
