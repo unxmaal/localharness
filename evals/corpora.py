@@ -1,9 +1,14 @@
 """Generating stt cases from a speech corpus.
 
-    uv run python -m evals.corpora --limit 40 --seed 1
+    uv run python -m evals.corpora --limit 300 --seed 1
 
 LibriSpeech test-clean is 2620 utterances with human transcripts, which is what
-makes an stt measurement the model's own rather than joint with a TTS. Writing
+makes an stt measurement the model's own rather than joint with a TTS.
+
+USE AT LEAST A FEW HUNDRED. At 40 clips this project got the winner right and
+both effect sizes wrong in the same run: it called a 1.43x gap "twice as bad"
+and called a significant loss a tie. 40 is enough to decide "do not switch";
+it is not enough to quote a ratio. `evals.compare` puts an interval on it. Writing
 case files for a sample by hand would be silly, and shipping them in the repo
 would be wrong: the audio paths are machine-specific. So the generator is
 committed and the cases are not, and the sample is seeded so a comparison run a
