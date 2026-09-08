@@ -732,3 +732,38 @@ def test_a_chain_candidate_needs_an_output_directory(tmp_path):
     with pytest.raises(SystemExit) as e:
         build_runner("upscale-seedvr2:mflux:flux2-klein-4b", "http://gw", None)
     assert "--out" in str(e.value)
+
+
+def test_screen_picks_one_case_per_modality_and_shrinks_it():
+    """1,081 pairs at full settings does not run. The screen is what makes
+    traversal affordable."""
+    from evals.core import Case
+    from evals.run import screen_cases
+    cases = [Case(id="b", modality="image", prompt="p",
+                  params={"width": 1024, "height": 1024, "steps": 20}),
+             Case(id="a", modality="image", prompt="p",
+                  params={"width": 512, "height": 512, "steps": 8}),
+             Case(id="c", modality="svg", prompt="p")]
+    got = screen_cases(cases)
+    assert {c.modality for c in got} == {"image", "svg"}
+    assert len(got) == 2
+    img = next(c for c in got if c.modality == "image")
+    assert img.id == "a", "picks deterministically, by id"
+    assert img.params["width"] == 256 and img.params["steps"] == 2
+
+
+def test_screen_never_enlarges_a_case_that_is_already_smaller():
+    from evals.core import Case
+    from evals.run import screen_cases
+    got = screen_cases([Case(id="a", modality="image", prompt="p",
+                             params={"width": 64, "height": 64, "steps": 1})])
+    assert got[0].params["width"] == 64
+    assert got[0].params["steps"] == 1
+
+
+def test_screen_does_not_mutate_the_case_it_was_given():
+    from evals.core import Case
+    from evals.run import screen_cases
+    c = Case(id="a", modality="image", prompt="p", params={"width": 1024})
+    screen_cases([c])
+    assert c.params["width"] == 1024

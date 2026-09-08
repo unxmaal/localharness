@@ -336,6 +336,10 @@ def cmd_discover(a) -> int:
     every time anything is installed or any eval is run. A number in a document
     is wrong by the next commit.
     """
+    if getattr(a, "control", False):
+        return _report_control(a)
+    if getattr(a, "recurrence", False):
+        return _report_recurrence(a)
     if getattr(a, "sources", False):
         return _report_sources(a)
     if getattr(a, "feeds", False):
@@ -431,6 +435,53 @@ def _warn_stale_sources() -> None:
     print("  lh discover --sources   when each was last read")
 
 
+def _report_control(a) -> int:
+    """A judge is a metric, and a metric without a control is noise."""
+    from harness import judge
+    try:
+        got = judge.control()
+    except Exception as exc:  # noqa: BLE001
+        return err(f"control failed: {exc}")
+    if a.json:
+        print(json.dumps(got, indent=2))
+        return 0
+    print(f"\nrubric {got['rubric']}, judge {got['model']}")
+    for r in got["rows"]:
+        print(f"  {r['outcome']:5} {r['score']:2}  {r['name']:20} {r['why'][:52]}")
+    print(f"\n  known-good min {got['won_min']}, known-bad max "
+          f"{got['lost_max']}, gap {got['gap']:+d}")
+    if got["separates"]:
+        print("  SEPARATES. Scores from this rubric may be used to rank.")
+        return 0
+    print("  DOES NOT SEPARATE. No ranking may be drawn from this rubric.")
+    return 1
+
+
+def _report_recurrence(a) -> int:
+    from harness import memory_store as ms
+    conn = ms.connect()
+    try:
+        rows = ms.recurrence(conn, minimum=2)
+        stats = ms.precision(conn)
+    finally:
+        conn.close()
+    if a.json:
+        print(json.dumps({"recurrence": rows, "totals": stats}, indent=2))
+        return 0
+    if not rows:
+        print("nothing seen more than once yet. Run `lh discover --feeds`.")
+    else:
+        print("\nseen more than once (recurrence beats a single mention):")
+        for r in rows:
+            span = (r["last_seen"] - r["first_seen"]) / 86400.0
+            print(f"  {r['times']}x over {span:5.1f}d  {r['name'][:44]:46}"
+                  f" {r['sources']} source(s)")
+    print(f"\n{stats['proposals']} proposals, {stats['resolved']} resolved, "
+          f"{stats['verdict_measured']} measured, "
+          f"{stats['verdict_declined']} declined")
+    return 0
+
+
 def _report_sources(a) -> int:
     from harness import feeds
 
@@ -459,8 +510,16 @@ def _report_sources(a) -> int:
 
 
 def _report_feeds(a) -> int:
-    found = discovery.from_feeds(verify=not a.no_verify,
-                                 min_relevance=1 if a.platform else None)
+    from harness import memory_store as ms
+    store = ms.connect()
+    try:
+        found = discovery.from_feeds(
+            verify=not a.no_verify,
+            min_relevance=1 if a.platform else None, store=store)
+        if getattr(a, "judge", False):
+            found = _judge_proposals(found, store)
+    finally:
+        store.close()
     if a.json:
         print(json.dumps({"candidates": [vars(c) for c in found]}, indent=2))
         return 0
@@ -489,6 +548,36 @@ def _report_feeds(a) -> int:
         print(f"    {c.note}")
         print(f"    -> uv run python -m evals.run {c.how}")
     return 0
+
+
+def _judge_proposals(found, store):
+    """Score, record and re-sort. The cheapest tier: text only, no GPU."""
+    from harness import judge
+    from harness import memory_store as ms
+    try:
+        rubric = judge.load()
+    except judge.JudgeError as exc:
+        err(str(exc))
+        return found
+    for c in found:
+        if c.kind != "proposal":
+            continue
+        try:
+            score, why = judge.score(
+                judge.describe(c.name, why=c.note, relevance=c.relevance),
+                rubric)
+        except Exception as exc:  # noqa: BLE001
+            err(f"{c.name}: {exc}")
+            continue
+        c.relevance = score
+        c.note = f"[{score}/10] {why[:90]} | {c.note}"
+        try:
+            ms.decide(store, c.name, "queued", tier="judge", score=score,
+                      rubric=rubric.identity, judge=rubric.model, detail=why[:200])
+        except KeyError:
+            pass
+    found.sort(key=lambda c: -getattr(c, "relevance", 0))
+    return found
 
 
 def cmd_voices(a) -> int:
@@ -624,6 +713,15 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--sources", action="store_true",
                    help="list discovery sources, when each was last read, and "
                         "any new sources the feeds point at")
+    d.add_argument("--judge", action="store_true",
+                   help="with --feeds, score each proposal 1-10 with the "
+                        "rubric before anything is run")
+    d.add_argument("--control", action="store_true",
+                   help="score items whose outcome is already known, and report "
+                        "whether the rubric separates them. Run this before "
+                        "trusting any score")
+    d.add_argument("--recurrence", action="store_true",
+                   help="what keeps coming back, from the discovery store")
     d.add_argument("--platform", action="store_true",
                    help="with --feeds, only what looks like it runs on Apple "
                         "Silicon")

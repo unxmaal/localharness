@@ -401,11 +401,16 @@ class Receipt:
     sampling: dict
     gateway: str
     adherence: str = ""
+    #: Which cost tier produced these rows. A screen answers "did it run"; a
+    #: measurement answers "is it better". Ranking one against the other
+    #: compares two different exams.
+    tier: str = "measure"
 
     def as_dict(self) -> dict:
         return {"modality": self.modality, "case_ids": list(self.case_ids),
                 "repeat": self.repeat, "sampling": dict(self.sampling),
-                "gateway": self.gateway, "adherence": self.adherence}
+                "gateway": self.gateway, "adherence": self.adherence,
+                "tier": self.tier}
 
 
 def comparable(a: Receipt, b: Receipt) -> tuple[bool, str]:
@@ -432,6 +437,10 @@ def comparable(a: Receipt, b: Receipt) -> tuple[bool, str]:
         invalidate a measurement, and a commit that touches sampling is already
         caught by `sampling`.
     """
+    if a.tier != b.tier:
+        return False, (f"different tier: {a.tier} vs {b.tier}. A screen asks "
+                       f"whether it ran; a measurement asks whether it is "
+                       f"better")
     if a.modality != b.modality:
         return False, f"different modality: {a.modality} vs {b.modality}"
     if tuple(a.case_ids) != tuple(b.case_ids):
