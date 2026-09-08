@@ -336,6 +336,8 @@ def cmd_discover(a) -> int:
     every time anything is installed or any eval is run. A number in a document
     is wrong by the next commit.
     """
+    if getattr(a, "neighbors", False):
+        return _report_neighbors(a)
     if getattr(a, "control", False):
         return _report_control(a)
     if getattr(a, "recurrence", False):
@@ -479,6 +481,75 @@ def _report_recurrence(a) -> int:
     print(f"\n{stats['proposals']} proposals, {stats['resolved']} resolved, "
           f"{stats['verdict_measured']} measured, "
           f"{stats['verdict_declined']} declined")
+    return 0
+
+
+def _report_neighbors(a) -> int:
+    """What the people who build what we run are looking at. Issue #58."""
+    from harness import feeds, github, memory_store as ms, neighbors as nb
+
+    client = github.Client(budget=getattr(a, "budget", 900))
+    try:
+        people = nb.cohort(client=client, limit=getattr(a, "crowd", 250))
+    except github.GitHubError as exc:
+        return err(f"{exc}. `gh auth status` to check the token.")
+    if getattr(a, "control", False):
+        got = nb.control(list(nb.DEFAULT_SEEDS), people, client)
+        if a.json:
+            print(json.dumps(got, indent=2))
+            return 0
+        print(f"\ncrowd of {got['crowd']}, ranking {len(got['top'])}")
+        print(f"  expected and found : {', '.join(got['expected_found']) or 'NONE'}")
+        print(f"  expected but absent: {', '.join(got['missing']) or 'none'}")
+        print(f"  decoys in the top  : {', '.join(got['decoys_in_top']) or 'none'}")
+        print(f"\n  SEPARATES: {got['separates']}")
+        if not got["separates"]:
+            print("  Do not quote a score from this run.")
+        print("\n  by shared count alone, which is what we do NOT ship:")
+        for r in got["raw_top"][:5]:
+            print(f"    {r}")
+        return 0
+
+    found = nb.neighbors(people, client, top=getattr(a, "top", 25),
+                         exclude=nb.DEFAULT_SEEDS)
+    if a.json:
+        print(json.dumps({"crowd": len(people),
+                          "neighbors": [vars(n) for n in found]}, indent=2))
+        return 0
+    print(f"\nrepos concentrated in the crowd that builds what this machine "
+          f"runs\n({len(people)} people, {client.spent} requests; a popularity "
+          f"signal, not a measurement)")
+    if client.stale:
+        print(f"  {len(client.stale)} answer(s) served from a stale cache")
+    for n in found:
+        flag = "  ARCHIVED" if n.archived else ""
+        print(f"\n  {n.score:.5f}  {n.repo}{flag}")
+        print(f"    {n.shared} of {n.crowd} starred it; {n.stars} stars, "
+              f"pushed {n.pushed}")
+        if n.description:
+            print(f"    {n.description[:100]}")
+    # Into the store, so a sighting counts towards recurrence and the graph
+    # finally has edges to walk. Seeds are recorded too, because link() needs
+    # both ends to exist.
+    store = ms.connect()
+    try:
+        for seed in nb.DEFAULT_SEEDS:
+            ms.record(store, ms.Seen(name=seed, source="installed", kind="repo",
+                                     url=f"https://github.com/{seed}",
+                                     resolved=seed))
+        for n in found:
+            ms.record(store, ms.Seen(name=n.repo, source="github-crowd",
+                                     url=f"https://github.com/{n.repo}",
+                                     why=n.description, kind="repo",
+                                     relevance=feeds.relevance(
+                                         f"{n.repo} {n.description} "
+                                         f"{' '.join(n.topics)}"),
+                                     resolved=n.repo))
+            for seed in nb.DEFAULT_SEEDS:
+                ms.link(store, seed, n.repo, "crowd",
+                        note=f"{n.shared}/{n.crowd} at {n.score:.5f}")
+    finally:
+        store.close()
     return 0
 
 
@@ -720,6 +791,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="score items whose outcome is already known, and report "
                         "whether the rubric separates them. Run this before "
                         "trusting any score")
+    d.add_argument("--neighbors", action="store_true",
+                   help="repos concentrated in the crowd that builds what "
+                        "this machine runs; add --control to check the metric "
+                        "before trusting it")
+    d.add_argument("--crowd", type=int, default=250,
+                   help="with --neighbors, how many people to ask")
+    d.add_argument("--budget", type=int, default=900,
+                   help="with --neighbors, cap on GitHub API requests")
+    d.add_argument("--top", type=int, default=25,
+                   help="with --neighbors, how many to show")
     d.add_argument("--recurrence", action="store_true",
                    help="what keeps coming back, from the discovery store")
     d.add_argument("--platform", action="store_true",
