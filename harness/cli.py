@@ -529,6 +529,23 @@ def _report_inspect(a) -> int:
             if outcome:
                 ms.decide(store, repo, outcome, tier="inspect",
                           detail=f"{fit.verdict}: {fit.why}"[:200])
+            # The WEIGHTS are what a download queue can act on. The repo is
+            # something to install and screen, and the two are not the same
+            # queue: queueing the repo sent GitHub names to snapshot_download,
+            # which wants a HuggingFace id, and every one of them 401'd.
+            if fit.verdict != "fits":
+                continue
+            for model_id, size in sorted(fit.weights.items(),
+                                         key=lambda kv: kv[1])[:3]:
+                if size > ins.MEMORY_CEILING:
+                    continue
+                ms.record(store, ms.Seen(
+                    name=model_id, source="inspect", kind="weights",
+                    url=f"https://huggingface.co/{model_id}",
+                    resolved=model_id, why=f"named by {repo}"))
+                ms.link(store, repo, model_id, "needs")
+                ms.decide(store, model_id, "queued", tier="inspect",
+                          detail=f"bytes={size} named by {repo}")
     finally:
         store.close()
     if a.json:
@@ -569,7 +586,7 @@ def cmd_fetch(a) -> int:
             for r in rows[:20]:
                 print(f"  {r['score'] or 0:>4}  {r['resolved'] or r['name']}")
             return 0
-        sizes = {(r["resolved"] or r["name"]): ins.hf_size(r["resolved"] or r["name"])
+        sizes = {(r["resolved"] or r["name"]): fetching.size_of(r)
                  for r in rows[:a.limit]}
         for got in fetching.run(store, sizes, limit=a.limit):
             print(f"  {'OK  ' if got['ok'] else 'skip'} {got['repo']}: {got['why']}")

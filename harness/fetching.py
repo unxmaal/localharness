@@ -18,6 +18,7 @@ NOTHING IS EXECUTED. Fetching weights is not running them.
 """
 from __future__ import annotations
 
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -78,32 +79,83 @@ def plan(repo: str, size: int, *, free: int | None = None,
 #: also writes `queued`, and it judges a description: it queued a 122B model on
 #: a 32 GB machine. Nothing is downloaded on the strength of prose.
 FETCHABLE_TIERS = ("inspect", "fetch")
+#: And only WEIGHTS are downloadable. The inspect tier queued the GitHub repos
+#: it read, and this worker calls snapshot_download, which wants a HuggingFace
+#: model id: every queued name 401'd. A repo is something to install and screen,
+#: a weight is something to fetch, and they are not the same queue.
+FETCHABLE_KIND = "weights"
 
 
-def queued(conn, tiers=FETCHABLE_TIERS) -> list[dict]:
-    """Candidates the inspect tier queued, best score first."""
+def have(model_id: str, root: Path | None = None) -> bool:
+    """Already in the HuggingFace cache, so there is nothing to download."""
+    import os
+    home = Path(root or os.environ.get("HF_HOME")
+                or Path.home() / ".cache" / "huggingface")
+    return (home / "hub" / f"models--{model_id.replace('/', '--')}").exists()
+
+
+def queued(conn, tiers=FETCHABLE_TIERS, kind: str = FETCHABLE_KIND) -> list[dict]:
+    """Weights the inspect tier queued, best score first."""
     rows = conn.execute("""
-        SELECT p.name, p.resolved,
+        SELECT p.name, p.resolved, p.kind,
                (SELECT v.score FROM verdicts v WHERE v.proposal_id = p.id
                  AND v.score IS NOT NULL ORDER BY v.id DESC LIMIT 1) AS score,
                (SELECT v.outcome FROM verdicts v WHERE v.proposal_id = p.id
                  ORDER BY v.id DESC LIMIT 1) AS outcome,
                (SELECT v.tier FROM verdicts v WHERE v.proposal_id = p.id
-                 ORDER BY v.id DESC LIMIT 1) AS tier
+                 ORDER BY v.id DESC LIMIT 1) AS tier,
+               (SELECT v.detail FROM verdicts v WHERE v.proposal_id = p.id
+                 ORDER BY v.id DESC LIMIT 1) AS detail
         FROM proposals p""").fetchall()
     out = [dict(r) for r in rows
-           if r["outcome"] == "queued" and r["tier"] in tiers]
+           if r["outcome"] == "queued" and r["tier"] in tiers
+           and (not kind or r["kind"] == kind)
+           and not have(r["resolved"] or r["name"])]
     return sorted(out, key=lambda r: -(r["score"] or 0))
 
 
+def size_of(row: dict) -> int:
+    """The size the inspect tier measured, carried on the verdict.
+
+    Read from the store rather than asked for again: the registry rate-limits,
+    and a size already measured is a fact.
+    """
+    detail = (row.get("detail") or "")
+    m = re.search(r"bytes=(\d+)", detail)
+    return int(m.group(1)) if m else 0
+
+
 def download(repo: str, snapshot=None) -> str:
-    """Weights into the shared cache. Returns the path."""
-    if snapshot is None:
-        from huggingface_hub import snapshot_download as snapshot
+    """Weights into the shared cache. Returns the path.
+
+    HF_HUB_OFFLINE is 1 everywhere else in this project on purpose: an eval
+    that silently re-downloads a model turns a network hiccup into a model
+    "failure" mid-run. Fetching is the ONE operation whose whole job is to go
+    online, so it lifts the guard for the length of the call and puts it back.
+    """
+    import os
+    was = os.environ.get("HF_HUB_OFFLINE")
+    os.environ["HF_HUB_OFFLINE"] = "0"
+    constants = restore = None
     try:
+        if snapshot is None:
+            # The env var alone is not enough: huggingface_hub reads it ONCE at
+            # import into a module constant, and harness.env has already set it
+            # by then. Set both, and put both back.
+            from huggingface_hub import constants
+            from huggingface_hub import snapshot_download as snapshot
+            restore = constants.HF_HUB_OFFLINE
+            constants.HF_HUB_OFFLINE = False
         return str(snapshot(repo_id=repo))
     except Exception as exc:  # noqa: BLE001
         raise FetchError(f"{repo}: {str(exc)[:200]}") from exc
+    finally:
+        if constants is not None:
+            constants.HF_HUB_OFFLINE = restore
+        if was is None:
+            os.environ.pop("HF_HUB_OFFLINE", None)
+        else:
+            os.environ["HF_HUB_OFFLINE"] = was
 
 
 def run(conn, sizes: dict[str, int], *, limit: int = 1, snapshot=None,

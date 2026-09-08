@@ -12,8 +12,8 @@ def db(tmp_path):
     conn.close()
 
 
-def seen(db, name):
-    ms.record(db, ms.Seen(name=name, source="inspect", resolved=name))
+def seen(db, name, kind="weights"):
+    ms.record(db, ms.Seen(name=name, source="inspect", resolved=name, kind=kind))
 
 
 # ---- what may be downloaded ------------------------------------------------
@@ -106,3 +106,50 @@ def test_a_finished_download_records_where_it_landed(db):
           free=900 * f.GIB)
     row = db.execute("SELECT run_path FROM verdicts WHERE tier='fetch'").fetchone()
     assert row["run_path"] == "/Volumes/Models/hf/a"
+
+
+# ---- a repo is not a weight ------------------------------------------------
+
+def test_a_github_repo_is_not_downloadable(db):
+    """The inspect tier queued the repos it read, and this worker calls
+    snapshot_download, which wants a HuggingFace model id. Every queued name
+    401'd. A repo is something to install and screen; a weight is something to
+    fetch."""
+    seen(db, "Blaizzy/nativ", kind="repo")
+    seen(db, "mlx-community/parakeet", kind="weights")
+    ms.decide(db, "Blaizzy/nativ", "queued", tier="inspect")
+    ms.decide(db, "mlx-community/parakeet", "queued", tier="inspect")
+    assert [r["name"] for r in f.queued(db)] == ["mlx-community/parakeet"]
+
+
+def test_something_already_in_the_cache_is_not_queued(db, tmp_path, monkeypatch):
+    monkeypatch.setenv("HF_HOME", str(tmp_path))
+    (tmp_path / "hub" / "models--org--have").mkdir(parents=True)
+    for name in ["org/have", "org/want"]:
+        seen(db, name)
+        ms.decide(db, name, "queued", tier="inspect")
+    assert [r["name"] for r in f.queued(db)] == ["org/want"]
+
+
+def test_the_size_is_read_from_the_store_not_asked_for_again():
+    """The registry rate-limits, and a size already measured is a fact."""
+    assert f.size_of({"detail": "fits: bytes=1234 MLX-native"}) == 1234
+    assert f.size_of({"detail": "no size here"}) == 0
+    assert f.size_of({}) == 0
+
+
+def test_fetching_lifts_the_offline_guard_and_puts_it_back(monkeypatch):
+    """HF_HUB_OFFLINE=1 everywhere else stops an eval silently re-downloading
+    a model mid-run. Fetching is the one operation whose job is to go online."""
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+    seen_value = {}
+
+    def snapshot(repo_id):
+        import os
+        seen_value["during"] = os.environ.get("HF_HUB_OFFLINE")
+        return "/tmp/x"
+
+    f.download("org/x", snapshot=snapshot)
+    import os
+    assert seen_value["during"] == "0"
+    assert os.environ["HF_HUB_OFFLINE"] == "1"

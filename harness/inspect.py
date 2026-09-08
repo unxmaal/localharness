@@ -35,14 +35,26 @@ MEMORY_CEILING = 22 * GIB
 CLONE_KB_CAP = 250_000
 #: No commits in this long and it is not where this month's technique lives.
 DEAD_DAYS = 730
+#: How many named weights to size. A repo that lists a hundred models is
+#: showing a CATALOGUE, and the smallest few decide the verdict anyway, so
+#: sizing all of them buys nothing and costs an hour.
+SIZE_LIMIT = 12
+#: The registry 429s under a sweep. Retrying at the feed cadence (4 tries, 20s
+#: apart) turns one repo naming 130 models into three hours, which defeats a
+#: tier whose whole justification is that it costs seconds. One quick retry,
+#: then record the size as unknown and move on.
+SIZE_RETRIES = 1
+SIZE_DELAY = 2.0
 
 VERDICTS = ("fits", "too-big", "needs-cuda", "no-entry-point", "dead", "unknown")
 
 #: Imports and pins that mean it will not run on this machine at all.
+#: NOT awq, gptq or vllm: awq is a QUANTISATION FORMAT that mlx-lm implements
+#: natively, and matching it flagged ml-explore/mlx-lm as CUDA-dependent on the
+#: strength of an entry point named `mlx_lm.awq`.
 CUDA_MARKERS = re.compile(
     r"\b(torch\.cuda|cuda_is_available|bitsandbytes|flash[_-]attn|xformers|"
-    r"triton|nvidia-[a-z0-9-]+|tensorrt|cupy|deepspeed|vllm|auto-?gptq|awq)\b",
-    re.I)
+    r"triton|nvidia-[a-z0-9-]+|tensorrt|cupy|deepspeed)\b", re.I)
 MLX_MARKERS = re.compile(r"\b(import mlx|from mlx|mlx[_-]lm|mlx[_-]audio|"
                          r"mlx[_-]vlm|mlx\.core|MLX)\b")
 MPS_MARKERS = re.compile(r"""device\s*=\s*['"]mps['"]|torch\.backends\.mps""")
@@ -158,7 +170,21 @@ def scan(tree: Path) -> dict:
             "entry_points": sorted(set(entries))[:8]}
 
 
-def hf_size(model_id: str, fetch=None) -> int:
+def _sizes_path() -> Path:
+    from harness import paths
+    d = paths.home() / "cache" / "github"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "hf-sizes.json"
+
+
+def _size_cache() -> dict:
+    try:
+        return json.loads(_sizes_path().read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def hf_size(model_id: str, fetch=None, cache: dict | None = None) -> int:
     """Total bytes of a HuggingFace repo, or -1 when it cannot be told.
 
     -1 rather than 0, and callers must keep the two apart: an unknown size
@@ -167,14 +193,23 @@ def hf_size(model_id: str, fetch=None) -> int:
     goes through the feed fetcher, which already retries with backoff.
     """
     from harness import feeds
-    fetch = fetch or feeds.fetch
+    if cache is not None and model_id in cache:
+        return int(cache[model_id])
+    if fetch is None:
+        def fetch(url):
+            return feeds.fetch(url, retries=SIZE_RETRIES, delay=SIZE_DELAY)
     url = f"https://huggingface.co/api/models/{model_id}?blobs=true"
     try:
         data = json.loads(fetch(url))
     except Exception:  # noqa: BLE001 - unreachable is unknown, never zero
         return -1
     sizes = [s.get("size") or 0 for s in data.get("siblings", [])]
-    return sum(sizes) if sizes else -1
+    total = sum(sizes) if sizes else -1
+    # Only a real answer is worth keeping. Caching -1 would freeze a rate-limit
+    # into a permanent "unknown".
+    if cache is not None and total > 0:
+        cache[model_id] = total
+    return total
 
 
 def decide(fit: Fit, ceiling: int = MEMORY_CEILING, dead_days: int = DEAD_DAYS,
@@ -189,14 +224,31 @@ def decide(fit: Fit, ceiling: int = MEMORY_CEILING, dead_days: int = DEAD_DAYS,
     # Only a DECLARED dependency disqualifies. apple/coreai-models mentions
     # torch.cuda in one export recipe and is an Apple on-device repo; calling
     # that "needs CUDA" threw away the most relevant candidate in the sweep.
-    if fit.cuda:
+    # An MLX import is positive proof the project runs on Apple Silicon, so a
+    # CUDA pin alongside it is an OPTIONAL non-Mac build path rather than a
+    # requirement. ml-explore/mlx itself was reported as needs-cuda: its
+    # setup.py adds nvidia-* inside `if toolkit == 12:`, a branch never taken
+    # here.
+    if fit.cuda and not fit.mlx:
         fit.verdict, fit.why = "needs-cuda", f"depends on {', '.join(fit.cuda[:3])}"
         return fit
+    if fit.cuda:
+        fit.cuda_mentioned = sorted(set(fit.cuda_mentioned) | set(fit.cuda))
+        fit.cuda = []
     # THE SMALLEST decides, not the largest, and this was measured the hard
     # way: Blaizzy/nativ names a 1774 GiB model and was reported as too big for
     # this machine. It is a Mac app with a CATALOGUE of models it can serve.
     # Source cannot tell a requirement from an option, so the honest question
     # is whether ANYTHING it names could run here.
+    # A truncated size scan cannot support "too-big": the smallest of twelve
+    # sized ids out of nearly three hundred named is an upper bound on the
+    # floor, not the floor. Blaizzy/mlx-video was refused on exactly this.
+    if fit.smallest > ceiling and len(fit.unsized) > len(fit.weights):
+        fit.verdict = "unknown"
+        fit.why = (f"smallest of {len(fit.weights)} sized weights is "
+                   f"{fit.smallest / GIB:.1f} GiB, but {len(fit.unsized)} more "
+                   f"were never sized, so the floor is not known")
+        return fit
     if fit.smallest > ceiling:
         fit.verdict = "too-big"
         fit.why = (f"smallest weight it names is {fit.smallest / GIB:.1f} GiB, "
@@ -227,6 +279,14 @@ def decide(fit: Fit, ceiling: int = MEMORY_CEILING, dead_days: int = DEAD_DAYS,
     return fit
 
 
+def _takes_cache(fn) -> bool:
+    import inspect as _i
+    try:
+        return "cache" in _i.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+
+
 def inspect(repo: str, workdir: Path, *, meta: dict | None = None,
             sizer=hf_size, run=_run, ceiling: int = MEMORY_CEILING,
             kb_cap: int = CLONE_KB_CAP) -> Fit:
@@ -247,12 +307,22 @@ def inspect(repo: str, workdir: Path, *, meta: dict | None = None,
     fit.mlx, fit.mps = found["mlx"], found["mps"]
     fit.cuda, fit.entry_points = found["cuda"], found["entry_points"]
     fit.cuda_mentioned = found["cuda_mentioned"]
-    for model_id in found["hf_ids"]:
-        size = sizer(model_id)
+    cache = _size_cache()
+    before = len(cache)
+    # Shortest ids first: an id like "org/model" is far likelier to be the
+    # thing it runs than a long variant name buried in a catalogue.
+    for model_id in sorted(found["hf_ids"], key=len)[:SIZE_LIMIT]:
+        size = sizer(model_id, cache=cache) if _takes_cache(sizer) else sizer(model_id)
         if size > 0:
             fit.weights[model_id] = size
         else:
             fit.unsized.append(model_id)
+    fit.unsized += found["hf_ids"][SIZE_LIMIT:] if len(found["hf_ids"]) > SIZE_LIMIT else []
+    if len(cache) > before:
+        try:
+            _sizes_path().write_text(json.dumps(cache, indent=1, sort_keys=True))
+        except OSError:
+            pass
     fit.largest = max(fit.weights.values(), default=0)
     fit.smallest = min(fit.weights.values(), default=0)
     return decide(fit, ceiling=ceiling)

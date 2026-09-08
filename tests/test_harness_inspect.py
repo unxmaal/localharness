@@ -143,3 +143,100 @@ def test_a_registry_reply_with_no_files_is_unknown_not_zero():
 def test_sizes_are_summed_across_the_repo():
     reply = '{"siblings": [{"size": 100}, {"size": 250}]}'
     assert ins.hf_size("org/x", fetch=lambda url: reply) == 350
+
+
+# ---- the tier has to stay cheap --------------------------------------------
+
+def test_only_a_bounded_number_of_weights_is_sized(tmp_path):
+    """A repo listing a hundred models is showing a CATALOGUE. Sizing all of
+    them turned a seconds-long tier into hours: the registry 429s under a
+    sweep, and retrying at the feed cadence costs 80s per id."""
+    asked = []
+
+    def run(argv, cwd=None, timeout=180.0):
+        d = tmp_path / "a__b"
+        d.mkdir(exist_ok=True)
+        (d / "m.py").write_text("\n".join(
+            f'load("org/model-{i:03d}")' for i in range(60)))
+        return "2026-01-01T00:00:00+00:00"
+
+    def sizer(model_id, cache=None):
+        asked.append(model_id)
+        return -1
+
+    got = ins.inspect("a/b", tmp_path, meta={"size": 10}, run=run, sizer=sizer)
+    assert len(asked) == ins.SIZE_LIMIT
+    assert len(got.unsized) == 60
+
+
+def test_the_sizing_retry_is_short_not_the_feed_cadence():
+    """20s between four tries is right for a feed nobody is waiting on, and
+    wrong for a tier justified by costing seconds."""
+    assert ins.SIZE_RETRIES <= 1 and ins.SIZE_DELAY <= 5
+
+
+def test_a_known_size_is_answered_from_cache_without_asking():
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return '{"siblings": [{"size": 5}]}'
+
+    cache = {"org/x": 4242}
+    assert ins.hf_size("org/x", fetch=fetch, cache=cache) == 4242
+    assert calls == []
+
+
+def test_a_rate_limit_is_not_cached_as_a_permanent_unknown():
+    """Caching -1 would freeze one bad afternoon into a fact."""
+    cache = {}
+    ins.hf_size("org/x", fetch=lambda url: (_ for _ in ()).throw(RuntimeError()),
+                cache=cache)
+    assert cache == {}
+
+
+def test_a_real_size_is_kept_so_the_next_sweep_is_free():
+    cache = {}
+    ins.hf_size("org/x", fetch=lambda url: '{"siblings": [{"size": 7}]}',
+                cache=cache)
+    assert cache == {"org/x": 7}
+
+
+def test_an_mlx_project_is_not_disqualified_by_an_optional_cuda_build(tmp_path):
+    """ml-explore/mlx itself came back needs-cuda. Its setup.py adds nvidia-*
+    inside `if toolkit == 12:`, a branch this machine never takes, and an
+    `import mlx` is positive proof the project runs on Apple Silicon."""
+    got = ins.decide(ins.Fit(repo="ml-explore/mlx", entry_points=["setup.py"],
+                             mlx=True, cuda=["nvidia-cublas"]))
+    assert got.verdict == "fits"
+    assert "nvidia-cublas" in got.cuda_mentioned
+
+
+def test_a_non_mlx_project_is_still_disqualified_by_a_cuda_dependency():
+    got = ins.decide(ins.Fit(repo="a/b", entry_points=["setup.py"], mlx=False,
+                             cuda=["nvidia-resiliency-ext"]))
+    assert got.verdict == "needs-cuda"
+
+
+def test_awq_is_a_quantisation_format_not_a_cuda_requirement(tmp_path):
+    """mlx-lm was flagged on an entry point named `mlx_lm.awq`, and mlx-lm
+    implements AWQ natively."""
+    t = tree(tmp_path, {"setup.py": '"mlx_lm.awq = mlx_lm.quant.awq:main"'})
+    assert ins.scan(t)["cuda"] == []
+
+
+def test_too_big_is_not_claimed_from_a_truncated_size_scan():
+    """The smallest of twelve sized ids out of three hundred named is an upper
+    bound on the floor, not the floor. mlx-video was refused on exactly this."""
+    got = ins.decide(ins.Fit(repo="a/b", entry_points=["m.py"],
+                             weights={"org/x": 90 * ins.GIB},
+                             smallest=90 * ins.GIB, largest=90 * ins.GIB,
+                             unsized=["org/%d" % i for i in range(50)]))
+    assert got.verdict == "unknown" and "never sized" in got.why
+
+
+def test_too_big_still_holds_when_the_scan_was_complete():
+    got = ins.decide(ins.Fit(repo="a/b", entry_points=["m.py"],
+                             weights={"org/x": 90 * ins.GIB},
+                             smallest=90 * ins.GIB, largest=90 * ins.GIB))
+    assert got.verdict == "too-big"
