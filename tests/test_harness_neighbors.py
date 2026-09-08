@@ -1,5 +1,6 @@
 """Issue #58: repo similarity from a crowd's stars, computed here."""
 import json
+from datetime import datetime, timezone
 
 import pytest
 
@@ -147,23 +148,29 @@ def _world():
     """Fifty people. Forty starred a small sibling project; all fifty starred a
     giant that everybody stars."""
     people = [f"u{i}" for i in range(50)]
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00Z")
     repos = {
-        "org/sibling": {"stargazers_count": 900},
-        "big/everything": {"stargazers_count": 500_000, "archived": True,
+        "org/sibling": {"stargazers_count": 900, "pushed_at": today},
+        "big/everything": {"stargazers_count": 500_000,
                            "language": "JavaScript", "topics": ["awesome"],
-                           "pushed_at": "2020-01-01T00:00:00Z",
+                           "pushed_at": today,
                            "description": "everyone stars this"},
+        "dead/finished": {"stargazers_count": 900, "archived": True,
+                          "pushed_at": today},
+        "old/abandoned": {"stargazers_count": 900,
+                          "pushed_at": "2019-01-01T00:00:00Z"},
     }
     starred = {u: ["big/everything"] for u in people}
     for u in people[:40]:
-        starred[u].append("org/sibling")
+        starred[u] += ["org/sibling", "dead/finished", "old/abandoned"]
     return FakeAPI(repos=repos, starred=starred), people
 
 
 def test_the_sibling_outranks_the_repo_everybody_stars(tmp_path):
     api, people = _world()
     got = nb.neighbors(people, client(api, tmp_path))
-    assert [n.repo for n in got] == ["org/sibling", "big/everything"]
+    assert got[0].repo == "org/sibling"
+    got = [n for n in got if n.repo in ("org/sibling", "big/everything")]
     # The score is a log ratio times a count, so the gap is a comfortable
     # margin rather than the orders of magnitude a plain ratio would give.
     assert got[0].score > got[1].score * 2
@@ -197,17 +204,46 @@ def test_what_we_already_run_can_be_excluded(tmp_path):
     release feeds are a separate source kind."""
     api, people = _world()
     got = nb.neighbors(people, client(api, tmp_path), exclude=["org/sibling"])
-    assert [n.repo for n in got] == ["big/everything"]
+    assert "org/sibling" not in [n.repo for n in got]
+    assert "big/everything" in [n.repo for n in got]
 
 
 def test_metadata_comes_from_github_not_from_a_third_party(tmp_path):
-    """Topics, archived and pushed date are what let the judge tell a live
+    """Topics, language and pushed date are what let the judge tell a live
     project from an abandoned one, and they are GitHub's own fields."""
     api, people = _world()
     got = nb.neighbors(people, client(api, tmp_path))
     big = [n for n in got if n.repo == "big/everything"][0]
-    assert big.archived and big.language == "JavaScript"
-    assert big.topics == ["awesome"] and big.pushed == "2020-01-01"
+    assert big.language == "JavaScript" and big.topics == ["awesome"]
+    assert big.pushed and not big.archived
+
+
+def test_an_archived_repo_never_ranks(tmp_path):
+    """Archived means finished, so it cannot be a thing to try next however
+    well it scores. A 2020 physics course ranked sixth on the first real run."""
+    api, people = _world()
+    got = nb.neighbors(people, client(api, tmp_path))
+    assert "dead/finished" not in [n.repo for n in got]
+
+
+def test_an_archived_repo_can_be_kept_deliberately(tmp_path):
+    api, people = _world()
+    got = nb.neighbors(people, client(api, tmp_path), keep_archived=True)
+    assert "dead/finished" in [n.repo for n in got]
+
+
+def test_a_stale_repo_scores_below_an_identical_live_one(tmp_path):
+    """Same stars, same overlap, seven years apart. The question is what to
+    try NOW, so the live one has to win."""
+    api, people = _world()
+    got = {n.repo: n.score for n in nb.neighbors(people, client(api, tmp_path))}
+    assert got["org/sibling"] > got["old/abandoned"] * 5
+
+
+def test_a_missing_push_date_is_not_treated_as_abandonment(tmp_path):
+    """Thin metadata is not evidence of death, and scoring it as such would
+    silently drop every repo whose fields came back empty."""
+    assert nb.recency("") == 1.0 and nb.recency("not-a-date") == 1.0
 
 
 def test_a_candidate_whose_metadata_is_gone_is_skipped_not_fatal(tmp_path):

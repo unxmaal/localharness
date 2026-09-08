@@ -372,3 +372,39 @@ def test_the_platform_filter_drops_cuda_only_proposals(week):
                                    min_relevance=1)
     assert len(filtered) < len(everything)
     assert all(c.relevance >= 1 for c in filtered)
+
+
+# ---- issue #49: a repo name in prose is a claim -----------------------------
+
+class FakeGH:
+    """Stands in for harness.github.Client.exists."""
+
+    def __init__(self, known=(), unreachable=False):
+        self.known, self.unreachable = set(known), unreachable
+        self.asked = []
+
+    def exists(self, full_name):
+        self.asked.append(full_name)
+        if self.unreachable:
+            raise RuntimeError("no network")
+        return full_name in self.known
+
+
+def test_a_github_proposal_that_does_not_exist_is_dropped(week):
+    """Held to the same bar as a model name: HF ids were verified from the
+    start and repo names were not."""
+    src = Source("fix", "https://example.invalid", lane="image")
+    gh = FakeGH(known=())
+    got = discover.from_feeds([src], reader=lambda s: week, verify=True, gh=gh)
+    assert not [c for c in got if c.kind == "proposal" and "/" in c.name
+                and c.how.startswith("https://github.com")]
+
+
+def test_an_unreachable_api_keeps_the_proposal_rather_than_emptying_the_sweep(week):
+    """Fails OPEN. An outage that silently returns nothing looks identical to
+    a quiet week, which is the worst way for a discovery tool to break."""
+    src = Source("fix", "https://example.invalid", lane="image")
+    linked = discover.from_feeds([src], reader=lambda s: week, verify=False)
+    survived = discover.from_feeds([src], reader=lambda s: week, verify=True,
+                                   gh=FakeGH(unreachable=True))
+    assert {c.name for c in survived} >= {c.name for c in linked if c.kind == "tool"}

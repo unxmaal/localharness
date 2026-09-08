@@ -87,6 +87,13 @@ DEFAULT_SOURCES = [
     Source("mlx-audio-releases", kind="releases",
            url="https://github.com/Blaizzy/mlx-audio/releases.atom",
            lane="tts", note="TTS and STT server"),
+    # Not a feed: read through the GitHub API by `lh discover --neighbors`.
+    # It lives here so it shares the interval and shows up in --sources, rather
+    # than being a source nobody remembers to run. Issue #58.
+    Source("github-crowd", kind="crowd",
+           url="https://github.com/ (contributors of what this machine runs)",
+           lane="all",
+           note="what the people who build mlx, mlx-audio and mflux star"),
     Source("mflux-releases", kind="releases",
            url="https://github.com/mflux-community/mflux/releases.atom",
            lane="image",

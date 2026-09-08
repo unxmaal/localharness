@@ -465,10 +465,12 @@ def _report_recurrence(a) -> int:
     try:
         rows = ms.recurrence(conn, minimum=2)
         stats = ms.precision(conn)
+        per_source = ms.by_source(conn)
     finally:
         conn.close()
     if a.json:
-        print(json.dumps({"recurrence": rows, "totals": stats}, indent=2))
+        print(json.dumps({"recurrence": rows, "totals": stats,
+                          "by_source": per_source}, indent=2))
         return 0
     if not rows:
         print("nothing seen more than once yet. Run `lh discover --feeds`.")
@@ -481,6 +483,12 @@ def _report_recurrence(a) -> int:
     print(f"\n{stats['proposals']} proposals, {stats['resolved']} resolved, "
           f"{stats['verdict_measured']} measured, "
           f"{stats['verdict_declined']} declined")
+    if per_source:
+        print("\nper source (issue #49: precision is a query, not a count):")
+        print(f"  {'source':24} {'proposed':>8} {'resolved':>8} {'settled':>8}")
+        for r in per_source:
+            print(f"  {r['source']:24} {r['proposals']:8d} "
+                  f"{r['resolved']:8d} {r['settled']:8d}")
     return 0
 
 
@@ -533,6 +541,7 @@ def _report_neighbors(a) -> int:
     # both ends to exist.
     store = ms.connect()
     try:
+        feeds.record_fetch("github-crowd")
         for seed in nb.DEFAULT_SEEDS:
             ms.record(store, ms.Seen(name=seed, source="installed", kind="repo",
                                      url=f"https://github.com/{seed}",
@@ -548,8 +557,42 @@ def _report_neighbors(a) -> int:
             for seed in nb.DEFAULT_SEEDS:
                 ms.link(store, seed, n.repo, "crowd",
                         note=f"{n.shared}/{n.crowd} at {n.score:.5f}")
+        if getattr(a, "judge", False):
+            _judge_neighbors(found, store)
     finally:
         store.close()
+    return 0
+
+
+def _judge_neighbors(found, store):
+    """Score crowd proposals with the rubric. Same cheapest tier as the feeds.
+
+    A repo card says more than a recap blurb, so the judge is shown the
+    description, topics and how much of the crowd starred it.
+    """
+    from harness import judge
+    from harness import memory_store as ms
+    try:
+        rubric = judge.load()
+    except judge.JudgeError as exc:
+        return err(str(exc))
+    print("\n  judged:")
+    for n in found:
+        why = f"{n.description} [{n.language}; {', '.join(n.topics[:6])}]"
+        try:
+            score, reason = judge.score(
+                judge.describe(n.repo, why=why, source="github-crowd",
+                               times_seen=n.shared), rubric)
+        except Exception as exc:  # noqa: BLE001
+            err(f"{n.repo}: {exc}")
+            continue
+        print(f"    {score:2d}/10  {n.repo:38.38s} {reason[:60]}")
+        try:
+            ms.decide(store, n.repo, "queued", tier="judge", score=score,
+                      rubric=rubric.identity, judge=rubric.model,
+                      detail=reason[:200])
+        except KeyError:
+            pass
     return 0
 
 
@@ -573,7 +616,12 @@ def _report_sources(a) -> int:
     if proposed:
         print("\nsources these feeds point at that we do not read:")
         for c in proposed:
-            print(f"  {c.name:20} {c.note}")
+            # Probing is the difference between a shortlist and a guess: half
+            # of these hosts serve no feed at all. Issue #50.
+            ok, why = feeds.probe(c.how or c.url)
+            mark = "FEED " if ok else "none "
+            print(f"  {mark} {c.name:20} {c.note}")
+            print(f"        {why}")
         print(f"\n  Add one to {feeds.config_path()} to start reading it. "
               f"Deliberately manual: a source URL out of untrusted prose "
               f"should need a human nod.")
@@ -808,7 +856,8 @@ def build_parser() -> argparse.ArgumentParser:
                         "Silicon")
     d.add_argument("--no-verify", action="store_true",
                    help="with --feeds, skip resolving prose names against the "
-                        "registry (faster, noisier)")
+                        "registry. Faster, and QUIETER: every unresolved name "
+                        "is dropped rather than offered")
     d.set_defaults(func=cmd_discover)
 
     h = sub.add_parser("hear", help="transcribe a clip, or record and transcribe")
