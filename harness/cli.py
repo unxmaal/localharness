@@ -336,6 +336,8 @@ def cmd_discover(a) -> int:
     every time anything is installed or any eval is run. A number in a document
     is wrong by the next commit.
     """
+    if getattr(a, "inspect", False):
+        return _report_inspect(a)
     if getattr(a, "neighbors", False):
         return _report_neighbors(a)
     if getattr(a, "control", False):
@@ -489,6 +491,90 @@ def _report_recurrence(a) -> int:
         for r in per_source:
             print(f"  {r['source']:24} {r['proposals']:8d} "
                   f"{r['resolved']:8d} {r['settled']:8d}")
+    return 0
+
+
+def _report_inspect(a) -> int:
+    """Read a candidate's source before anyone downloads its weights. #61."""
+    from harness import github, inspect as ins
+    from harness import memory_store as ms
+
+    client = github.Client(budget=getattr(a, "budget", 900))
+    work = paths.home() / "cache" / "clones"
+    work.mkdir(parents=True, exist_ok=True)
+    store = ms.connect()
+    try:
+        names = list(a.repos) if a.repos else [
+            n.repo for n in __import__("harness.neighbors", fromlist=["x"])
+            .neighbors(client=client, top=getattr(a, "top", 10))]
+        out = []
+        for repo in names:
+            try:
+                meta = client.repo(repo)
+            except github.GitHubError as exc:
+                err(f"{repo}: {exc}")
+                continue
+            try:
+                fit = ins.inspect(repo, work, meta=meta)
+            except ins.InspectError as exc:
+                err(f"{repo}: {exc}")
+                continue
+            out.append(fit)
+            ms.record(store, ms.Seen(name=repo, source="inspect", kind="repo",
+                                     url=f"https://github.com/{repo}",
+                                     resolved=repo, why=fit.why))
+            # A thing that cannot run here is ANSWERED, so it is terminal and
+            # never proposed again. "unknown" settles nothing, deliberately.
+            outcome = {"fits": "queued", "unknown": ""}.get(fit.verdict, "declined")
+            if outcome:
+                ms.decide(store, repo, outcome, tier="inspect",
+                          detail=f"{fit.verdict}: {fit.why}"[:200])
+    finally:
+        store.close()
+    if a.json:
+        print(json.dumps({"inspected": [vars(f) for f in out]}, indent=2))
+        return 0
+    print("\nread from source, with nothing downloaded and nothing run")
+    for f in out:
+        print(f"\n  {f.verdict.upper():14} {f.repo}")
+        print(f"    {f.why}")
+        bits = []
+        if f.mlx:
+            bits.append("MLX-native")
+        if f.mps and not f.mlx:
+            bits.append("torch/MPS")
+        if f.cuda_mentioned:
+            bits.append(f"mentions {', '.join(f.cuda_mentioned[:2])}")
+        if f.unsized:
+            bits.append(f"{len(f.unsized)} weight(s) unsized")
+        if bits:
+            print(f"    {'; '.join(bits)}")
+    return 0
+
+
+def cmd_fetch(a) -> int:
+    """Download what the inspect tier queued. Issue #62."""
+    from harness import fetching, inspect as ins
+    from harness import memory_store as ms
+
+    store = ms.connect()
+    try:
+        rows = fetching.queued(store)
+        if not rows:
+            print("nothing queued. `lh discover --inspect` fills the queue.")
+            return 0
+        if not a.run:
+            print(f"\n{len(rows)} queued, {fetching.free_bytes() / fetching.GIB:.0f} "
+                  f"GiB free. --run to start; one at a time, largest first.")
+            for r in rows[:20]:
+                print(f"  {r['score'] or 0:>4}  {r['resolved'] or r['name']}")
+            return 0
+        sizes = {(r["resolved"] or r["name"]): ins.hf_size(r["resolved"] or r["name"])
+                 for r in rows[:a.limit]}
+        for got in fetching.run(store, sizes, limit=a.limit):
+            print(f"  {'OK  ' if got['ok'] else 'skip'} {got['repo']}: {got['why']}")
+    finally:
+        store.close()
     return 0
 
 
@@ -849,6 +935,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="with --neighbors, cap on GitHub API requests")
     d.add_argument("--top", type=int, default=25,
                    help="with --neighbors, how many to show")
+    d.add_argument("--inspect", action="store_true",
+                   help="clone a candidate's source and say whether it can run "
+                        "here, before anything is downloaded")
+    d.add_argument("--repos", nargs="*", default=[],
+                   help="with --inspect, specific repos instead of the crowd")
     d.add_argument("--recurrence", action="store_true",
                    help="what keeps coming back, from the discovery store")
     d.add_argument("--platform", action="store_true",
@@ -859,6 +950,15 @@ def build_parser() -> argparse.ArgumentParser:
                         "registry. Faster, and QUIETER: every unresolved name "
                         "is dropped rather than offered")
     d.set_defaults(func=cmd_discover)
+
+    f = sub.add_parser("fetch",
+                       help="download weights the inspect tier queued")
+    f.add_argument("--run", action="store_true",
+                   help="actually download; without it, only says what would")
+    f.add_argument("--limit", type=int, default=1,
+                   help="how many to fetch. One at a time by default: this "
+                        "machine holds one working set")
+    f.set_defaults(func=cmd_fetch)
 
     h = sub.add_parser("hear", help="transcribe a clip, or record and transcribe")
     h.add_argument("file", nargs="?", help="an existing audio file")
