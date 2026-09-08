@@ -166,3 +166,21 @@ def test_changing_what_the_judge_sees_bumps_the_rubric_version():
     """Two runs under different rubrics are different exams, so a scored run
     from before this change must not be ranked against one from after."""
     assert load().version >= 2
+
+
+def test_every_control_item_carries_the_same_inspect_verdict():
+    """A control has to be shaped like the data the judge actually meets. When
+    the inspect result was first shown, six unrelated candidates all scored
+    10/10 on "MLX-native, weights fit", and the control could not see it
+    because control items carried no inspect fields at all. A fact shared by
+    every item cannot be what separates them."""
+    prompts = []
+    judge.control(complete=lambda p, **kw: prompts.append(p) or "5\n")
+    assert len(prompts) == len(judge.CONTROL)
+    assert all(judge.CONTROL_INSPECTED in p for p in prompts)
+
+
+def test_the_rubric_says_running_here_is_not_merit():
+    p = load().prompt.lower()
+    assert "price of entry" in p or "not merit" in p
+    assert "5 at most" in p
