@@ -98,14 +98,23 @@ def queued(conn, tiers=FETCHABLE_TIERS, kind: str = FETCHABLE_KIND) -> list[dict
     """Weights the inspect tier queued, best score first."""
     rows = conn.execute("""
         SELECT p.name, p.resolved, p.kind,
-               (SELECT v.score FROM verdicts v WHERE v.proposal_id = p.id
-                 AND v.score IS NOT NULL ORDER BY v.id DESC LIMIT 1) AS score,
                (SELECT v.outcome FROM verdicts v WHERE v.proposal_id = p.id
                  ORDER BY v.id DESC LIMIT 1) AS outcome,
                (SELECT v.tier FROM verdicts v WHERE v.proposal_id = p.id
                  ORDER BY v.id DESC LIMIT 1) AS tier,
                (SELECT v.detail FROM verdicts v WHERE v.proposal_id = p.id
-                 ORDER BY v.id DESC LIMIT 1) AS detail
+                 ORDER BY v.id DESC LIMIT 1) AS detail,
+               -- The judge scores REPOS; the queue holds WEIGHTS, and a weight
+               -- is never judged (judging a model id in isolation is the
+               -- copywriting problem the rubric exists to avoid). So a weight
+               -- inherits the score of the repo that named it, through the
+               -- `needs` edge. Without this every row sorted at 0 and "largest
+               -- first" was whatever order the query happened to return.
+               COALESCE((SELECT v2.score FROM edges e
+                           JOIN verdicts v2 ON v2.proposal_id = e.src
+                          WHERE e.dst = p.id AND e.relation = 'needs'
+                            AND v2.score IS NOT NULL
+                          ORDER BY v2.id DESC LIMIT 1), 0) AS score
         FROM proposals p""").fetchall()
     out = [dict(r) for r in rows
            if r["outcome"] == "queued" and r["tier"] in tiers
