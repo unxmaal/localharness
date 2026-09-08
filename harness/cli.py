@@ -813,7 +813,11 @@ def _report_feeds(a) -> int:
     try:
         found = discovery.from_feeds(
             verify=not a.no_verify,
-            min_relevance=1 if a.platform else None, store=store)
+            min_relevance=1 if a.platform else None, store=store,
+            comments=getattr(a, "comments", 0),
+            mentions=(_mention_extractor()
+                      if getattr(a, "comments", 0) and getattr(a, "judge", False)
+                      else None))
         if getattr(a, "judge", False):
             found = _judge_proposals(found, store)
     finally:
@@ -846,6 +850,12 @@ def _report_feeds(a) -> int:
         print(f"    {c.note}")
         print(f"    -> uv run python -m evals.run {c.how}")
     return 0
+
+
+def _mention_extractor():
+    """The judge, used to read names out of freeform comment prose. #79."""
+    from harness import judge
+    return lambda text: judge.mentions(text)
 
 
 def _judge_proposals(found, store):
@@ -1035,6 +1045,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="with --inspect, specific repos instead of the crowd")
     d.add_argument("--recurrence", action="store_true",
                    help="what keeps coming back, from the discovery store")
+    d.add_argument("--comments", type=int, default=0, metavar="N",
+                   help="with --feeds, also read the replies on the N newest "
+                        "posts per source. The comparative judgements live "
+                        "there, not in the post")
     d.add_argument("--platform", action="store_true",
                    help="with --feeds, only what looks like it runs on Apple "
                         "Silicon")

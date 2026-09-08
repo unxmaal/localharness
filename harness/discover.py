@@ -394,7 +394,9 @@ def _gh_exists(repo: str, client=None) -> bool:
 
 def from_feeds(sources=None, reader=None, verify=True,
                limit: int = 25, min_relevance: int | None = None,
-               store=None, gh=None) -> list[Capability]:
+               store=None, gh=None, comments: int = 0,
+               comment_reader=None, mentions=None,
+               mention_comments: int = 8) -> list[Capability]:
     """Candidates the community is talking about that nothing here has measured.
 
     A LINKED repo is already an id. A name lifted from prose is a claim, and is
@@ -445,14 +447,52 @@ def from_feeds(sources=None, reader=None, verify=True,
                     note=f"running {have}, latest is {newest}"))
             continue
 
-        for p in feeds.candidates(entries, src.name):
+        # The comparative judgements are in the REPLIES, not the post. A post
+        # title says "what do you use for local image generation"; the answer
+        # names four tools across four lanes. Issue #78.
+        # Comments are their OWN source, not more of the post's. Folding them
+        # together would move the recap's measured extraction precision (0.45,
+        # issue #49) without anyone changing the recap, and the baseline stops
+        # meaning anything. They are a different kind of text with a different
+        # hit rate, so they get a different name in the store.
+        batches = [(src.name, list(entries))]
+        if comments and src.kind == "atom":
+            reader_c = comment_reader or feeds.comments
+            replies: list = []
+            for e in entries[:comments]:
+                if not e.link:
+                    continue
+                try:
+                    replies += reader_c(e.link)
+                except Exception:  # noqa: BLE001 - one dead thread is not a sweep
+                    continue
+            if replies:
+                batches.append((f"{src.name}-comments", replies))
+
+        proposals: list = []
+        for origin, batch in batches:
+            proposals += feeds.candidates(batch, origin)
+            if not (mentions and origin.endswith("-comments")):
+                continue
+            # A model call per comment, so only the longest few: a two-word
+            # reply names nothing, and the thread that prompted this had 126
+            # comments of which one carried the ranking worth having. #79.
+            richest = sorted(batch, key=lambda e: -len(e.body or ""))
+            for e in richest[:mention_comments]:
+                for name, claim in mentions(e.body):
+                    proposals.append(feeds.Proposal(
+                        name, claim or f"named in: {e.title}"[:160], origin,
+                        e.link, e.updated, "candidate",
+                        feeds.relevance(f"{name} {claim}")))
+
+        for p in proposals:
             # Every drop is RECORDED. Without the thrown-away names there is no
             # denominator, and a store holding only survivors can report that
             # 100% of proposals resolved, which is true and means nothing.
             # Issue #49.
-            def drop(reason, name=None):
+            def drop(reason, name=None, origin=None):
                 if store is not None:
-                    ms.reject(store, name or p.name, src.name, reason)
+                    ms.reject(store, name or p.name, origin or p.source, reason)
 
             if min_relevance is not None and p.relevance < min_relevance:
                 drop("below-relevance")
@@ -491,7 +531,7 @@ def from_feeds(sources=None, reader=None, verify=True,
             seen.add(repo.lower())
             if store is not None:
                 ms.record(store, ms.Seen(
-                    name=repo, source=src.name, url=p.url or src.url,
+                    name=repo, source=p.source or src.name, url=p.url or src.url,
                     why=p.why[:160], relevance=p.relevance, kind=p.kind,
                     # `repo` is the linked id, or the id a prose name resolved
                     # to. Either way it is the verified thing, so keep it.

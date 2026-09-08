@@ -184,3 +184,48 @@ def test_the_rubric_says_running_here_is_not_merit():
     p = load().prompt.lower()
     assert "price of entry" in p or "not merit" in p
     assert "5 at most" in p
+
+
+# ---- issue #79: reading names out of freeform prose ------------------------
+
+def test_a_named_thing_and_its_claim_are_both_kept():
+    """The value of a comment is the CLAIM, not just the name: "king for image
+    editing" is the part a registry cannot tell you."""
+    reply = "Qwen Image Edit | king for image editing\nBreeze TTS | best for cloning"
+    got = judge.mentions("...", complete=lambda p, **kw: reply)
+    assert got == [("Qwen Image Edit", "king for image editing"),
+                   ("Breeze TTS", "best for cloning")]
+
+
+def test_a_comment_naming_nothing_yields_nothing():
+    assert judge.mentions("thanks!", complete=lambda p, **kw: "NONE") == []
+
+
+def test_empty_text_never_reaches_the_model():
+    def boom(p, **kw):
+        raise AssertionError("must not be called")
+    assert judge.mentions("   ", complete=boom) == []
+
+
+def test_a_model_that_errors_does_not_empty_the_sweep():
+    """One unparseable comment is not a failure of the sweep."""
+    def boom(p, **kw):
+        raise RuntimeError("model is down")
+    assert judge.mentions("something", complete=boom) == []
+
+
+def test_a_sentence_is_not_a_name():
+    reply = ("A | ok\n" + "x" * 80 + " | too long\n| no name\nNAME | header")
+    got = judge.mentions("...", complete=lambda p, **kw: reply)
+    assert [n for n, _ in got] == []
+
+
+def test_a_narrating_model_is_cut_off():
+    reply = "\n".join(f"thing{i} | claim" for i in range(40))
+    assert len(judge.mentions("...", complete=lambda p, **kw: reply)) == \
+        judge.MAX_MENTIONS
+
+
+def test_list_markers_are_stripped():
+    got = judge.mentions("...", complete=lambda p, **kw: "- ComfyUI | a UI")
+    assert got == [("ComfyUI", "a UI")]

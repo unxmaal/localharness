@@ -408,3 +408,63 @@ def test_an_unreachable_api_keeps_the_proposal_rather_than_emptying_the_sweep(we
     survived = discover.from_feeds([src], reader=lambda s: week, verify=True,
                                    gh=FakeGH(unreachable=True))
     assert {c.name for c in survived} >= {c.name for c in linked if c.kind == "tool"}
+
+
+# ---- issue #78: the judgements are in the replies ---------------------------
+
+COMMENTS = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+ <entry><title>What do you use for local image generation?</title>
+  <link href="https://reddit.com/p1"/><updated>2026-09-08T00:00:00+00:00</updated>
+  <content>the post body</content></entry>
+ <entry><title>/u/Brett_ta_ta on What do you use for local image generation?</title>
+  <link href="https://reddit.com/p1/c1"/><updated>2026-09-08T01:00:00+00:00</updated>
+  <content>I use https://github.com/deepbeepmeep/Wan2GP daily</content></entry>
+ <entry><title>/u/KS-Wolf-1978 on What do you use for local image generation?</title>
+  <link href="https://reddit.com/p1/c2"/><updated>2026-09-08T02:00:00+00:00</updated>
+  <content>seconded</content></entry>
+</feed>"""
+
+
+def test_a_commenter_is_not_a_candidate():
+    """One real thread produced ten usernames and four real names. A handle
+    looks exactly like a product name to the prose extractor."""
+    got = {c.name.lower() for c in
+           feeds.candidates(feeds.parse(COMMENTS), "reddit-comments")}
+    assert "brett_ta_ta" not in got and "ks-wolf-1978" not in got
+
+
+def test_a_repo_linked_in_a_reply_is_found():
+    got = {c.name for c in
+           feeds.candidates(feeds.parse(COMMENTS), "reddit-comments")}
+    assert "deepbeepmeep/Wan2GP" in got
+
+
+def test_a_comments_title_is_not_mined_once_per_comment():
+    """Every comment repeats the PARENT post's title, so mining it per comment
+    invents the same candidates over and over and credits them to whoever
+    replied."""
+    one = feeds.parse(COMMENTS)[:1]
+    all_of_it = feeds.parse(COMMENTS)
+    from_post = {c.name for c in feeds.candidates(one, "x")}
+    from_all = {c.name for c in feeds.candidates(all_of_it, "x")}
+    assert from_all - from_post == {"deepbeepmeep/Wan2GP"}
+
+
+def test_the_comment_feed_is_the_permalink_plus_rss():
+    """Measured: <permalink>.rss returns 200 with one entry per comment; the
+    .json API 403s to everything."""
+    assert feeds.comment_url("https://reddit.com/r/x/comments/abc/title/") == \
+        "https://reddit.com/r/x/comments/abc/title/.rss"
+
+
+def test_a_dead_thread_does_not_empty_the_sweep():
+    src = Source("fix", "https://example.invalid", lane="image")
+    entries = feeds.parse(COMMENTS)
+
+    def boom(link):
+        raise RuntimeError("429")
+
+    got = discover.from_feeds([src], reader=lambda s: entries, verify=False,
+                              comments=2, comment_reader=boom)
+    assert got != []

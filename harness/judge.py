@@ -130,6 +130,59 @@ def score(item: str, rubric: Rubric | None = None, *, gateway: str = "",
     return parse_score(text, rubric.low, rubric.high)
 
 
+MENTION_PROMPT = """List every software product, model or tool this text names.
+
+One per line, exactly: NAME | what the text claims about it
+Use the name as written. If the text names nothing, reply NONE.
+Do not list people, usernames, companies, file formats or programming
+languages. Do not invent names that are not in the text.
+
+---
+{text}
+---"""
+#: A reply longer than this is the model narrating rather than listing.
+MAX_MENTIONS = 12
+
+
+def mentions(text: str, *, gateway: str = "", complete=None,
+             model: str = "q3-4b") -> list[tuple[str, str]]:
+    """Names a piece of freeform prose mentions, with what it claims of each.
+
+    The extractor that reads the monthly recap is shaped for `Name - one-line
+    description` and finds nothing in comment English. The best line in the
+    thread that prompted this ranked four lanes in one sentence and produced
+    zero candidates. Issue #79.
+
+    Returns [] rather than raising: a comment nobody can parse is not an error,
+    and one bad reply must not empty a sweep.
+    """
+    complete = complete or completion.complete
+    body = (text or "").strip()
+    if not body:
+        return []
+    kw = {"model": model, "modality": "extract"}
+    if gateway:
+        kw["gateway"] = gateway
+    try:
+        reply = complete(MENTION_PROMPT.format(text=body[:4000]), **kw)
+    except Exception:  # noqa: BLE001
+        return []
+    out = []
+    for line in (reply or "").splitlines():
+        line = line.strip().lstrip("-*0123456789. ").strip()
+        if not line or line.upper().startswith("NONE"):
+            continue
+        name, _, claim = line.partition("|")
+        name = name.strip().strip("`\"'")
+        # A "name" this long is a sentence, and one this short is punctuation.
+        if not (2 <= len(name) <= 60) or name.upper() == "NAME":
+            continue
+        out.append((name, claim.strip()[:160]))
+        if len(out) >= MAX_MENTIONS:
+            break
+    return out
+
+
 #: Items whose real outcome is already known here, for calibrating a rubric.
 #: Descriptions only, as a feed would carry them: the judge must reach the right
 #: order without being told the answer.

@@ -296,6 +296,28 @@ class Proposal:
     relevance: int = 0
 
 
+#: A comment entry is titled "/u/NAME on <the post's title>". Both halves are
+#: traps: the name is a person, and the title is the PARENT post's, repeated on
+#: every comment. Reading one thread produced ten usernames and four real
+#: candidates before this. Issue #78.
+_COMMENT_TITLE = re.compile(r"^/u/([A-Za-z0-9_-]+)\s+on\s+(.*)$", re.S)
+
+
+def comment_url(permalink: str) -> str:
+    """Reddit serves a post's comments as Atom at <permalink>.rss.
+
+    The .json API 403s to everything; this returns 200 with one entry per
+    comment, author and body included, and the existing parser reads it
+    unchanged.
+    """
+    return permalink.rstrip("/") + "/.rss"
+
+
+def comments(permalink: str, fetcher=None) -> list[Entry]:
+    """Every comment on one post, as feed entries."""
+    return parse((fetcher or fetch)(comment_url(permalink)))
+
+
 def candidates(entries: list[Entry], source: str = "") -> list[Proposal]:
     """What a feed is talking about, best evidence first.
 
@@ -304,10 +326,14 @@ def candidates(entries: list[Entry], source: str = "") -> list[Proposal]:
     anyone acts on it -- the same bar `external()` holds a language model to.
     """
     out: dict[str, Proposal] = {}
+    # Everyone who wrote a comment. A person is not a candidate, and their
+    # handle looks exactly like a product name to the prose extractor.
+    authors = {m.group(1).lower() for m in
+               (_COMMENT_TITLE.match(e.title) for e in entries) if m}
 
     def add(name, why, link, when, kind):
         key = name.lower()
-        if key in _STOPWORDS or key in out:
+        if key in _STOPWORDS or key in out or key in authors:
             return
         why = why.strip()[:160]
         out[key] = Proposal(name, why, source, link, when, kind,
@@ -327,6 +353,11 @@ def candidates(entries: list[Entry], source: str = "") -> list[Proposal]:
     for e in entries:
         for name, why in _CANDIDATE.findall(e.body):
             add(name, why, e.link, e.updated, "candidate")
+        # A comment's title is the PARENT POST's, repeated on every comment, so
+        # mining it once per comment invents the same candidates over and over
+        # and attributes them to whoever replied.
+        if _COMMENT_TITLE.match(e.title):
+            continue
         for name in _TITLE_NAME.findall(e.title):
             add(name, e.title, e.link, e.updated, "candidate")
         for name in _TITLE_PRODUCT.findall(e.title):
