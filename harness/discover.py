@@ -77,6 +77,8 @@ class Capability:
     present: bool = True
     #: Installed but unusable, and why. Distinct from `present` and `measured`.
     blocked: str = ""
+    #: How much this looks like it runs on Apple Silicon. See feeds.relevance().
+    relevance: int = 0
     note: str = ""
 
 
@@ -383,7 +385,7 @@ def _hf_exists(name: str) -> str:
 
 
 def from_feeds(sources=None, reader=None, verify=True,
-               limit: int = 25) -> list[Capability]:
+               limit: int = 25, min_relevance: int | None = None) -> list[Capability]:
     """Candidates the community is talking about that nothing here has measured.
 
     A LINKED repo is already an id. A name lifted from prose is a claim, and is
@@ -410,7 +412,23 @@ def from_feeds(sources=None, reader=None, verify=True,
                 blocked=f"could not read: {str(exc)[:160]}"))
             continue
 
+        if src.kind == "releases":
+            # The signal here is drift, not the repo name. Proposing
+            # `ml-explore/mlx` to a project built on MLX is noise.
+            package = feeds.TRACKS.get(src.name, "")
+            newest = feeds.newest_release(entries)
+            have = feeds.installed_version(package) if package else ""
+            if feeds.behind(newest, have):
+                out.append(Capability(
+                    "update", package, src.lane, src.url,
+                    f"upgrade {package} {have} -> {newest}, then re-run the "
+                    f"lane's eval to confirm nothing regressed",
+                    note=f"running {have}, latest is {newest}"))
+            continue
+
         for p in feeds.candidates(entries, src.name):
+            if min_relevance is not None and p.relevance < min_relevance:
+                continue
             repo = p.name
             if p.kind == "tool":
                 # A github repo is something to read, not an mflux candidate.
@@ -431,10 +449,16 @@ def from_feeds(sources=None, reader=None, verify=True,
             if repo.lower() in seen or _was_measured(repo, done):
                 continue
             seen.add(repo.lower())
+            tag = f" [apple silicon +{p.relevance}]" if p.relevance > 0 else ""
             out.append(Capability(
                 "proposal", repo, src.lane, p.url or src.url,
                 _HOW.get(src.lane, "--candidates {id}").format(id=repo),
-                note=f"{p.why[:120]} [{src.name} {p.when}]"))
+                measured=False,
+                note=f"{p.why[:120]}{tag} [{src.name} {p.when}]"))
+            out[-1].relevance = p.relevance
+    # Most relevant to this machine first. A CUDA-only proposal is noise here
+    # and was previously ranked identically to a native-MLX one.
+    out.sort(key=lambda c: -getattr(c, "relevance", 0))
     return out[:limit]
 
 

@@ -459,7 +459,8 @@ def _report_sources(a) -> int:
 
 
 def _report_feeds(a) -> int:
-    found = discovery.from_feeds(verify=not a.no_verify)
+    found = discovery.from_feeds(verify=not a.no_verify,
+                                 min_relevance=1 if a.platform else None)
     if a.json:
         print(json.dumps({"candidates": [vars(c) for c in found]}, indent=2))
         return 0
@@ -469,6 +470,15 @@ def _report_feeds(a) -> int:
     found = [c for c in found if not c.blocked]
     if not found:
         print("nothing new in the feeds, or no network.")
+        return 0
+    updates = [c for c in found if c.kind == "update"]
+    found = [c for c in found if c.kind != "update"]
+    if updates:
+        print("\nBEHIND on something already installed:")
+        for c in updates:
+            print(f"  {c.name:12} {c.note}")
+            print(f"    -> {c.how}")
+    if not found:
         return 0
     print("\ncandidates the community is talking about that nothing here "
           "has measured")
@@ -614,6 +624,9 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--sources", action="store_true",
                    help="list discovery sources, when each was last read, and "
                         "any new sources the feeds point at")
+    d.add_argument("--platform", action="store_true",
+                   help="with --feeds, only what looks like it runs on Apple "
+                        "Silicon")
     d.add_argument("--no-verify", action="store_true",
                    help="with --feeds, skip resolving prose names against the "
                         "registry (faster, noisier)")

@@ -44,7 +44,10 @@ class FeedError(RuntimeError):
 class Source:
     name: str
     url: str
-    kind: str = "atom"        # only atom for now; the field is the seam
+    #: "atom" is a feed of things to try. "releases" is a feed of versions of
+    #: something already installed, where the useful signal is drift, not the
+    #: repo name -- proposing `ml-explore/mlx` to a project built on MLX is noise.
+    kind: str = "atom"
     lane: str = "all"
     enabled: bool = True
     note: str = ""
@@ -73,7 +76,43 @@ DEFAULT_SOURCES = [
            "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=week",
            lane="text",
            note="text lane equivalent"),
+    # The reddit feeds carry almost no Apple Silicon signal: measured 0/25 and
+    # 1/25 on 2026-09-07 (issue #45). These do, because they are the releases of
+    # the stack this project actually runs on.
+    Source("mlx-releases", kind="releases", url="https://github.com/ml-explore/mlx/releases.atom",
+           lane="all", note="the array framework everything here sits on"),
+    Source("mlx-lm-releases", kind="releases",
+           url="https://github.com/ml-explore/mlx-lm/releases.atom",
+           lane="text", note="the text lane engine"),
+    Source("mlx-audio-releases", kind="releases",
+           url="https://github.com/Blaizzy/mlx-audio/releases.atom",
+           lane="tts", note="TTS and STT server"),
+    Source("mflux-releases", kind="releases",
+           url="https://github.com/mflux-community/mflux/releases.atom",
+           lane="image",
+           note="image lane engine; moved from filipstrand, the old URL 301s"),
 ]
+
+# Terms that make a result relevant to THIS machine. An Apple-Silicon-only
+# project reading general feeds gets mostly CUDA noise, so relevance is scored
+# rather than left for a human to spot. Issue #45.
+APPLE_TERMS = re.compile(
+    r"\b(mlx|apple[ -]silicon|metal|macos|mac|coreml|core ?ml|unified memory|"
+    r"m[1-9](?:\s*(?:pro|max|ultra))?|neural engine|ane)\b", re.I)
+# Terms that mean it will not run here at all.
+FOREIGN_TERMS = re.compile(
+    r"\b(cuda|nvidia|rtx|tensorrt|rocm|vram|3090|4090|5090|a100|h100|xformers)\b",
+    re.I)
+
+
+def relevance(text: str) -> int:
+    """How much this looks like it runs on Apple Silicon.
+
+    Positive is a reason to look; negative means it names hardware this machine
+    does not have. Zero is the honest default for text that says neither.
+    """
+    return (2 * len(set(m.group(0).lower() for m in APPLE_TERMS.finditer(text)))
+            - len(set(m.group(0).lower() for m in FOREIGN_TERMS.finditer(text))))
 
 
 def config_path() -> Path:
@@ -243,6 +282,8 @@ class Proposal:
     url: str
     when: str = ""
     kind: str = "candidate"
+    #: See relevance(). Higher means more likely to run on this machine.
+    relevance: int = 0
 
 
 def candidates(entries: list[Entry], source: str = "") -> list[Proposal]:
@@ -258,7 +299,9 @@ def candidates(entries: list[Entry], source: str = "") -> list[Proposal]:
         key = name.lower()
         if key in _STOPWORDS or key in out:
             return
-        out[key] = Proposal(name, why.strip()[:160], source, link, when, kind)
+        why = why.strip()[:160]
+        out[key] = Proposal(name, why, source, link, when, kind,
+                            relevance(f"{name} {why}"))
 
     # Two passes so a name linked on BOTH huggingface and github is recorded as
     # the model, which is the thing the eval can actually run.
@@ -353,3 +396,60 @@ def read(source: Source, cache_dir: Path | None = None,
     cached.write_text(text)
     record_fetch(source.name)
     return entries
+
+
+#: What each releases source tracks, and the package whose installed version it
+#: is compared against.
+TRACKS = {
+    "mlx-releases": "mlx",
+    "mlx-lm-releases": "mlx-lm",
+    "mlx-audio-releases": "mlx-audio",
+    "mflux-releases": "mflux",
+}
+
+_VERSION = re.compile(r"(\d+\.\d+(?:\.\d+)*)")
+
+
+def newest_release(entries: list[Entry]) -> str:
+    """The highest version in a releases feed, or "" if none parses."""
+    best, best_key = "", ()
+    for e in entries:
+        m = _VERSION.search(e.title)
+        if not m:
+            continue
+        key = tuple(int(x) for x in m.group(1).split("."))
+        if key > best_key:
+            best, best_key = m.group(1), key
+    return best
+
+
+def installed_version(package: str, pins: Path | None = None) -> str:
+    """What this machine actually runs, from the uv tool venv or the pins."""
+    from harness import stages
+    have = stages.tool_versions()
+    if package in have:
+        return have[package]
+    try:
+        import importlib.metadata as md
+        return md.version(package)
+    except Exception:  # noqa: BLE001
+        pass
+    # Services install their deps from scripts/versions.sh rather than pyproject.
+    path = pins or (Path(__file__).resolve().parent.parent
+                    / "scripts" / "versions.sh")
+    try:
+        text = Path(path).read_text()
+    except OSError:
+        return ""
+    m = re.search(rf'^[A-Z_]+_PIN="{re.escape(package)}(?:\[[^\]]*\])?=='
+                  rf'([^"]+)"', text, re.M)
+    return m.group(1) if m else ""
+
+
+def behind(newest: str, have: str) -> bool:
+    """Is `have` an older version than `newest`? False if either is unreadable."""
+    if not newest or not have:
+        return False
+    def key(v):
+        return tuple(int(x) for x in re.findall(r"\d+", v))
+    return key(have) < key(newest)
