@@ -384,9 +384,17 @@ def _hf_exists(name: str) -> str:
     return ""
 
 
+def _gh_exists(repo: str, client=None) -> bool:
+    from harness import github
+    try:
+        return (client or github.Client()).exists(repo)
+    except Exception:  # noqa: BLE001 - never let the check itself drop a sweep
+        return True
+
+
 def from_feeds(sources=None, reader=None, verify=True,
                limit: int = 25, min_relevance: int | None = None,
-               store=None) -> list[Capability]:
+               store=None, gh=None) -> list[Capability]:
     """Candidates the community is talking about that nothing here has measured.
 
     A LINKED repo is already an id. A name lifted from prose is a claim, and is
@@ -409,6 +417,10 @@ def from_feeds(sources=None, reader=None, verify=True,
 
     for src in sources:
         if not src.enabled:
+            continue
+        # A source read some other way is not a broken feed. Reading it here
+        # would report the crowd source as unreachable on every sweep.
+        if src.kind not in ("atom", "releases"):
             continue
         try:
             entries = reader(src)
@@ -442,6 +454,11 @@ def from_feeds(sources=None, reader=None, verify=True,
                 if repo.lower() in seen:
                     continue
                 seen.add(repo.lower())
+                # A repo name in prose is a claim, held to the same bar as a
+                # model name. Fails OPEN: only a definite 404 drops it, so an
+                # unreachable API cannot silently empty a sweep.
+                if verify and not _gh_exists(repo, client=gh):
+                    continue
                 out.append(Capability(
                     "proposal", repo, src.lane, p.url or src.url,
                     f"https://github.com/{repo}",

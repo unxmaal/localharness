@@ -20,7 +20,9 @@ rather than assuming it, because a metric without a negative control is noise.
 from __future__ import annotations
 
 import math
+import time
 from collections import Counter
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 
 from harness import github
@@ -35,6 +37,9 @@ MIN_SHARED = 3
 #: constant: it sets how much evidence counts against how much enrichment, and
 #: the control only passes between 1e6 and 2e7. Measured, see control().
 POPULATION = 5_000_000
+#: Score halves after this long without a push. A live niche project beats a
+#: dead one with the same overlap, because the question is what to try NOW.
+HALF_LIFE_DAYS = 365.0
 #: A repo this large is starred by everyone and tells us nothing. One in the
 #: top means popularity has leaked back into the ranking. Structural rather
 #: than a list of names, because the first hand-written list missed every repo
@@ -81,6 +86,26 @@ def enrichment(shared: int, crowd_size: int, stars: int,
     shared = min(shared, crowd_size)
     ratio = (shared / crowd_size) / (stars / population)
     return shared * math.log(ratio) if ratio > 1 else 0.0
+
+
+def recency(pushed: str, now: float | None = None,
+            half_life: float = HALF_LIFE_DAYS) -> float:
+    """Weight from how long ago the repo was last pushed, halving per half-life.
+
+    Unknown or unparseable dates weigh 1.0 rather than 0: a missing field is
+    not evidence of abandonment, and scoring it as such would silently drop
+    every repo whose metadata came back thin.
+    """
+    if not pushed:
+        return 1.0
+    try:
+        when = datetime.strptime(pushed[:10], "%Y-%m-%d").replace(
+            tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return 1.0
+    now = time.time() if now is None else now
+    days = max(0.0, (now - when) / 86400.0)
+    return 0.5 ** (days / half_life)
 
 
 def cohort(seeds=DEFAULT_SEEDS, client: github.Client | None = None, *,
@@ -141,7 +166,8 @@ def crowd(people, client: github.Client | None = None) -> tuple[Counter, int]:
 
 def neighbors(people=None, client: github.Client | None = None, *,
               seeds=DEFAULT_SEEDS, min_shared: int = MIN_SHARED,
-              top: int = 25, exclude=()) -> list[Neighbor]:
+              top: int = 25, exclude=(), keep_archived: bool = False
+              ) -> list[Neighbor]:
     """Repos concentrated in this crowd, best first."""
     client = client or github.Client()
     people = list(people) if people is not None else cohort(seeds, client)
@@ -157,14 +183,21 @@ def neighbors(people=None, client: github.Client | None = None, *,
             meta = client.repo(repo)
         except github.GitHubError:
             continue
+        # An archived repo is finished by definition, so it cannot be a thing
+        # to try next however well it scores. A 2020 physics course ranked
+        # sixth on the first real run.
+        if bool(meta.get("archived")) and not keep_archived:
+            continue
         stars = int(meta.get("stargazers_count") or 0)
+        pushed = (meta.get("pushed_at") or "")[:10]
         out.append(Neighbor(
             repo=repo, shared=shared, crowd=asked,
-            score=enrichment(shared, asked, stars), stars=stars,
+            score=enrichment(shared, asked, stars) * recency(pushed),
+            stars=stars,
             language=meta.get("language") or "",
             topics=list(meta.get("topics") or []),
             archived=bool(meta.get("archived")),
-            pushed=(meta.get("pushed_at") or "")[:10],
+            pushed=pushed,
             description=(meta.get("description") or "")[:200]))
     out.sort(key=lambda n: n.score, reverse=True)
     return out[:top]

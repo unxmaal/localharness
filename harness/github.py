@@ -40,6 +40,15 @@ class GitHubError(RuntimeError):
     """The API could not be reached and no cached copy existed."""
 
 
+class NotFound(GitHubError):
+    """The API says this does not exist, as opposed to could not be reached.
+
+    Worth its own type: a proposal naming a repo that 404s should be dropped,
+    but a proposal that could not be checked because the network is down must
+    NOT be, or an outage silently empties every sweep.
+    """
+
+
 class BudgetError(GitHubError):
     """The caller's request budget is spent. Raised, never exceeded."""
 
@@ -57,7 +66,10 @@ def _gh(path: str) -> str:
     proc = subprocess.run(["gh", "api", path], capture_output=True, text=True,
                           timeout=60)
     if proc.returncode != 0:
-        raise GitHubError(f"gh api {path}: {proc.stderr.strip()[:200]}")
+        detail = proc.stderr.strip()[:200]
+        if "Not Found" in detail or "404" in detail:
+            raise NotFound(f"gh api {path}: {detail}")
+        raise GitHubError(f"gh api {path}: {detail}")
     return proc.stdout
 
 
@@ -103,6 +115,8 @@ class Client:
             if payload is not None:
                 self.stale.append(api_path)
                 return payload["data"]
+            if isinstance(exc, NotFound):
+                raise
             raise GitHubError(f"{api_path}: {exc}") from exc
         cached.write_text(json.dumps({"fetched": time.time(),
                                       "path": api_path, "data": data}))
@@ -112,6 +126,17 @@ class Client:
 
     def repo(self, full_name: str) -> dict:
         return self.get(f"repos/{full_name}")
+
+    def exists(self, full_name: str) -> bool:
+        """Fail OPEN. Only a definite 404 is a no; an unreachable API keeps the
+        proposal, because an outage must not silently empty a sweep."""
+        try:
+            self.repo(full_name)
+        except NotFound:
+            return False
+        except GitHubError:
+            return True
+        return True
 
     def contributors(self, full_name: str, pages: tuple[int, ...] = (1,)) -> list[str]:
         """Who writes this repo, most commits first.

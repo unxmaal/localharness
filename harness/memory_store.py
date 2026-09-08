@@ -242,6 +242,27 @@ def precision(conn: sqlite3.Connection) -> dict:
             **{f"verdict_{k}": v for k, v in counts.items()}}
 
 
+def by_source(conn: sqlite3.Connection) -> list[dict]:
+    """Per source: how many it proposed, how many resolved, how many settled.
+
+    Issue #49 asked for extraction precision and it was impossible to answer
+    without a store. It is a query now, and it compares sources against each
+    other rather than reporting one number for all of them.
+    """
+    return [dict(r) for r in conn.execute("""
+        SELECT s.source AS source,
+               COUNT(DISTINCT s.proposal_id) AS proposals,
+               COUNT(DISTINCT CASE WHEN p.resolved <> '' THEN p.id END) AS resolved,
+               COUNT(DISTINCT CASE WHEN v.outcome IN ('measured','declined',
+                     'broken','ignored') THEN p.id END) AS settled,
+               COUNT(DISTINCT CASE WHEN v.outcome = 'measured' THEN p.id END)
+                     AS measured
+        FROM sightings s
+        JOIN proposals p ON p.id = s.proposal_id
+        LEFT JOIN verdicts v ON v.proposal_id = p.id
+        GROUP BY s.source ORDER BY proposals DESC""")]
+
+
 def traverse(conn: sqlite3.Connection, name: str, depth: int = 2,
              direction: str = "both") -> list[dict]:
     """Walk the edge graph from `name`, forwards, backwards, or both.
