@@ -1,6 +1,8 @@
 # localharness
 
-Local media generation and voice, on Apple Silicon, in a command line.
+A discovery engine. It looks for better ways to do its own job, measures whether
+they are actually better, and remembers the answer. The first domain it does
+this in is local media generation on Apple Silicon.
 
 Last rewritten 2026-09-07, against a working tree. Numbers here were measured
 on this machine; `docs/validation-log.md` holds the evidence, including
@@ -40,8 +42,65 @@ because the tests happened to run immediately afterwards.
 
 ## 1. What this is for
 
-Generate images, video, SVG and web pages, and talk to the machine, entirely
-locally. That is the whole goal, and `lh` is the product:
+**The loop is the project:**
+
+    sources -> proposals -> measurement -> verdict -> memory
+                  ^                                     |
+                  +-------------------------------------+
+
+Find what exists that we have not tried. Rank it cheaply. Measure what survives.
+Record the answer, including the failures. Use that memory to decide what to look
+at next.
+
+Everything else here is downstream of getting that right. This was reframed on
+2026-09-07 (issue #55); before that the plan led with media generation and
+treated discovery as a feature, which had the dependency backwards.
+
+### Why media is the first domain
+
+Not because media is the point, but because **the loop only turns where
+verification is cheap and objective.** An image either renders or is a blank
+canvas. Generated code either passes its checks or does not. An SVG either marks
+the canvas or does not. Speech either transcribes back to its input or does not.
+
+Every lane here has an automatic verifier, which is why a cycle can complete
+without a human in the middle of it. That is also the limit on where this can
+scale: it cannot run on "which strategy is best", because there is no checker.
+The domains it reaches are exactly the ones with cheap ground truth.
+
+The machinery is already domain-neutral, more by luck of naming than foresight:
+`Case`, `candidate`, `lane`, `CHECKERS`, `Receipt`, `comparable()`. Changing
+domain means new cases and new checkers, not a new harness.
+
+### The evidence that the loop finds things
+
+The two largest wins measured here were **compositions, not models**:
+
+| | what it was | result |
+|---|---|---|
+| `trace` | a diffusion model + vtracer | beat every language model, 4/4 against 2/6 |
+| `repair` | a model + a checker that already existed | code 20/27 -> 24/27, no extra download |
+
+Neither component was novel. The composition was, and both were found by
+accident while looking at something else. That is the argument for searching the
+combination space deliberately.
+
+### Three limits, stated plainly
+
+- **Measurement is the bottleneck, not discovery.** One feed sweep yields ~47
+  proposals; this machine can fully measure a handful, and pair traversal over 47
+  nodes is 1,081 combinations. Improving the extractor lengthens the queue.
+  Improving eval cost multiplies across everything. Hence the three tiers: a
+  rubric judge (#54), a screen (#53), then measurement.
+- **Popularity is anti-correlated with novelty.** Feeds surface what is
+  discussed, and a real innovation is under-discussed exactly when it matters
+  most. Recurrence over time (#52) is a partial answer, not a full one.
+- **Negative results are the compounding asset.** "We tried X and it lost" is the
+  most valuable row this accumulates, and until #52 nothing recorded it.
+
+### The product it happens to be
+
+`lh` is how a person or an agent uses the current answers:
 
     lh image "a red fox in falling snow" --width 768
     lh video "a fox running" --seconds 2
@@ -50,7 +109,7 @@ locally. That is the whole goal, and `lh` is the product:
     lh code  "a python function that parses an ISO timestamp"
     lh extract --file build.log "how many tests failed?"
     lh say   "the tests all passed"          # cloned, French accent
-    lh voices
+    lh discover --feeds                      # what is new and worth testing
     lh hear  --seconds 5
 
 Installed with `uv tool install --python 3.12 --editable .`, which puts `lh` on
@@ -67,7 +126,7 @@ routing between local and cloud models. It is not, and the phases that followed
 from that premise put cloud routing, opencode integration and a ComfyUI lane
 ahead of media. None of them were built and none of them should be.
 
-Two things follow from "local only" that shape everything below:
+Two rules shape everything below:
 
 - **Nothing is a wheel worth reinventing.** Find the mature project first. This
   repo has twice built something that already existed and was better; the voice

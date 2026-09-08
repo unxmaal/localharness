@@ -1100,3 +1100,31 @@ def test_exit_zero_with_no_output_is_still_empty_not_error():
     the ordering has to keep them apart."""
     from evals.core import failure_kind
     assert failure_kind("mflux exited 0 but left no output at /tmp/x.png") == "empty"
+
+
+def test_a_screen_may_not_be_ranked_against_a_measurement():
+    """Issue #53. A screen asks whether it ran; a measurement asks whether it is
+    better. Ranking them together is the confound comparable() exists for."""
+    from evals.core import Receipt, comparable
+    base = dict(modality="image", case_ids=("a",), repeat=1, sampling={},
+                gateway="g")
+    ok, why = comparable(Receipt(**base, tier="screen"),
+                         Receipt(**base, tier="measure"))
+    assert not ok
+    assert "tier" in why
+
+
+def test_two_screens_are_comparable_with_each_other():
+    from evals.core import Receipt, comparable
+    base = dict(modality="image", case_ids=("a",), repeat=1, sampling={},
+                gateway="g", tier="screen")
+    assert comparable(Receipt(**base), Receipt(**base))[0]
+
+
+def test_a_receipt_defaults_to_the_measure_tier():
+    """Every run written before tiers existed was a measurement."""
+    from evals.core import Receipt
+    r = Receipt(modality="svg", case_ids=("a",), repeat=1, sampling={},
+                gateway="g")
+    assert r.tier == "measure"
+    assert r.as_dict()["tier"] == "measure"

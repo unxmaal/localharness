@@ -385,7 +385,8 @@ def _hf_exists(name: str) -> str:
 
 
 def from_feeds(sources=None, reader=None, verify=True,
-               limit: int = 25, min_relevance: int | None = None) -> list[Capability]:
+               limit: int = 25, min_relevance: int | None = None,
+               store=None) -> list[Capability]:
     """Candidates the community is talking about that nothing here has measured.
 
     A LINKED repo is already an id. A name lifted from prose is a claim, and is
@@ -394,11 +395,17 @@ def from_feeds(sources=None, reader=None, verify=True,
     """
     from harness import feeds
 
+    from harness import memory_store as ms
+
     sources = feeds.load_sources() if sources is None else sources
     reader = reader or feeds.read
     done = measured()
     out: list[Capability] = []
     seen: set[str] = set()
+    # A proposal with a terminal verdict has been answered. Re-offering it every
+    # sweep is what makes an operator stop reading the output.
+    settled = ms.settled(store) if store is not None else set()
+    suppressed = 0
 
     for src in sources:
         if not src.enabled:
@@ -449,6 +456,16 @@ def from_feeds(sources=None, reader=None, verify=True,
             if repo.lower() in seen or _was_measured(repo, done):
                 continue
             seen.add(repo.lower())
+            if store is not None:
+                ms.record(store, ms.Seen(
+                    name=repo, source=src.name, url=p.url or src.url,
+                    why=p.why[:160], relevance=p.relevance, kind=p.kind,
+                    # `repo` is the linked id, or the id a prose name resolved
+                    # to. Either way it is the verified thing, so keep it.
+                    lane=src.lane, resolved=repo))
+            if repo in settled:
+                suppressed += 1
+                continue
             tag = f" [apple silicon +{p.relevance}]" if p.relevance > 0 else ""
             out.append(Capability(
                 "proposal", repo, src.lane, p.url or src.url,
@@ -459,7 +476,14 @@ def from_feeds(sources=None, reader=None, verify=True,
     # Most relevant to this machine first. A CUDA-only proposal is noise here
     # and was previously ranked identically to a native-MLX one.
     out.sort(key=lambda c: -getattr(c, "relevance", 0))
-    return out[:limit]
+    out = out[:limit]
+    if suppressed:
+        out.append(Capability(
+            "note", f"{suppressed} already answered", "all", "discovery.db",
+            "lh discover --recurrence to see what is known",
+            note=f"{suppressed} proposal(s) suppressed: already measured, "
+                 f"declined or broken"))
+    return out
 
 
 def feed_sources(sources=None, reader=None) -> list[Capability]:

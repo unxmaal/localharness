@@ -285,6 +285,27 @@ def cases_for(candidate: str, cases: list[Case]) -> list[Case]:
 STOCHASTIC_MODALITIES = {"image", "video", "svg", "web", "code"}
 
 
+#: Screen settings: the smallest thing that still proves the pipeline ran.
+SCREEN_PARAMS = {"width": 256, "height": 256, "steps": 2, "seconds": None,
+                 "frames": None}
+
+
+def screen_cases(cases: list[Case]) -> list[Case]:
+    """One case per modality, shrunk. Cheap enough to be wrong about."""
+    import dataclasses
+    picked: dict[str, Case] = {}
+    for c in sorted(cases, key=lambda c: c.id):
+        picked.setdefault(c.modality, c)
+    out = []
+    for c in picked.values():
+        params = dict(c.params)
+        for k, v in SCREEN_PARAMS.items():
+            if k in params and v is not None:
+                params[k] = min(params[k], v) if isinstance(params[k], int) else v
+        out.append(dataclasses.replace(c, params=params))
+    return out
+
+
 def expand_cases(cases: list[Case], repeat: int) -> list[Case]:
     """Turn each stochastic case into `repeat` cases with different seeds.
 
@@ -362,6 +383,10 @@ def main(argv: list[str] | None = None) -> int:
                          "multi-GB preference model, so it is opt-in and needs "
                          "`uv sync --group metrics`. Scores from the two "
                          "backends are NOT comparable to each other")
+    ap.add_argument("--screen", action="store_true",
+                   help="cheapest tier: one case per candidate at minimal "
+                        "settings, answering only whether it runs. Never a "
+                        "ranking")
     ap.add_argument("--repeat", type=int, default=1,
                     help="samples per case, each with a different seed. One "
                          "sample per prompt ranks noise; 3 is the usual "
@@ -377,8 +402,16 @@ def main(argv: list[str] | None = None) -> int:
     if missing:
         raise SystemExit(f"{' and '.join(missing)} required (or use --compare)")
 
+    if args.screen:
+        # A screen is allowed to be statistically worthless. Its job is to
+        # reject what does not run at all, which is how most things here have
+        # failed: seedvr2 crashed 0/3, local-small never closed a tag 0/9.
+        args.repeat = 1
+        args.adherence = ""
     cases = expand_cases(select_cases(load_cases(args.cases), args.modality),
                          args.repeat)
+    if args.screen:
+        cases = screen_cases(cases)
     # An engine spec contains commas, which are also the candidate separator.
     # Split on commas that start a new candidate, i.e. those followed by a
     # known engine prefix or by something with no '=' in it.
@@ -428,7 +461,8 @@ def main(argv: list[str] | None = None) -> int:
             repeat=args.repeat,
             sampling={m: dict(v) for m, v in sorted(completion.SAMPLING.items())},
             gateway=args.gateway,
-            adherence=getattr(args, "adherence", "") or "")
+            adherence=getattr(args, "adherence", "") or "",
+            tier="screen" if getattr(args, "screen", False) else "measure")
         (outdir / "results.json").write_text(json.dumps(
             {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
              "environment": capture(),
@@ -469,7 +503,8 @@ def compare_runs(files: list[str]) -> int:
                                   repeat=raw["repeat"],
                                   sampling=raw["sampling"],
                                   gateway=raw["gateway"],
-                                  adherence=raw.get("adherence", "")),
+                                  adherence=raw.get("adherence", ""),
+                                  tier=raw.get("tier", "measure")),
                        data.get("summary") or {}))
 
     first_file, first, _ = loaded[0]
