@@ -550,6 +550,12 @@ def _report_inspect(a) -> int:
             # weight is almost always a tokenizer or a helper, and the first
             # queue built that way filled with them. Issue #68.
             ranked = [m for m in fit.headline if m in fit.weights][:3]
+            # Re-inspecting CORRECTS the queue rather than only extending it:
+            # weights this repo queued under an older ranking, and no longer
+            # ranks, are retired. Issue #73.
+            ms.retire_unlisted(
+                store, repo, keep=ranked, reason=(
+                    "no longer among this repo's top-ranked weights"))
             for model_id in ranked:
                 size = fit.weights[model_id]
                 if size > ins.MEMORY_CEILING:
@@ -599,9 +605,12 @@ def cmd_fetch(a) -> int:
             return 0
         if not a.run:
             print(f"\n{len(rows)} queued, {fetching.free_bytes() / fetching.GIB:.0f} "
-                  f"GiB free. --run to start; one at a time, largest first.")
+                  f"GiB free. --run to start, one at a time. The score is the "
+                  f"judged score of the repo that named the weight.")
             for r in rows[:20]:
-                print(f"  {r['score'] or 0:>4}  {r['resolved'] or r['name']}")
+                size = fetching.size_of(r)
+                gib = f"{size / fetching.GIB:5.1f} GiB" if size else "  no size"
+                print(f"  {r['score'] or 0:>4.0f}  {gib}  {r['resolved'] or r['name']}")
             return 0
         sizes = {(r["resolved"] or r["name"]): fetching.size_of(r)
                  for r in rows[:a.limit]}

@@ -57,10 +57,17 @@ def test_a_terminal_verdict_leaves_the_queue(db):
     assert f.queued(db) == []
 
 
-def test_the_queue_is_ordered_by_score(db):
-    for name, score in [("org/low", 4), ("org/high", 9)]:
-        seen(db, name)
-        ms.decide(db, name, "queued", tier="inspect", score=score)
+def test_a_weight_inherits_the_score_of_the_repo_that_named_it(db):
+    """The judge scores REPOS and the queue holds WEIGHTS, so a weight has no
+    score of its own. Sorting on its own score put every row at 0 and "largest
+    first" was whatever order the query returned."""
+    for repo, weight, score in [("org/dull", "org/low", 4),
+                                ("org/sharp", "org/high", 9)]:
+        seen(db, repo, kind="repo")
+        seen(db, weight)
+        ms.link(db, repo, weight, "needs")
+        ms.decide(db, repo, "queued", tier="inspect", score=score)
+        ms.decide(db, weight, "queued", tier="inspect")
     assert [r["name"] for r in f.queued(db)] == ["org/high", "org/low"]
 
 

@@ -238,3 +238,45 @@ def test_sources_are_compared_against_each_other(db):
     rows = {r["source"]: r for r in ms.extraction(db)}
     assert rows["crowd"]["precision"] == 1.0
     assert rows["recap"]["precision"] == 0.0
+
+
+# ---- issue #73: a queue entry is a decision a ranking made ------------------
+
+def _queued_weight(db, repo, weight):
+    see(db, repo, source="inspect")
+    see(db, weight, source="inspect")
+    ms.link(db, repo, weight, "needs")
+    ms.decide(db, weight, "queued", tier="inspect")
+
+
+def test_a_repo_retires_the_weights_it_no_longer_ranks(db):
+    """Re-inspecting used to only ADD, so the queue mixed picks from rankings
+    that no longer exist: DepthPro and sam3 sat there after #68 replaced the
+    rule that chose them."""
+    _queued_weight(db, "org/tool", "org/stale")
+    _queued_weight(db, "org/tool", "org/current")
+    got = ms.retire_unlisted(db, "org/tool", keep=["org/current"],
+                             reason="superseded")
+    assert got == ["org/stale"]
+    assert "org/stale" in ms.settled(db)
+    assert "org/current" not in ms.settled(db)
+
+
+def test_a_weight_another_repo_still_names_is_not_retired(db):
+    """Not this repo's to retire. The edge says who queued what."""
+    _queued_weight(db, "org/one", "org/shared")
+    see(db, "org/two", source="inspect")
+    ms.link(db, "org/two", "org/shared", "needs")
+    assert ms.retire_unlisted(db, "org/one", keep=[]) == []
+    assert "org/shared" not in ms.settled(db)
+
+
+def test_something_already_settled_is_not_retired_again(db):
+    _queued_weight(db, "org/tool", "org/done")
+    ms.decide(db, "org/done", "measured", tier="measure")
+    assert ms.retire_unlisted(db, "org/tool", keep=[]) == []
+
+
+def test_parents_names_who_pointed_at_a_thing(db):
+    _queued_weight(db, "org/tool", "org/w")
+    assert ms.parents(db, "org/w") == ["org/tool"]

@@ -301,6 +301,49 @@ def extraction(conn: sqlite3.Connection) -> list[dict]:
     return sorted(out, key=lambda r: -r["extracted"])
 
 
+def parents(conn: sqlite3.Connection, name: str,
+            relation: str = "needs") -> list[str]:
+    """Proposals with an edge INTO `name`. Which repos named this weight."""
+    return [r["name"] for r in conn.execute(
+        "SELECT src.name FROM edges e JOIN proposals src ON src.id = e.src "
+        "JOIN proposals dst ON dst.id = e.dst "
+        "WHERE dst.name = ? AND e.relation = ?", (name, relation))]
+
+
+def retire_unlisted(conn: sqlite3.Connection, name: str, keep,
+                    relation: str = "needs", reason: str = "",
+                    outcome: str = "ignored") -> list[str]:
+    """Retire things `name` queued that it no longer ranks.
+
+    A queue entry is a decision a ranking made at a point in time, and when the
+    ranking changes every decision it made is suspect. Re-inspecting a repo used
+    to only ADD, so the queue mixed picks from rules that no longer exist.
+
+    A weight named by TWO repos is not this one's to retire: if any other parent
+    still ranks it, it stays. Returns what was retired.
+    """
+    keep = set(keep)
+    retired = []
+    rows = conn.execute(
+        "SELECT dst.name AS name FROM edges e JOIN proposals src ON src.id = e.src "
+        "JOIN proposals dst ON dst.id = e.dst "
+        "WHERE src.name = ? AND e.relation = ?", (name, relation)).fetchall()
+    for row in rows:
+        other = row["name"]
+        if other in keep:
+            continue
+        cur = conn.execute(
+            "SELECT outcome FROM verdicts v JOIN proposals p ON p.id = v.proposal_id "
+            "WHERE p.name = ? ORDER BY v.id DESC LIMIT 1", (other,)).fetchone()
+        if not cur or cur["outcome"] != "queued":
+            continue
+        if any(p != name for p in parents(conn, other, relation)):
+            continue      # another repo still names it; not ours to retire
+        decide(conn, other, outcome, tier="inspect", detail=reason[:200])
+        retired.append(other)
+    return retired
+
+
 def by_source(conn: sqlite3.Connection) -> list[dict]:
     """Per source: how many it proposed, how many resolved, how many settled.
 
