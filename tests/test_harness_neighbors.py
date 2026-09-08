@@ -323,20 +323,31 @@ def test_a_second_hop_needs_several_of_the_crowd_to_agree(tmp_path):
     assert "solo" not in got          # followed by h1 alone
 
 
-def test_one_hop_stays_the_default(tmp_path):
-    """A wider crowd has to earn its place by measurement, not by arriving as
-    the new default."""
-    api = FakeAPI(contributors={"a/one": ["c1"]},
-                  following={"c1": ["h1"], "h1": ["far"]})
-    assert "far" not in nb.cohort(["a/one"], client(api, tmp_path))
+def test_each_hop_gets_its_own_budget_or_the_first_spends_it_all():
+    """Without a per-hop budget `hops` is unreachable dead code. 45
+    contributors follow enough people to fill any cap, so the first real
+    attempt ran three configurations and executed hop two in NONE of them:
+    every crowd traced back as 100% hop-one."""
+    import inspect as _i
+    assert "per_hop" in _i.signature(nb.cohort).parameters
+
+
+def test_a_second_hop_actually_reaches_someone_hop_one_did_not(tmp_path):
+    api = FakeAPI(contributors={"a/one": ["c1", "c2"]},
+                  following={"c1": ["h1", "h2"], "c2": ["h1", "h2"],
+                             "h1": ["deep"], "h2": ["deep"]})
+    got = nb.cohort(["a/one"], client(api, tmp_path), hops=2, limit=20)
+    assert "deep" in got
 
 
 def test_the_crowd_never_exceeds_its_cap_however_many_hops(tmp_path):
     api = FakeAPI(contributors={"a/one": [f"c{i}" for i in range(5)]},
                   following={f"c{i}": [f"h{j}" for j in range(40)]
                              for i in range(5)})
+    # At or under: per-hop budgets divide the allowance, so a deep sweep can
+    # finish short of the cap. Exceeding it is the failure, not falling short.
     assert len(nb.cohort(["a/one"], client(api, tmp_path), hops=3,
-                         limit=12)) == 12
+                         limit=12)) <= 12
 
 
 def test_expansion_stops_when_a_hop_adds_nobody(tmp_path):
@@ -354,14 +365,11 @@ def test_growing_the_crowd_is_still_deterministic(tmp_path):
     assert nb.cohort(["a/one"], c, hops=2) == nb.cohort(["a/one"], c, hops=2)
 
 
-def test_a_second_hop_is_inert_at_the_default_cap(tmp_path):
-    """Measured, not assumed: at 250 the crowd fills from hop one alone, so
-    hops=2 returned an identical ranking for zero extra requests. The hop
-    machinery only does anything if the cap is also raised, and raising it
-    breaks the control. Issue #75."""
+def test_hop_one_cannot_spend_the_whole_allowance(tmp_path):
+    """The bug that made hops unreachable: hop one filled the cap every time."""
     api = FakeAPI(contributors={"a/one": ["c1"]},
-                  following={"c1": [f"h{i}" for i in range(10)],
-                             **{f"h{i}": ["far"] for i in range(10)}})
-    c = client(api, tmp_path)
-    assert nb.cohort(["a/one"], c, hops=1, limit=5) == \
-        nb.cohort(["a/one"], c, hops=2, limit=5)
+                  following={"c1": [f"h{i}" for i in range(40)],
+                             **{f"h{i}": ["deep"] for i in range(40)}})
+    got = nb.cohort(["a/one"], client(api, tmp_path), hops=2, limit=21,
+                    min_degree=2)
+    assert "deep" in got

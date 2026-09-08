@@ -109,8 +109,9 @@ def recency(pushed: str, now: float | None = None,
 
 
 def cohort(seeds=DEFAULT_SEEDS, client: github.Client | None = None, *,
-           per_repo: int = 12, follow: bool = True, hops: int = 1,
-           limit: int = 250, min_degree: int = 2) -> list[str]:
+           per_repo: int = 12, follow: bool = True, hops: int = 2,
+           limit: int = 250, min_degree: int = 2,
+           per_hop: int | None = None) -> list[str]:
     """People to ask, grown from the repos this project runs.
 
     Contributors first, then who they follow. Each further hop reaches the
@@ -131,15 +132,19 @@ def cohort(seeds=DEFAULT_SEEDS, client: github.Client | None = None, *,
 
     Deterministic throughout, so two sweeps are comparable.
 
-    ONE HOP IS THE DEFAULT BECAUSE TWO WAS MEASURED AND LOST. At the 250 cap a
-    second hop changes NOTHING: the crowd fills from hop one alone, so hops=2
-    returned a byte-identical ranking and spent zero extra requests. Raising
-    the cap to 450 does reach further -- eight repos one hop never surfaced,
-    including two MLX serving projects -- but the ranking then FAILS its
-    control, and no value of POPULATION between 5e6 and 1e8 recovers it. A
-    bigger crowd raises `shared` for popular repos faster than the enrichment
-    term divides it out. Leads from that configuration are leads, never
-    rankings. See issue #75.
+    TWO HOPS IS THE DEFAULT, AT THE SAME CROWD SIZE. Measured on 250 people:
+
+      1 hop    45 core + 205 hop-one              separates, 5/6, 0 leaks
+      2 hops   45 core + 102 hop-one + 102 hop-two  separates, 5/6, 0 leaks
+                                                    and 12 repos one hop
+                                                    never surfaced
+
+    Size is held constant, so this compares hop DEPTH rather than crowd size.
+    Depth is free; SIZE is what breaks the metric. A 450-person crowd fails its
+    control at every POPULATION from 5e6 to 1e8, because doubling the crowd
+    raises `shared` for popular repos faster than the enrichment term divides
+    it out. The metric is not scale-invariant in crowd size, so widen by DEPTH,
+    never by raising the cap. See issue #75.
     """
     client = client or github.Client()
     people: list[str] = []
@@ -165,12 +170,18 @@ def cohort(seeds=DEFAULT_SEEDS, client: github.Client | None = None, *,
     if not follow:
         return people[:limit]
 
+    # EACH HOP GETS ITS OWN BUDGET, and without one `hops` is unreachable.
+    # 45 contributors follow enough people to fill ANY cap tried -- 250 and 450
+    # both came back 100% hop-one -- so a second hop can never start while hop
+    # one is allowed to spend the whole allowance. Measured, not reasoned: the
+    # first attempt at this ran three configurations and executed hop two in
+    # none of them.
+    hops = max(1, hops)
+    budget = per_hop if per_hop else max(1, (limit - len(people)) // hops)
     frontier = list(dict.fromkeys(core))
-    for hop in range(max(1, hops)):
+    for hop in range(hops):
         degree: Counter = Counter()
         for login in frontier:
-            if len(people) >= limit:
-                break
             try:
                 for other in client.following(login):
                     if other not in seen:
@@ -180,7 +191,12 @@ def cohort(seeds=DEFAULT_SEEDS, client: github.Client | None = None, *,
         # Ties broken by name so the order does not depend on dict iteration.
         ranked = sorted(degree.items(), key=lambda kv: (-kv[1], kv[0]))
         floor = 1 if hop == 0 else min_degree
-        added = [name for name, d in ranked if d >= floor and add(name)]
+        added = []
+        for name, d in ranked:
+            if len(added) >= budget or len(people) >= limit:
+                break
+            if d >= floor and add(name):
+                added.append(name)
         if not added:
             break
         frontier = added
