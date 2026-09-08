@@ -12,7 +12,7 @@ def db(tmp_path):
     conn.close()
 
 
-def see(db, name, source="reddit", url="", why="", relevance=0, at=None, **kw):
+def see(db, name, source="reddit", url="", why="", relevance=0, at=None, **kw):  # noqa: E501
     return ms.record(db, Seen(name=name, source=source, url=url, why=why,
                               relevance=relevance, **kw), at=at)
 
@@ -192,3 +192,49 @@ def test_a_newer_schema_is_refused_rather_than_migrated_backwards(tmp_path):
     with pytest.raises(RuntimeError) as exc:
         ms.connect(p)
     assert "Refusing" in str(exc.value)
+
+
+# ---- issue #49: extraction precision needs the DENOMINATOR ------------------
+
+def test_a_store_of_survivors_alone_cannot_report_precision(db):
+    """Every proposal in the store resolved to something real, so "100%
+    resolved" is arithmetic, not precision. The names thrown away are the
+    measurement."""
+    see(db, "org/real", source="recap")
+    got = ms.extraction(db)[0]
+    assert got["precision"] == 1.0 and got["dropped"] == 0
+    ms.reject(db, "RTX 3070", "recap", "unresolvable")
+    ms.reject(db, "Diablo 4", "recap", "unresolvable")
+    got = ms.extraction(db)[0]
+    assert got["kept"] == 1 and got["dropped"] == 2
+    assert got["extracted"] == 3
+    assert got["precision"] == pytest.approx(1 / 3)
+
+
+def test_rejections_are_broken_down_by_reason(db):
+    ms.reject(db, "a", "recap", "unresolvable")
+    ms.reject(db, "b", "recap", "not-a-repo")
+    ms.reject(db, "c", "recap", "not-a-repo")
+    assert ms.extraction(db)[0]["reasons"] == {"unresolvable": 1, "not-a-repo": 2}
+
+
+def test_the_same_rejection_twice_is_recorded_once(db):
+    """Re-reading a cached feed must not inflate the denominator, for the same
+    reason a second sighting is not a second proposal."""
+    for _ in range(3):
+        ms.reject(db, "RTX 3070", "recap", "unresolvable")
+    assert ms.extraction(db)[0]["dropped"] == 1
+
+
+def test_an_unknown_rejection_reason_is_refused(db):
+    with pytest.raises(ValueError) as exc:
+        ms.reject(db, "x", "recap", "vibes")
+    assert "known:" in str(exc.value)
+
+
+def test_sources_are_compared_against_each_other(db):
+    see(db, "org/a", source="crowd")
+    ms.reject(db, "junk", "recap", "unresolvable")
+    rows = {r["source"]: r for r in ms.extraction(db)}
+    assert rows["crowd"]["precision"] == 1.0
+    assert rows["recap"]["precision"] == 0.0

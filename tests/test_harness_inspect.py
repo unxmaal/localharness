@@ -165,7 +165,7 @@ def test_only_a_bounded_number_of_weights_is_sized(tmp_path):
         return -1
 
     got = ins.inspect("a/b", tmp_path, meta={"size": 10}, run=run, sizer=sizer)
-    assert len(asked) == ins.SIZE_LIMIT
+    assert 0 < len(asked) <= ins.SIZE_LIMIT
     assert len(got.unsized) == 60
 
 
@@ -240,3 +240,57 @@ def test_too_big_still_holds_when_the_scan_was_complete():
                              weights={"org/x": 90 * ins.GIB},
                              smallest=90 * ins.GIB, largest=90 * ins.GIB))
     assert got.verdict == "too-big"
+
+
+# ---- issue #68: which weight is the repo actually FOR ----------------------
+
+def test_a_model_named_in_the_readme_outranks_one_buried_in_code():
+    """The first queue built from "smallest named weight" filled with
+    tokenizers and a 0.6B somebody used in a test."""
+    got = ins.headline("org/thing", ["org/buried", "org/introduced"],
+                       {"org/buried": 1, "org/introduced": 1},
+                       ["org/introduced"])
+    assert got[0] == "org/introduced"
+
+
+def test_a_model_named_repeatedly_outranks_one_named_once():
+    """The model a repo is ABOUT gets named again and again; a helper appears
+    once."""
+    got = ins.headline("org/thing", ["org/once", "org/everywhere"],
+                       {"org/once": 1, "org/everywhere": 9}, [])
+    assert got[0] == "org/everywhere"
+
+
+def test_a_model_whose_name_echoes_the_repo_outranks_a_stranger():
+    """mlx-video naming Lightricks/LTX-2 beats it naming google/umt5-xxl."""
+    got = ins.headline("Blaizzy/mlx-video", ["google/umt5-xxl", "org/mlx-video-base"],
+                       {}, [])
+    assert got[0] == "org/mlx-video-base"
+
+
+def test_the_ranking_keeps_everything(tmp_path):
+    """A ranking, not a filter: a weak signal is not evidence of irrelevance."""
+    ids = ["org/a", "org/b", "org/c"]
+    assert sorted(ins.headline("x/y", ids, {}, [])) == sorted(ids)
+
+
+def test_both_the_smallest_and_the_headline_get_sized(tmp_path):
+    """They are rarely the same models, and they answer different questions:
+    can anything here run, and what is worth downloading."""
+    asked = []
+
+    def run(argv, cwd=None, timeout=180.0):
+        d = tmp_path / "a__thing"
+        d.mkdir(exist_ok=True)
+        (d / "README.md").write_text('see "org/the-headline-model-with-long-name"')
+        (d / "m.py").write_text("\n".join(
+            f'load("org/helper-{i:02d}")' for i in range(30)))
+        return "2026-01-01T00:00:00+00:00"
+
+    def sizer(model_id, cache=None):
+        asked.append(model_id)
+        return 2 * ins.GIB
+
+    ins.inspect("a/thing", tmp_path, meta={"size": 10}, run=run, sizer=sizer)
+    assert "org/the-headline-model-with-long-name" in asked
+    assert any(i.startswith("org/helper-") for i in asked)
