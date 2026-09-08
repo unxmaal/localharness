@@ -50,29 +50,44 @@ def client(api, tmp_path, **kw):
 
 # ---- the metric ------------------------------------------------------------
 
-def test_the_overlap_is_exact_not_estimated():
-    """Every member of the crowd is checked, so the intersection is counted,
-    not inferred from a sample."""
-    assert nb.jaccard(40, 200, 900) == pytest.approx(40 / (200 + 900 - 40))
+def test_popularity_does_not_win():
+    """One of the two failures. A repo with half a million stars is starred by
+    every crowd and says nothing about this one."""
+    niche = nb.enrichment(40, 200, 900)
+    huge = nb.enrichment(60, 200, 500_000)
+    assert niche > huge
 
 
-def test_popularity_is_divided_out():
-    """THE point of the metric. A repo with half a million stars shares its
-    crowd with everything and must not outrank a niche one."""
-    niche = nb.jaccard(40, 200, 900)
-    huge = nb.jaccard(20, 200, 500_000)
-    assert huge < niche / 100
+def test_a_tiny_repo_with_a_thin_overlap_does_not_win_either():
+    """The OPPOSITE failure, and the one that actually shipped. Jaccard, lift
+    and a Wilson bound all rank a 33-star repo shared by four people above
+    mlx shared by thirty-one, because the union is almost all crowd. Measured
+    on the first live run: nothing this project runs reached the top ten."""
+    tiny = nb.enrichment(4, 250, 33)
+    real = nb.enrichment(31, 250, 28_346)
+    assert real > tiny
 
 
-def test_a_count_larger_than_the_crowd_is_clamped():
-    """Defensive: a union below the intersection would score above 1 and read
-    as a spectacular result rather than as an arithmetic error."""
-    assert nb.jaccard(999, 200, 900) <= 1.0
+def test_evidence_and_enrichment_both_count():
+    """Same rate, more people, higher score: the count is not just a filter."""
+    assert nb.enrichment(20, 250, 1000) > nb.enrichment(10, 250, 500)
+
+
+def test_a_repo_no_rarer_here_than_anywhere_scores_zero():
+    """Not negative. A thing the crowd stars at the base rate is uninformative,
+    not evidence against."""
+    assert nb.enrichment(1, 250, 5_000_000) == 0.0
+
+
+def test_the_population_constant_is_declared_inside_its_measured_window():
+    """It trades evidence against enrichment and is NOT free: the control was
+    measured to pass at 1e6 through 2e7 and fail at 1e5, 1e8 and 1e9."""
+    assert 1e6 <= nb.POPULATION <= 2e7
 
 
 @pytest.mark.parametrize("args", [(5, 0, 10), (5, 10, 0), (0, 10, 10)])
 def test_nothing_to_divide_by_scores_zero_rather_than_raising(args):
-    assert nb.jaccard(*args) == 0.0
+    assert nb.enrichment(*args) == 0.0
 
 
 # ---- building the crowd ----------------------------------------------------
@@ -149,7 +164,9 @@ def test_the_sibling_outranks_the_repo_everybody_stars(tmp_path):
     api, people = _world()
     got = nb.neighbors(people, client(api, tmp_path))
     assert [n.repo for n in got] == ["org/sibling", "big/everything"]
-    assert got[0].score > got[1].score * 100
+    # The score is a log ratio times a count, so the gap is a comfortable
+    # margin rather than the orders of magnitude a plain ratio would give.
+    assert got[0].score > got[1].score * 2
 
 
 def test_raw_overlap_would_have_got_it_backwards(tmp_path):
@@ -212,22 +229,21 @@ def test_a_person_who_cannot_be_read_does_not_count_as_asked(tmp_path):
 
 # ---- the control -----------------------------------------------------------
 
-def test_the_control_passes_when_the_expected_ranks_and_no_decoy_does(tmp_path):
+def test_the_control_passes_when_the_expected_ranks_and_nothing_huge_does(tmp_path):
     api, people = _world()
-    got = nb.control(["org/sibling"], people, client(api, tmp_path), top=1,
-                     decoys=("big/everything",))
+    got = nb.control(["org/sibling"], people, client(api, tmp_path), top=1)
     assert got["expected_found"] == ["org/sibling"]
-    assert got["decoys_in_top"] == []
+    assert got["popularity_leaks"] == []
     assert got["separates"] is True
 
 
-def test_a_decoy_in_the_top_fails_the_control(tmp_path):
-    """The negative direction. Passing the positive alone is how a metric that
-    ranks popularity ships as a metric that ranks relevance."""
+def test_anything_enormous_in_the_top_fails_the_control(tmp_path):
+    """The negative direction, measured by SIZE rather than by a list of names.
+    The hand-written list passed a ranking whose top five were all repos over
+    100k stars, because it did not happen to name those five."""
     api, people = _world()
-    got = nb.control(["org/sibling"], people, client(api, tmp_path), top=5,
-                     decoys=("big/everything",))
-    assert got["decoys_in_top"] == ["big/everything"]
+    got = nb.control(["org/sibling"], people, client(api, tmp_path), top=5)
+    assert got["popularity_leaks"] == [("big/everything", 500_000)]
     assert got["separates"] is False
 
 

@@ -19,6 +19,7 @@ rather than assuming it, because a metric without a negative control is noise.
 """
 from __future__ import annotations
 
+import math
 from collections import Counter
 from dataclasses import dataclass, field
 
@@ -30,10 +31,16 @@ DEFAULT_SEEDS = ("ml-explore/mlx", "ml-explore/mlx-lm", "Blaizzy/mlx-audio",
                  "mflux-community/mflux")
 #: Below this, a score rests on one or two people and means nothing.
 MIN_SHARED = 3
-#: Repos that share a crowd with everything. If one of these outranks the real
-#: neighbours, the normalisation is not working.
-DECOYS = ("freeCodeCamp/freeCodeCamp", "torvalds/linux", "facebook/react",
-          "huggingface/transformers", "ollama/ollama", "vllm-project/vllm")
+#: How many people could plausibly have starred any of this. NOT a free
+#: constant: it sets how much evidence counts against how much enrichment, and
+#: the control only passes between 1e6 and 2e7. Measured, see control().
+POPULATION = 5_000_000
+#: A repo this large is starred by everyone and tells us nothing. One in the
+#: top means popularity has leaked back into the ranking. Structural rather
+#: than a list of names, because the first hand-written list missed every repo
+#: that actually leaked (openclaw, opencode, hermes-agent) and named repos this
+#: crowd does not star.
+POPULAR_STARS = 100_000
 
 
 @dataclass
@@ -50,23 +57,30 @@ class Neighbor:
     description: str = ""
 
 
-def jaccard(shared: int, crowd_size: int, stars: int) -> float:
-    """Overlap between the crowd and everyone who starred the candidate.
+def enrichment(shared: int, crowd_size: int, stars: int,
+               population: float = POPULATION) -> float:
+    """How much more this crowd stars a repo than the world does, times the
+    evidence for saying so.
 
-    Exact, not estimated: `shared` IS the intersection, because every member of
-    the crowd is checked, and `stars` is the candidate's own star count from
-    GitHub. Union is `crowd + stars - shared`.
+        shared * log( (shared / crowd) / (stars / population) )
 
-    So a repo with half a million stars and twenty of our crowd scores far
-    below a niche one with nine hundred stars and forty, which is the entire
-    point: the question is how concentrated a repo's audience is in the crowd
-    we trust, not how many people like it.
+    BOTH HALVES ARE NECESSARY AND THIS WAS MEASURED, not reasoned. Ranking on
+    `shared` alone returns whatever giant everyone stars: five repos over
+    100k stars led the first real run. Ranking on the ratio alone -- plain
+    Jaccard, lift, or a Wilson bound, all three tried -- inverts the error and
+    returns 33-star repos that four people happen to share, putting nothing
+    this project runs in the top ten. Multiplying the log ratio by the count
+    is the standard fix and the only one of six that passed both directions.
+
+    `population` decides the balance. The control passes between 1e6 and 2e7
+    and fails outside it, so the default sits in the middle of that window
+    rather than at its edge.
     """
     if crowd_size <= 0 or stars <= 0 or shared <= 0:
         return 0.0
-    shared = min(shared, crowd_size, stars)
-    union = crowd_size + stars - shared
-    return shared / union if union > 0 else 0.0
+    shared = min(shared, crowd_size)
+    ratio = (shared / crowd_size) / (stars / population)
+    return shared * math.log(ratio) if ratio > 1 else 0.0
 
 
 def cohort(seeds=DEFAULT_SEEDS, client: github.Client | None = None, *,
@@ -146,7 +160,7 @@ def neighbors(people=None, client: github.Client | None = None, *,
         stars = int(meta.get("stargazers_count") or 0)
         out.append(Neighbor(
             repo=repo, shared=shared, crowd=asked,
-            score=jaccard(shared, asked, stars), stars=stars,
+            score=enrichment(shared, asked, stars), stars=stars,
             language=meta.get("language") or "",
             topics=list(meta.get("topics") or []),
             archived=bool(meta.get("archived")),
@@ -157,7 +171,7 @@ def neighbors(people=None, client: github.Client | None = None, *,
 
 
 def control(expect, people=None, client: github.Client | None = None, *,
-            top: int = 10, decoys=DECOYS, **kw) -> dict:
+            top: int = 10, popular: int = POPULAR_STARS, **kw) -> dict:
     """Rank a known crowd and report whether the ranking is real.
 
     Two directions, because either alone passes on a broken metric:
@@ -165,11 +179,18 @@ def control(expect, people=None, client: github.Client | None = None, *,
     POSITIVE -- things already known to belong here have to rank. The tools this
     project runs are the honest test set: they were chosen before the metric
     existed.
-    NEGATIVE -- a repo everybody stars must NOT rank, which is exactly what
-    counting shared stars alone does and the reason for dividing by the union.
+    NEGATIVE -- nothing enormous may rank, because a repo with 300k stars is
+    starred by every crowd and carries no information about this one. Measured
+    by size rather than by a list of names: the hand-written list passed a
+    ranking whose top five were all repos over 100k stars, because it did not
+    happen to name those five.
 
     `raw_top` is the ranking by shared count alone, kept so the difference
     between the two orderings is visible rather than asserted.
+
+    ONE HONEST LIMIT: `POPULATION` was chosen by running this control, so a
+    pass now confirms the metric has not regressed rather than proving it
+    generalises. A fresh crowd is the real test.
     """
     client = client or github.Client()
     people = list(people) if people is not None else cohort(client=client)
@@ -177,9 +198,9 @@ def control(expect, people=None, client: github.Client | None = None, *,
     counts, asked = crowd(people, client)
     names = [n.repo for n in found]
     hits = [e for e in expect if e in names]
-    decoyed = [d for d in decoys if d in names]
+    leaks = [(n.repo, n.stars) for n in found if n.stars > popular]
     return {"crowd": asked, "top": names, "expected_found": hits,
             "missing": [e for e in expect if e not in names],
-            "decoys_in_top": decoyed,
+            "popularity_leaks": leaks,
             "raw_top": [r for r, _ in counts.most_common(top)],
-            "separates": bool(hits) and not decoyed}
+            "separates": bool(hits) and not leaks}
