@@ -174,8 +174,8 @@ generation five times faster. That is what it found on its first real run: a
 `--neighbors` is the newest and the highest signal. People who maintain the
 tools you already run follow and star each other, and what they star is a
 curated list rather than a popularity poll. `lh` starts from whoever contributes
-to the tools installed here, follows one hop out, and ranks what that crowd
-stars by how *concentrated* it is in them:
+to the tools installed here, follows their network outward, and ranks what that
+crowd stars by how *concentrated* it is in them:
 
 ```
 score = shared * log( (shared / crowd) / (stars / population) )
@@ -188,6 +188,27 @@ were tried against a control; one passed.
 
 The first sweep found zero overlap with anything the feeds had ever produced,
 so it is a second axis rather than a better version of the same one.
+
+The crowd grows toward **consensus** rather than outward. Everyone considered
+carries a count of how many people already in the crowd follow them, and a
+second hop needs several of them to agree before someone joins. That matters:
+two hops at the same crowd size found twelve repos one hop never surfaced,
+while simply making the crowd bigger broke the ranking outright at every
+setting tried.
+
+**Comments, not just posts.** The comparative judgements are in the replies. A
+post title says "what do you use for local image generation"; one reply names
+four tools across four lanes and says which is best at what. Reddit serves a
+thread's comments as a feed, so the same reader handles them:
+
+```bash
+lh discover --feeds --comments 5            # replies on the 5 newest posts
+lh discover --feeds --comments 5 --judge    # and read names out of the prose
+```
+
+The judge is what reads the prose, because the linked repos are the easy half:
+"Krea 2 being replaced with Anima" is a claim no registry can produce and no
+pattern-matcher was going to find.
 
 **3. It sorts proposals cheapest-first, so measurement is spent where it counts.**
 
@@ -226,6 +247,13 @@ proposed again. Anything that can is queued for download, and `lh fetch --run`
 takes them one at a time with a disk floor, because this machine holds one
 working set.
 
+**A weight is only queued if something here can measure it.** A model needs a
+lane -- a case, a runner and a metric -- and this project has eight. A voice
+activity detector and a speech enhancer both downloaded cleanly once and
+neither could be scored by anything, so they sat on disk. Those are listed
+now, and not fetched. It is not a verdict on the model: sometimes building the
+lane is the work.
+
 **4. You measure, and the result decides.**
 
 Discovery never concludes anything. It hands you proposals, each with a source
@@ -261,7 +289,9 @@ lh discover --recurrence     # what keeps coming back, and how each source is do
 
 Discovery goes stale, which defeats the point, so `lh` tracks when it last
 looked and tells you in ordinary `lh discover` output when it has been too long.
-Default is 30 days, set `$LOCALHARNESS_DISCOVERY_DAYS` to change it.
+Default is 7 days, set `$LOCALHARNESS_DISCOVERY_DAYS` to change it. Each kind
+of answer is cached for less time than that, or a more frequent sweep would
+just re-read what it read last time and report success.
 
 ```bash
 lh discover --sources        # which places it reads, and when it last looked
