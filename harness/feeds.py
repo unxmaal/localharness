@@ -29,7 +29,10 @@ ATOM = {"a": "http://www.w3.org/2005/Atom"}
 USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
               "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0 Safari/537.36")
 
-DEFAULT_INTERVAL_DAYS = 30
+#: The field moves weekly and the Reddit feeds are already on that cadence.
+#: MUST stay above github.TTL_BY_ENDPOINT_HOURS["/starred"], or a sweep re-reads
+#: a cached answer and reports success without looking. Asserted in the tests.
+DEFAULT_INTERVAL_DAYS = 7
 INTERVAL_ENV = "LOCALHARNESS_DISCOVERY_DAYS"
 #: Rapid repeat requests get 429 with an empty body.
 RETRIES = 4

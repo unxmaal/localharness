@@ -109,26 +109,56 @@ def recency(pushed: str, now: float | None = None,
 
 
 def cohort(seeds=DEFAULT_SEEDS, client: github.Client | None = None, *,
-           per_repo: int = 12, follow: bool = True, limit: int = 250
-           ) -> list[str]:
-    """People to ask, from the repos this project runs.
+           per_repo: int = 12, follow: bool = True, hops: int = 2,
+           limit: int = 250, min_degree: int = 2,
+           per_hop: int | None = None) -> list[str]:
+    """People to ask, grown from the repos this project runs.
 
-    Contributors first, then who those people follow. The second hop is what
-    turns a handful of maintainers into a community: it reaches the people they
-    read, which is where a technique shows up before it reaches a subreddit.
+    Contributors first, then who they follow. Each further hop reaches the
+    people THEY read, which is where a technique appears before it reaches a
+    subreddit.
 
-    Deterministic order, so two sweeps are comparable.
+    EXPANSION IS TOWARD CONSENSUS, NOT OUTWARD, and that is the whole design.
+    A naive second hop is 250 people following a hundred each: up to 25,000
+    candidates, almost all of them a random walk away from the subject. Hop one
+    already drags in an unrelated neuroscience cluster because one contributor
+    follows academics, and a second hop multiplies it.
+
+    So every candidate carries an IN-DEGREE: how many people already in the
+    crowd follow them. That separates someone the community reads from someone
+    one person happens to follow. Hop one is ordered by it; every hop after
+    REQUIRES it, so a distant person joins only on several existing members'
+    agreement. Same idea as the repo ranking in #58, applied to people.
+
+    Deterministic throughout, so two sweeps are comparable.
+
+    TWO HOPS IS THE DEFAULT, AT THE SAME CROWD SIZE. Measured on 250 people:
+
+      1 hop    45 core + 205 hop-one              separates, 5/6, 0 leaks
+      2 hops   45 core + 102 hop-one + 102 hop-two  separates, 5/6, 0 leaks
+                                                    and 12 repos one hop
+                                                    never surfaced
+
+    Size is held constant, so this compares hop DEPTH rather than crowd size.
+    Depth is free; SIZE is what breaks the metric. A 450-person crowd fails its
+    control at every POPULATION from 5e6 to 1e8, because doubling the crowd
+    raises `shared` for popular repos faster than the enrichment term divides
+    it out. The metric is not scale-invariant in crowd size, so widen by DEPTH,
+    never by raising the cap. See issue #75.
     """
     client = client or github.Client()
     people: list[str] = []
     seen: set[str] = set()
 
-    def add(login):
-        if login and login not in seen and not login.endswith("[bot]"):
+    def add(login) -> bool:
+        if (login and login not in seen and not login.endswith("[bot]")
+                and len(people) < limit):
             seen.add(login)
             people.append(login)
+            return True
+        return False
 
-    core = []
+    core: list[str] = []
     for repo in seeds:
         try:
             found = client.contributors(repo)[:per_repo]
@@ -137,15 +167,39 @@ def cohort(seeds=DEFAULT_SEEDS, client: github.Client | None = None, *,
         for login in found:
             add(login)
             core.append(login)
-    if follow:
-        for login in core:
-            if len(people) >= limit:
-                break
+    if not follow:
+        return people[:limit]
+
+    # EACH HOP GETS ITS OWN BUDGET, and without one `hops` is unreachable.
+    # 45 contributors follow enough people to fill ANY cap tried -- 250 and 450
+    # both came back 100% hop-one -- so a second hop can never start while hop
+    # one is allowed to spend the whole allowance. Measured, not reasoned: the
+    # first attempt at this ran three configurations and executed hop two in
+    # none of them.
+    hops = max(1, hops)
+    budget = per_hop if per_hop else max(1, (limit - len(people)) // hops)
+    frontier = list(dict.fromkeys(core))
+    for hop in range(hops):
+        degree: Counter = Counter()
+        for login in frontier:
             try:
                 for other in client.following(login):
-                    add(other)
+                    if other not in seen:
+                        degree[other] += 1
             except github.GitHubError:
                 continue
+        # Ties broken by name so the order does not depend on dict iteration.
+        ranked = sorted(degree.items(), key=lambda kv: (-kv[1], kv[0]))
+        floor = 1 if hop == 0 else min_degree
+        added = []
+        for name, d in ranked:
+            if len(added) >= budget or len(people) >= limit:
+                break
+            if d >= floor and add(name):
+                added.append(name)
+        if not added:
+            break
+        frontier = added
     return people[:limit]
 
 

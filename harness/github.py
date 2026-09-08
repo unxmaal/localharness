@@ -26,9 +26,34 @@ from typing import Any, Callable
 
 from harness import paths
 
-#: Star lists move slowly and a month-old neighbourhood is still a
-#: neighbourhood. The cache is a store of facts, not a performance trick.
-DEFAULT_TTL_HOURS = 24 * 30
+#: Fallback for an endpoint not named in TTL_BY_ENDPOINT.
+DEFAULT_TTL_HOURS = 24 * 7
+#: HOW LONG EACH ANSWER IS WORTH REUSING, because endpoints do not move at the
+#: same speed and one constant for all of them made a shorter sweep interval
+#: into theatre: with everything cached for 30 days, a weekly sweep re-read a
+#: month-old answer, found what it found last time, and reported success.
+#: Ordered longest-lived first only for readability; lookup is by substring.
+TTL_BY_ENDPOINT_HOURS = {
+    # Who writes a project changes over months.
+    "/contributors": 24 * 30,
+    # Who someone follows changes over weeks.
+    "/following": 24 * 14,
+    # Stars and pushed_at move daily but only feed ranking and recency.
+    "repos/": 24 * 3,
+    # THE SIGNAL. What someone starred this week is the entire point of the
+    # crowd source, so this must stay well under the discovery interval.
+    "/starred": 24 * 2,
+}
+
+
+def ttl_for(api_path: str, default: float = DEFAULT_TTL_HOURS) -> float:
+    """Hours this answer is worth reusing. Longest match wins, so
+    `repos/x/y/contributors` gets the contributors TTL, not the repos one."""
+    best, hours = "", default
+    for marker, value in TTL_BY_ENDPOINT_HOURS.items():
+        if marker in api_path and len(marker) > len(best):
+            best, hours = marker, value
+    return hours
 PER_PAGE = 100
 #: repos/<r>/stargazers and /subscribers return 404 to this token and 401 to no
 #: token at all, for every repo, so who starred a repo cannot be listed. The
@@ -76,7 +101,9 @@ def _gh(path: str) -> str:
 @dataclass
 class Client:
     cache: Path | None = None
-    ttl_hours: float = DEFAULT_TTL_HOURS
+    #: Overrides the per-endpoint table when set, for tests and for a caller
+    #: that deliberately wants everything fresh or everything cached.
+    ttl_hours: float | None = None
     runner: Callable[[str], str] = _gh
     budget: int = 400
     #: Requests actually sent. Cache hits are free and do not count.
@@ -101,7 +128,9 @@ class Client:
                 payload = None
         if payload is not None:
             age = time.time() - float(payload.get("fetched", 0))
-            if age < self.ttl_hours * 3600:
+            ttl = (self.ttl_hours if self.ttl_hours is not None
+                   else ttl_for(api_path))
+            if age < ttl * 3600:
                 return payload["data"]
         if self.spent >= self.budget:
             if payload is not None:
