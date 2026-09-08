@@ -12,8 +12,9 @@ def db(tmp_path):
     conn.close()
 
 
-def seen(db, name, kind="weights"):
-    ms.record(db, ms.Seen(name=name, source="inspect", resolved=name, kind=kind))
+def seen(db, name, kind="weights", lane="stt"):
+    ms.record(db, ms.Seen(name=name, source="inspect", resolved=name, kind=kind,
+                          lane=lane))
 
 
 # ---- what may be downloaded ------------------------------------------------
@@ -174,3 +175,37 @@ def test_a_refusal_does_not_consume_the_download_budget(db):
           snapshot=lambda repo_id: calls.append(repo_id) or "/tmp/x",
           free=900 * f.GIB)
     assert calls == ["org/real"]
+
+
+# ---- issue #81: a weight no lane can test is never fetched -----------------
+
+def test_a_weight_with_no_lane_is_not_downloaded(db):
+    """silero-vad and MossFormer2 both downloaded cleanly in a manual run and
+    neither can be screened: there is no VAD lane and no denoising lane. An
+    automated loop would keep doing that forever."""
+    calls = []
+    seen(db, "org/measurable", lane="stt")
+    seen(db, "org/orphan", lane="")
+    for n in ("org/measurable", "org/orphan"):
+        ms.decide(db, n, "queued", tier="inspect")
+    f.run(db, {"org/measurable": 2 * f.GIB, "org/orphan": 2 * f.GIB}, limit=5,
+          snapshot=lambda repo_id: calls.append(repo_id) or "/tmp/x",
+          free=900 * f.GIB)
+    assert calls == ["org/measurable"]
+
+
+def test_a_laneless_weight_is_still_listed_not_hidden(db):
+    """Not a verdict on the model. The eval suite has no case for it, and
+    building one is sometimes the work -- language ID is issue #2."""
+    seen(db, "org/orphan", lane="")
+    ms.decide(db, "org/orphan", "queued", tier="inspect")
+    assert [r["name"] for r in f.queued(db)] == ["org/orphan"]
+
+
+def test_a_laneless_weight_is_not_declined(db):
+    """Terminal would mean answered, and it is not: it is waiting on a lane."""
+    seen(db, "org/orphan", lane="")
+    ms.decide(db, "org/orphan", "queued", tier="inspect")
+    f.run(db, {"org/orphan": 2 * f.GIB}, snapshot=lambda **kw: "/x",
+          free=900 * f.GIB)
+    assert "org/orphan" not in ms.settled(db)

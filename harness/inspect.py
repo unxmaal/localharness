@@ -48,6 +48,38 @@ SIZE_DELAY = 2.0
 
 VERDICTS = ("fits", "too-big", "needs-cuda", "no-entry-point", "dead", "unknown")
 
+#: HuggingFace's own task label -> the lane that can actually measure it.
+#: `pipeline_tag` is frequently absent (3 of 6 real models checked), so the
+#: repo's free-text tags are read too. Anything not here has NO LANE, and that
+#: is a fact about this harness rather than about the model: silero-vad and
+#: MossFormer2 are both good and neither can be scored by anything here.
+PIPELINE_LANES = {
+    "automatic-speech-recognition": "stt", "text-to-speech": "tts",
+    "text-to-audio": "tts", "text-to-image": "image",
+    "text-to-video": "video", "image-to-video": "video",
+    "text-generation": "code",
+}
+TAG_LANES = {"asr": "stt", "speech-recognition": "stt", "stt": "stt",
+             "tts": "tts", "text-to-speech": "tts",
+             "text-to-image": "image", "diffusion": "image"}
+
+
+def lane_for(meta: dict) -> str:
+    """Which lane could measure this, or "" when nothing here can.
+
+    Empty is not a rejection. It means the eval suite has no case, no runner
+    and no metric for this kind of model, which is a gap in the harness and
+    sometimes the work worth doing (language ID is issue #2).
+    """
+    tag = (meta.get("pipeline_tag") or "").strip().lower()
+    if tag in PIPELINE_LANES:
+        return PIPELINE_LANES[tag]
+    for t in (meta.get("tags") or []):
+        got = TAG_LANES.get(str(t).strip().lower())
+        if got:
+            return got
+    return ""
+
 #: Imports and pins that mean it will not run on this machine at all.
 #: NOT awq, gptq or vllm: awq is a QUANTISATION FORMAT that mlx-lm implements
 #: natively, and matching it flagged ml-explore/mlx-lm as CUDA-dependent on the
@@ -91,6 +123,8 @@ class Fit:
     #: Weights it names that could not be sized. Kept apart from naming none
     #: at all: "unknown" and "none" are different answers.
     unsized: list[str] = field(default_factory=list)
+    #: model id -> the lane that could measure it, "" when nothing here can.
+    lanes: dict[str, str] = field(default_factory=dict)
     #: Named weights ranked by how likely each is the thing the repo is FOR.
     headline: list[str] = field(default_factory=list)
     #: CUDA named in code but NOT in any dependency file. Weaker evidence: a
@@ -223,6 +257,38 @@ def headline(repo: str, ids, counts: dict, in_readme) -> list[str]:
     return sorted(ids, key=score, reverse=True)
 
 
+def hf_facts(model_id: str, fetch=None, cache: dict | None = None) -> dict:
+    """Total bytes and measurable lane, from ONE registry call.
+
+    Both come out of the same response, and the registry rate-limits, so
+    asking twice for one model is a request spent on nothing.
+    """
+    from harness import feeds
+    if cache is not None and model_id in cache:
+        got = cache[model_id]
+        if isinstance(got, dict):
+            return got
+        # A size-only entry predates lanes. Returning it would report every
+        # already-sized model as unmeasurable, which is how this first read:
+        # 0 queued and 14 orphans, several of them plainly STT and image
+        # models. Fall through and upgrade the entry instead.
+    if fetch is None:
+        def fetch(url):
+            return feeds.fetch(url, retries=SIZE_RETRIES, delay=SIZE_DELAY)
+    url = f"https://huggingface.co/api/models/{model_id}?blobs=true"
+    try:
+        data = json.loads(fetch(url))
+    except Exception:  # noqa: BLE001 - unreachable is unknown, never zero
+        return {"size": -1, "lane": ""}
+    sizes = [s.get("size") or 0 for s in data.get("siblings", [])]
+    out = {"size": sum(sizes) if sizes else -1, "lane": lane_for(data)}
+    # Only a real answer is worth keeping. Caching a failure would freeze a
+    # rate-limit into a permanent "unknown".
+    if cache is not None and out["size"] > 0:
+        cache[model_id] = out
+    return out
+
+
 def hf_size(model_id: str, fetch=None, cache: dict | None = None) -> int:
     """Total bytes of a HuggingFace repo, or -1 when it cannot be told.
 
@@ -231,24 +297,7 @@ def hf_size(model_id: str, fetch=None, cache: dict | None = None) -> int:
     known. HuggingFace rate-limits this endpoint to 429 under a sweep, so it
     goes through the feed fetcher, which already retries with backoff.
     """
-    from harness import feeds
-    if cache is not None and model_id in cache:
-        return int(cache[model_id])
-    if fetch is None:
-        def fetch(url):
-            return feeds.fetch(url, retries=SIZE_RETRIES, delay=SIZE_DELAY)
-    url = f"https://huggingface.co/api/models/{model_id}?blobs=true"
-    try:
-        data = json.loads(fetch(url))
-    except Exception:  # noqa: BLE001 - unreachable is unknown, never zero
-        return -1
-    sizes = [s.get("size") or 0 for s in data.get("siblings", [])]
-    total = sum(sizes) if sizes else -1
-    # Only a real answer is worth keeping. Caching -1 would freeze a rate-limit
-    # into a permanent "unknown".
-    if cache is not None and total > 0:
-        cache[model_id] = total
-    return total
+    return hf_facts(model_id, fetch=fetch, cache=cache)["size"]
 
 
 def decide(fit: Fit, ceiling: int = MEMORY_CEILING, dead_days: int = DEAD_DAYS,
@@ -327,9 +376,15 @@ def _takes_cache(fn) -> bool:
 
 
 def inspect(repo: str, workdir: Path, *, meta: dict | None = None,
-            sizer=hf_size, run=_run, ceiling: int = MEMORY_CEILING,
+            sizer=None, facts=hf_facts, run=_run,
+            ceiling: int = MEMORY_CEILING,
             kb_cap: int = CLONE_KB_CAP) -> Fit:
     """Clone a candidate's source, read it, and say whether it can run here."""
+    if sizer is not None:      # older callers and tests pass a size-only stub
+        def facts(model_id, cache=None):
+            n = (sizer(model_id, cache=cache) if _takes_cache(sizer)
+                 else sizer(model_id))
+            return {"size": int(n), "lane": ""}
     fit = Fit(repo=repo, source_kb=int((meta or {}).get("size") or 0),
               description=((meta or {}).get("description") or "")[:200])
     if fit.source_kb and fit.source_kb > kb_cap:
@@ -358,7 +413,11 @@ def inspect(repo: str, workdir: Path, *, meta: dict | None = None,
     picked = list(dict.fromkeys(
         sorted(found["hf_ids"], key=len)[:half] + fit.headline[:half]))
     for model_id in picked:
-        size = sizer(model_id, cache=cache) if _takes_cache(sizer) else sizer(model_id)
+        got = (facts(model_id, cache=cache) if _takes_cache(facts)
+               else facts(model_id))
+        size = got["size"] if isinstance(got, dict) else int(got)
+        if isinstance(got, dict) and got.get("lane"):
+            fit.lanes[model_id] = got["lane"]
         if size > 0:
             fit.weights[model_id] = size
         else:
