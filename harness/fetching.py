@@ -167,8 +167,12 @@ def run(conn, sizes: dict[str, int], *, limit: int = 1, snapshot=None,
     error says nothing about the candidate.
     """
     done = []
+    fetched = 0
     for row in queued(conn):
-        if len(done) >= limit:
+        # `limit` bounds DOWNLOADS, not decisions. Counting refusals against it
+        # let one unsized entry at the head of the queue consume the whole
+        # budget, so nothing was ever fetched.
+        if fetched >= limit:
             break
         name = row["resolved"] or row["name"]
         p = plan(name, sizes.get(name, 0), free=free)
@@ -181,6 +185,7 @@ def run(conn, sizes: dict[str, int], *, limit: int = 1, snapshot=None,
         except FetchError as exc:
             done.append({"repo": name, "ok": False, "why": str(exc)})
             continue
+        fetched += 1
         ms.decide(conn, row["name"], "queued", tier="fetch",
                   detail=f"downloaded to {where}", run_path=where)
         done.append({"repo": name, "ok": True, "why": where})
