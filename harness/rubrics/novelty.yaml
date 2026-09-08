@@ -1,4 +1,4 @@
-version: 2
+version: 3
 name: novelty
 model: q3-4b
 scale: [1, 10]
@@ -21,9 +21,17 @@ what_scores_high:
   - A technique, workflow or method rather than another model.
   - Something that makes an existing job CHEAPER, because measurement time is
     the scarce resource here.
-  - Its source has already been read and found to run here. A line saying it
-    is MLX-native with weights that fit is worth more than any description,
-    because it was measured rather than claimed.
+  - A concrete measured claim about what it DOES, with a number and the
+    hardware it was measured on.
+
+# Everything reaching this rubric has already been read from source and found
+# to run here, so RUNNING IS NOT MERIT. Scoring it as merit put six unrelated
+# candidates at 10/10 in one sweep.
+scores_nothing_by_itself:
+  - Being MLX-native. Every candidate has already been read from its source and
+    found to run here, so this is the price of entry and not a distinction.
+  - Having weights that fit this machine. Same reason.
+  - Running natively on Apple Silicon, on Metal, or on a Mac at all.
 
 what_scores_low:
   - Another model in an already crowded family, with no claim distinguishing it.
@@ -42,7 +50,8 @@ what_scores_low:
 
 instructions: >-
   Reply with a single integer from 1 to 10 on the first line, then one sentence
-  saying why. 10 means drop everything and measure this. 1 means ignore it.
+  saying why. If your reason is only that it runs on this hardware, the score
+  is 5 at most: everything you are shown runs on this hardware. 10 means drop everything and measure this. 1 means ignore it.
   Judge only what the text supports. A confident description is not evidence,
   and a terse description of a real technique beats a florid one about nothing.
   If the text does not say enough to judge, score 3 and say so.

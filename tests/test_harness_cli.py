@@ -667,3 +667,48 @@ def test_discover_json_is_machine_readable(capsys, monkeypatch):
     assert rows[0]["name"] == "never-run"
     assert rows[0]["measured"] is False
     assert rows[0]["how"] == "cmd-b"
+
+
+# ---- issue #69 follow-up: the judging path had no test at all ---------------
+
+def test_judging_an_inspected_candidate_uses_only_fields_fit_has(monkeypatch,
+                                                                 tmp_path):
+    """This shipped reading `Fit.description`, a field Fit did not have, and
+    every one of 900+ tests passed because nothing called the function. A code
+    path with no test is untested however green the suite is."""
+    from harness import cli, inspect as ins, judge
+
+    fit = ins.Fit(repo="org/thing", verdict="fits", why="MLX-native",
+                  description="a tool", mlx=True,
+                  weights={"org/w": 2 * ins.GIB}, smallest=2 * ins.GIB,
+                  largest=2 * ins.GIB)
+    shown = {}
+
+    def fake_score(item, rubric=None, **kw):
+        shown["item"] = item
+        return 8, "because"
+
+    monkeypatch.setattr(judge, "score", fake_score)
+    assert cli._judge_fits([fit], store_path=tmp_path / "d.db") == 0
+    assert "NAME: org/thing" in shown["item"]
+    assert "READ FROM ITS SOURCE: fits: MLX-native" in shown["item"]
+    assert "RUNTIME: MLX-native" in shown["item"]
+    assert "DESCRIPTION: a tool" in shown["item"]
+
+
+def test_a_judge_failure_on_one_candidate_does_not_stop_the_rest(monkeypatch,
+                                                                 tmp_path):
+    from harness import cli, inspect as ins, judge
+    fits = [ins.Fit(repo="org/bad", verdict="fits"),
+            ins.Fit(repo="org/good", verdict="fits")]
+    seen = []
+
+    def fake_score(item, rubric=None, **kw):
+        if "org/bad" in item:
+            raise RuntimeError("model is down")
+        seen.append(item)
+        return 5, "ok"
+
+    monkeypatch.setattr(judge, "score", fake_score)
+    cli._judge_fits(fits, store_path=tmp_path / "d.db")
+    assert len(seen) == 1

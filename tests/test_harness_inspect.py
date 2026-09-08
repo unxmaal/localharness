@@ -294,3 +294,16 @@ def test_both_the_smallest_and_the_headline_get_sized(tmp_path):
     ins.inspect("a/thing", tmp_path, meta={"size": 10}, run=run, sizer=sizer)
     assert "org/the-headline-model-with-long-name" in asked
     assert any(i.startswith("org/helper-") for i in asked)
+
+
+def test_the_fit_carries_the_repo_description(tmp_path):
+    """_judge_fits reads it to show the judge prose AND source facts together.
+    It shipped reading a field Fit did not have, and the whole suite passed
+    because nothing exercised that path."""
+    def run(argv, cwd=None, timeout=180.0):
+        (tmp_path / "a__b").mkdir(exist_ok=True)
+        return "2026-01-01T00:00:00+00:00"
+
+    got = ins.inspect("a/b", tmp_path, meta={"size": 10, "description": "a tool"},
+                      run=run, sizer=lambda m, cache=None: -1)
+    assert got.description == "a tool"

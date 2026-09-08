@@ -102,6 +102,9 @@ class Fit:
     entry_points: list[str] = field(default_factory=list)
     last_commit: str = ""
     source_kb: int = 0
+    #: GitHub's own one-line description, carried so the judge can be shown the
+    #: prose AND the source facts in one place.
+    description: str = ""
 
     @property
     def largest_gib(self) -> float:
@@ -327,7 +330,8 @@ def inspect(repo: str, workdir: Path, *, meta: dict | None = None,
             sizer=hf_size, run=_run, ceiling: int = MEMORY_CEILING,
             kb_cap: int = CLONE_KB_CAP) -> Fit:
     """Clone a candidate's source, read it, and say whether it can run here."""
-    fit = Fit(repo=repo, source_kb=int((meta or {}).get("size") or 0))
+    fit = Fit(repo=repo, source_kb=int((meta or {}).get("size") or 0),
+              description=((meta or {}).get("description") or "")[:200])
     if fit.source_kb and fit.source_kb > kb_cap:
         fit.verdict = "too-big"
         fit.why = (f"source tree is {fit.source_kb / 1000:.0f} MB, which is "

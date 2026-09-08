@@ -51,8 +51,15 @@ def load(name: str = DEFAULT_RUBRIC, directory: Path | None = None) -> Rubric:
                          f"(known: {', '.join(known) or 'none'})") from exc
     scale = raw.get("scale") or [1, 10]
     body = [raw.get("question", "").strip(), ""]
+    # Every section a rubric can declare. A key not listed here is SILENTLY
+    # DROPPED: a "running here is not merit" section was added to the yaml,
+    # never rendered, and the judge went on rewarding exactly what it was
+    # written to stop.
     for key, header in (("what_scores_high", "SCORES HIGH"),
-                        ("what_scores_low", "SCORES LOW")):
+                        ("what_scores_low", "SCORES LOW"),
+                        ("scores_nothing_by_itself",
+                         "COUNTS FOR NOTHING BY ITSELF, because it is true of "
+                         "EVERY candidate you will be shown")):
         if raw.get(key):
             body.append(f"{header}:")
             body += [f"- {item.strip()}" for item in raw[key]]
@@ -126,6 +133,14 @@ def score(item: str, rubric: Rubric | None = None, *, gateway: str = "",
 #: Items whose real outcome is already known here, for calibrating a rubric.
 #: Descriptions only, as a feed would carry them: the judge must reach the right
 #: order without being told the answer.
+#:
+#: EVERY ITEM CARRIES THE SAME INSPECT VERDICT, and that is the point. When the
+#: inspect result was first shown to the judge, six unrelated candidates all
+#: scored 10/10 because "MLX-native, weights fit" was true of every one of
+#: them; the control could not see it, because control items carried no inspect
+#: fields at all. A control has to be shaped like the data the judge will
+#: actually meet, and a fact shared by every item cannot be what separates them.
+CONTROL_INSPECTED = "fits: MLX-native, weights that fit this machine"
 CONTROL = [
     ("trace",
      "Generate a raster image with a diffusion model, then vectorize it to SVG "
@@ -159,8 +174,9 @@ def control(rubric: Rubric | None = None, *, gateway: str = "",
     rubric = rubric or load()
     rows = []
     for name, why, outcome in CONTROL:
-        s, reason = score(describe(name, why), rubric, gateway=gateway,
-                          complete=complete)
+        s, reason = score(describe(name, why, inspected=CONTROL_INSPECTED,
+                                   platform="MLX-native"),
+                          rubric, gateway=gateway, complete=complete)
         rows.append({"name": name, "outcome": outcome, "score": s,
                      "why": reason})
     won = [r["score"] for r in rows if r["outcome"] == "won"]
