@@ -20,7 +20,6 @@ from __future__ import annotations
 import platform
 import re
 import subprocess
-import sys
 
 from harness import memory
 
@@ -46,48 +45,12 @@ def _last_word(s: str) -> str:
     return parts[-1] if parts else ""
 
 
-def _system_memory_gb() -> float:
-    """Physical RAM where there is no sysctl. Standard library only: this runs
-    before anything optional is installed."""
-    if sys.platform == "win32":
-        import ctypes
-
-        class MemoryStatusEx(ctypes.Structure):
-            _fields_ = [("dwLength", ctypes.c_ulong),
-                        ("dwMemoryLoad", ctypes.c_ulong),
-                        ("ullTotalPhys", ctypes.c_ulonglong),
-                        ("ullAvailPhys", ctypes.c_ulonglong),
-                        ("ullTotalPageFile", ctypes.c_ulonglong),
-                        ("ullAvailPageFile", ctypes.c_ulonglong),
-                        ("ullTotalVirtual", ctypes.c_ulonglong),
-                        ("ullAvailVirtual", ctypes.c_ulonglong),
-                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
-
-        status = MemoryStatusEx()
-        status.dwLength = ctypes.sizeof(status)
-        try:
-            if not ctypes.windll.kernel32.GlobalMemoryStatusEx(
-                    ctypes.byref(status)):
-                return 0.0
-        except (AttributeError, OSError):
-            return 0.0
-        return status.ullTotalPhys / 1024**3
-    try:
-        with open("/proc/meminfo", encoding="utf-8") as fh:
-            for line in fh:
-                if line.startswith("MemTotal:"):
-                    return int(line.split()[1]) / 1024**2
-    except (OSError, ValueError, IndexError):
-        pass
-    return 0.0
-
-
 def capture() -> dict:
     swap = _sh("sysctl", "-n", "vm.swapusage")
     m = re.search(r"used\s*=\s*([\d.]+)M", swap)
     mem_bytes = _sh("sysctl", "-n", "hw.memsize")
     memory_gb = (round(int(mem_bytes) / 1024**3) if mem_bytes.isdigit()
-                 else round(_system_memory_gb()))
+                 else round(memory.system_memory_gb()))
     accelerator = memory.detect()
 
     return {

@@ -28,6 +28,7 @@ from __future__ import annotations
 import os
 import platform
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -91,6 +92,43 @@ def _unified_total_gb() -> float:
         return 0.0
 
 
+def system_memory_gb() -> float:
+    """Physical RAM where there is no sysctl to ask. Standard library only:
+    this runs before anything optional is installed."""
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        class MemoryStatusEx(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong),
+                        ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+        status = MemoryStatusEx()
+        status.dwLength = ctypes.sizeof(status)
+        try:
+            if not ctypes.windll.kernel32.GlobalMemoryStatusEx(
+                    ctypes.byref(status)):
+                return 0.0
+        except (AttributeError, OSError):
+            return 0.0
+        return status.ullTotalPhys / 1024**3
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("MemTotal:"):
+                    return int(line.split()[1]) / 1024**2
+    except (OSError, ValueError, IndexError):
+        pass
+    return 0.0
+
+
 def _discrete() -> Accelerator | None:
     """The first NVIDIA card, or None if there is not one.
 
@@ -123,13 +161,23 @@ def _discrete() -> Accelerator | None:
 
 def detect() -> Accelerator:
     """What this machine loads weights into. Unified is checked first, so a
-    Mac answers without ever shelling out to a tool it does not have."""
+    Mac answers without ever shelling out to a tool it does not have.
+
+    A machine with neither answers with its system RAM. That is a PC with no
+    discrete card, where an integrated GPU draws from the same pool the CPU
+    does, and where anything that runs at all runs against system memory. The
+    alternative was a zero, and a zero ceiling refuses every candidate on a
+    machine that has not been asked yet.
+    """
     total = _unified_total_gb()
     if total > 0:
         return Accelerator("unified", total, available_gb() or total,
                            platform.machine())
     found = _discrete()
-    return found if found else Accelerator("unified", 0.0, 0.0)
+    if found:
+        return found
+    ram = system_memory_gb()
+    return Accelerator("unified", ram, ram, platform.machine())
 
 
 def total_gb() -> float:
@@ -137,7 +185,9 @@ def total_gb() -> float:
     if total > 0:
         return total
     found = _discrete()
-    return found.total_gb if found else 0.0
+    if found:
+        return found.total_gb
+    return system_memory_gb()
 
 
 def ceiling_gb() -> float:
@@ -146,7 +196,9 @@ def ceiling_gb() -> float:
     if total > 0:
         return total * GPU_FRACTION
     found = _discrete()
-    return found.total_gb if found else 0.0
+    if found:
+        return found.total_gb
+    return system_memory_gb() * GPU_FRACTION
 
 
 def available_gb() -> float:
@@ -158,7 +210,9 @@ def available_gb() -> float:
         # No vm_stat means this is not a Mac. A discrete card reports its own
         # free memory directly, which is a better answer than total_gb().
         found = _discrete()
-        return found.available_gb if found else total_gb()
+        if found:
+            return found.available_gb
+        return total_gb()
     page = 16384
     counts = {}
     for line in out.splitlines():
