@@ -12,4 +12,13 @@ source scripts/versions.sh
 
 source scripts/diffusers-venv.sh
 
+# UTF-8 REGARDLESS OF THE MACHINE'S CODEPAGE. Python picks its stdio encoding
+# from the locale, which is cp1252 on a stock Windows install, and anything
+# printing a character outside it dies. LiteLLM's startup banner does exactly
+# that, so the gateway exited during startup with a UnicodeEncodeError while
+# every one of its own settings was correct. Only visible when output is
+# redirected to a file, which is how a service runs.
+export PYTHONUTF8=1
+export PYTHONIOENCODING=utf-8
+
 exec "$PY" -m harness.image_cuda "$@"

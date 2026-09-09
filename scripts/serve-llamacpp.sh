@@ -47,8 +47,15 @@ fi
 # Port 8081 is mlx_lm.server's, on purpose. Only one of the two runs on any one
 # machine, and sharing the port means gateway/config.cuda.yaml differs from the
 # Mac config only in which weights it names.
+# GIVE THE CARD BACK WHEN IDLE. This machine is a gaming rig that also
+# runs this, and a server left up otherwise holds the model for as long
+# as the process lives. Measured on the 4070: a request takes VRAM from
+# 2462 to 3296 MiB, and fifteen seconds after the last one it reads 2473
+# again. The router reloads on the next request, at the cost of the load
+# time and nothing else. Set LLAMACPP_SLEEP_IDLE=-1 to serve full time.
 exec "$BIN" \
   --models-dir "$MODELS" \
+  --sleep-idle-seconds "${LLAMACPP_SLEEP_IDLE:-300}" \
   --models-max "${LLAMACPP_MAX_MODELS:-1}" \
   --n-gpu-layers "${LLAMACPP_GPU_LAYERS:-999}" \
   --host "${LLAMACPP_HOST:-0.0.0.0}" \

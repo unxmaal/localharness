@@ -30,6 +30,15 @@ export LITELLM_USE_CHAT_COMPLETIONS_URL_FOR_ANTHROPIC_MESSAGES=1
 # --host is passed explicitly regardless. LiteLLM's own default is 0.0.0.0, so
 # omitting the flag would make the binding invisible: every doc in this repo
 # once said "127.0.0.1:4000" while lsof said "*:4000". State it, whichever it is.
+# UTF-8 REGARDLESS OF THE MACHINE'S CODEPAGE. Python picks its stdio encoding
+# from the locale, which is cp1252 on a stock Windows install, and anything
+# printing a character outside it dies. LiteLLM's startup banner does exactly
+# that, so the gateway exited during startup with a UnicodeEncodeError while
+# every one of its own settings was correct. Only visible when output is
+# redirected to a file, which is how a service runs.
+export PYTHONUTF8=1
+export PYTHONIOENCODING=utf-8
+
 exec uv run --python 3.12 --with "$LITELLM_PIN" \
   litellm --config "${GATEWAY_CONFIG:-gateway/config.yaml}" \
   --host "${GATEWAY_HOST:-0.0.0.0}" --port "${GATEWAY_PORT:-4000}"

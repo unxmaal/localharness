@@ -43,8 +43,31 @@ export AUDIO_PORT="${AUDIO_PORT:-8890}"
 if [ "${OS:-}" = "Windows_NT" ]; then
   NV_BIN="$(uv run --no-project --with "$NVIDIA_CUBLAS_PIN" --with "$NVIDIA_CUDNN_PIN" \
     python -c "import nvidia, os, glob; print(os.pathsep.join(d for r in nvidia.__path__ for d in glob.glob(os.path.join(r, '*', 'bin')) if os.path.isdir(d)))" 2>/dev/null || true)"
-  [ -n "$NV_BIN" ] && export PATH="$NV_BIN;$PATH"
+  # CONVERTED, NOT PREPENDED WHOLE. Python joins those directories with the
+  # platform separator, which is a semicolon here, and bash splits PATH on
+  # colons: prepending the list as it stands leaves PATH beginning with a bare
+  # drive letter, after which nothing on it resolves at all. The symptom is
+  # this script's own `exec uv` reporting "uv: not found" two lines later, on a
+  # machine where uv is plainly on PATH. Same collision as HF_CANDIDATES in
+  # scripts/env.sh.
+  if [ -n "$NV_BIN" ]; then
+    NV_POSIX=""
+    while IFS= read -r _dir; do
+      [ -n "$_dir" ] || continue
+      NV_POSIX="$NV_POSIX$(cygpath -u "$_dir"):"
+    done <<< "$(printf '%s' "$NV_BIN" | tr ';' '\n')"
+    export PATH="$NV_POSIX$PATH"
+  fi
 fi
+
+# UTF-8 REGARDLESS OF THE MACHINE'S CODEPAGE. Python picks its stdio encoding
+# from the locale, which is cp1252 on a stock Windows install, and anything
+# printing a character outside it dies. LiteLLM's startup banner does exactly
+# that, so the gateway exited during startup with a UnicodeEncodeError while
+# every one of its own settings was correct. Only visible when output is
+# redirected to a file, which is how a service runs.
+export PYTHONUTF8=1
+export PYTHONIOENCODING=utf-8
 
 exec uv run --no-project \
   --with "$FASTER_WHISPER_PIN" --with "$KOKORO_ONNX_PIN" \
