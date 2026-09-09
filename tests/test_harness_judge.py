@@ -229,3 +229,36 @@ def test_a_narrating_model_is_cut_off():
 def test_list_markers_are_stripped():
     got = judge.mentions("...", complete=lambda p, **kw: "- ComfyUI | a UI")
     assert got == [("ComfyUI", "a UI")]
+
+
+# ---- issue #85: one control run is one draw --------------------------------
+
+def test_the_control_reports_a_spread_not_a_single_gap():
+    """Same rubric, same model, gap +4 then +2 on identical inputs. The judge
+    samples and nothing pins a seed, so near the boundary the verdict is a coin
+    flip -- and it is the sentence authorising every score."""
+    seq = iter(["10\n", "9\n", "3\n", "3\n", "3\n",     # run 1: gap +6
+                "10\n", "5\n", "4\n", "3\n", "3\n"])    # run 2: gap +1
+    got = judge.control_repeated(runs=2, complete=lambda p, **kw: next(seq))
+    assert got["gaps"] == [6, 1] and got["spread"] == 5
+
+
+def test_separating_once_out_of_three_is_not_separating():
+    seq = iter(["10\n", "9\n", "3\n", "3\n", "3\n",     # separates
+                "3\n", "3\n", "10\n", "3\n", "3\n"])    # does not
+    got = judge.control_repeated(runs=2, complete=lambda p, **kw: next(seq))
+    assert got["separated_in"] == 1
+    assert got["separates"] is False
+
+
+def test_the_composition_criterion_excludes_a_new_dependency():
+    """A second judge scored upscale-seedvr2 10/10 reading "composition of
+    existing tools" off the rubric's own top criterion. It is a new dependency
+    wearing the word."""
+    p = load().prompt.lower()
+    assert "already installed here" in p
+    assert "new dependency" in p
+
+
+def test_changing_the_criterion_bumped_the_rubric():
+    assert load().version >= 4

@@ -608,6 +608,17 @@ def summarize(results: list[Result]) -> dict:
             # Median, not mean: one cold model load should not decide which
             # candidate looks fastest.
             "median_s": round(statistics.median(times), 3) if times else 0.0,
+            # The FIRST case, kept beside the median rather than replaced by
+            # it. Measured 1.5x to 8.4x the median across real runs, and the
+            # image lane has recorded 239s against a 43s warm steady state.
+            # A one-shot caller -- `lh say`, `lh hear`, the MCP server -- meets
+            # this number, never the median. Issue #89.
+            #
+            # It is only a COLD measurement for the first candidate in a run;
+            # later ones may inherit a warm cache or pay a model swap instead,
+            # so `first_is_cold` says which this is rather than implying it.
+            "first_s": round(times[0], 3) if times else 0.0,
+            "first_is_cold": candidate == next(iter(by)),
             "total_s": round(sum(times), 1),
             "peak_kb": max((r.peak_kb for r in rows), default=0),
             "warnings": sum(len(r.warnings) for r in rows),
