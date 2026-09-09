@@ -133,3 +133,25 @@ def test_a_decision_argued_on_one_machine_does_not_bind_another():
     on_mac = {c.name for c in discover.not_adopted(APPLE)}
     assert "ComfyUI" in on_mac
     assert "ComfyUI" not in on_card
+
+
+CPU_ONLY = mach.Machine(frozenset({"cpu"}),
+                        Accelerator("unified", 16.0, 12.0, "AMD64"))
+
+
+@pytest.mark.parametrize("lane", LANES + ("svg",))
+def test_a_machine_with_no_accelerator_still_knows_where_to_look(lane):
+    """FOUND BY CI, WHICH HAS NO CARD. Every runtime-specific query lived under
+    mlx, cuda or rocm, so a machine with only a cpu got an empty list and
+    discovery reported no candidates rather than saying it had nowhere to look.
+    A cpu runs GGUF through llama.cpp and whisper through CTranslate2 slowly,
+    so it has real answers rather than a placeholder."""
+    assert discover.lane_queries(lane, CPU_ONLY), f"{lane} has nowhere to look"
+
+
+@pytest.mark.parametrize("lane", LANES + ("svg",))
+def test_no_machine_is_left_without_a_query(lane):
+    """The general form of the above. An empty list here is silence where a
+    finding belongs."""
+    for m in (APPLE, CARD, LINUX_CARD, CPU_ONLY):
+        assert discover.lane_queries(lane, m), f"{lane} is empty on {m.describe()}"

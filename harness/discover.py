@@ -394,6 +394,18 @@ _LANE_QUERIES = {
         "image": ["black-forest-labs/FLUX", "stabilityai/stable-diffusion"],
         "video": ["Lightricks/LTX-Video", "THUDM/CogVideoX"],
     },
+    # A cpu runs GGUF through llama.cpp and whisper through CTranslate2, both
+    # slowly and both really. This entry exists because CI has no card: every
+    # query lived under an accelerator runtime, so a machine with only a cpu
+    # got an empty list and discovery reported no candidates rather than
+    # saying it had nowhere to look.
+    "cpu": {
+        "text": ["Qwen3 GGUF", "bartowski/Qwen3"],
+        "stt": ["Systran/faster-whisper", "distil-whisper"],
+        "tts": ["hexgrad/Kokoro", "coqui/XTTS"],
+        "image": ["stabilityai/stable-diffusion", "segmind/tiny-sd"],
+        "video": ["THUDM/CogVideoX", "Lightricks/LTX-Video"],
+    },
 }
 
 #: Lanes served by a tool rather than by a runtime-specific model, so every
