@@ -24,6 +24,9 @@ SERVICES = {
     # address is a parameter, and it listens everywhere by default because the
     # point is that the other machine can use this one's GPU.
     "scripts/serve-llamacpp.sh": "LLAMACPP_HOST",
+    # The audio lanes on the same machine. mlx_audio serves these two
+    # endpoints on the Mac; harness/audio_server.py serves them here.
+    "scripts/serve-audio-cuda.sh": "AUDIO_HOST",
 }
 
 

@@ -86,11 +86,19 @@ fi
 # when misaki is missing, and it answers 200 then closes mid-stream when the
 # requested voice is not in the local cache. Assert on the bytes.
 A="http://$H:${TTS_PORT:-8890}/v1"
+
+# WHICH MODEL TO ASK FOR IS A PROPERTY OF THE MACHINE. The Mac transcribes with
+# parakeet under MLX; the CUDA box runs faster-whisper and refuses a parakeet
+# request rather than answering it with Whisper under another name. Reading the
+# defaults from harness/audio.py keeps one source of truth: hardcoding them
+# here made this check fail on the machine whose lane was working.
+SMOKE_TTS_MODEL="${SMOKE_TTS_MODEL:-$(uv run python -c   'from harness import audio; print(audio.DEFAULT_TTS_MODEL)' 2>/dev/null || echo mlx-community/Kokoro-82M-bf16)}"
+SMOKE_STT_MODEL="${SMOKE_STT_MODEL:-$(uv run python -c   'from harness import audio; print(audio.DEFAULT_STT_MODEL)' 2>/dev/null || echo mlx-community/parakeet-tdt-0.6b-v2)}"
 WAV="$(mktemp -t smoke-tts).wav"
 trap 'rm -f "$WAV"' EXIT
 
 if curl -sf --max-time 60 "$A/audio/speech" -H 'Content-Type: application/json' \
-     -d "{\"model\":\"mlx-community/Kokoro-82M-bf16\",\"input\":\"the gateway is up\",\"voice\":\"${TTS_VOICE:-bm_george}\",\"response_format\":\"wav\"}" \
+     -d "{\"model\":\"$SMOKE_TTS_MODEL\",\"input\":\"the gateway is up\",\"voice\":\"${TTS_VOICE:-bm_george}\",\"response_format\":\"wav\"}" \
      -o "$WAV" 2>/dev/null; then
   # 8000 bytes is a fifth of a second at 16k mono. A bare 44-byte WAV header
   # passes `test -s` and plays as silence.
@@ -106,7 +114,7 @@ fi
 
 if [ -s "$WAV" ]; then
   curl -sf --max-time 60 "$A/audio/transcriptions" \
-    -F "file=@$WAV" -F "model=mlx-community/parakeet-tdt-0.6b-v2" \
+    -F "file=@$WAV" -F "model=$SMOKE_STT_MODEL" \
     | grep -qi 'gateway' && ok "stt transcription round trip" \
     || no "stt transcription round trip"
 else

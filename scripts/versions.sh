@@ -35,3 +35,12 @@ SETUPTOOLS_PIN="setuptools>=70,<81"
 # scripts/serve-llamacpp.sh cannot install its own server. Bump it with
 # `winget upgrade --id ggml.llamacpp`, then run ./scripts/smoke.sh.
 LLAMACPP_BUILD="b10869"
+
+# The audio lanes on a machine with an NVIDIA card, served by
+# harness/audio_server.py. The two nvidia wheels carry the CUDA runtime that
+# CTranslate2 needs, which is why no system CUDA install appears anywhere here.
+FASTER_WHISPER_PIN="faster-whisper==1.2.1"
+KOKORO_ONNX_PIN="kokoro-onnx==0.6.1"
+SOUNDFILE_PIN="soundfile==0.14.0"
+NVIDIA_CUBLAS_PIN="nvidia-cublas-cu12==12.9.2.10"
+NVIDIA_CUDNN_PIN="nvidia-cudnn-cu12==9.25.1.1"

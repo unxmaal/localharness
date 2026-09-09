@@ -12,18 +12,32 @@ Two failure modes are handled explicitly because both look like success:
 """
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8890/v1"
-DEFAULT_TTS_MODEL = "mlx-community/Kokoro-82M-bf16"
+#: The same lane runs a different model on each machine, and the default says
+#: WHICH. parakeet is MLX and does not run under CUDA; the Windows box
+#: transcribes with faster-whisper, and a result recording parakeet would name
+#: a model that never ran. Kokoro is the same weights either side, in a
+#: different runtime, so it is named differently for the same reason.
+if sys.platform == "win32":
+    DEFAULT_TTS_MODEL = "kokoro-onnx/Kokoro-82M"
+else:
+    DEFAULT_TTS_MODEL = "mlx-community/Kokoro-82M-bf16"
 # A HuggingFace repo id, never "whisper-1": mlx_audio rejects the OpenAI model
 # name outright. This is why port 8890 matters to voicemode's provider probe.
-DEFAULT_STT_MODEL = "mlx-community/parakeet-tdt-0.6b-v2"
+if sys.platform == "win32":
+    DEFAULT_STT_MODEL = os.environ.get(
+        "WHISPER_MODEL", "Systran/faster-whisper-base.en")
+else:
+    DEFAULT_STT_MODEL = "mlx-community/parakeet-tdt-0.6b-v2"
 # Parakeet is English-only and there is no way around that: it hears French as
 # English words that rhyme. Whisper is the multilingual ear, and it has to be
 # called in-process because mlx_audio's server cannot load it -- the mlx repos

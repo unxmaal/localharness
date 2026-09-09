@@ -21,7 +21,8 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 VERSIONS = REPO / "scripts" / "versions.sh"
-PINNED = ("scripts/serve-gateway.sh", "scripts/serve-tts.sh")
+PINNED = ("scripts/serve-gateway.sh", "scripts/serve-tts.sh",
+          "scripts/serve-audio-cuda.sh")
 
 
 def test_there_is_one_place_that_records_the_versions():
