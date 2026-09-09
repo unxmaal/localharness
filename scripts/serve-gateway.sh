@@ -7,6 +7,11 @@ source scripts/versions.sh
 LH_LOGS="${LOCALHARNESS_HOME:-$HOME/localharness}/logs"
 mkdir -p "$LH_LOGS"
 
+# Which config, so one launcher serves both machines: the Mac names
+# mlx-community weights, gateway/config.cuda.yaml names GGUF ones.
+#
+#   GATEWAY_CONFIG=gateway/config.cuda.yaml ./scripts/serve-gateway.sh
+#
 # Opt out of LiteLLM's Responses API adapter. Without it, POST /v1/messages is
 # routed to POST /v1/responses upstream, which mlx_lm.server does not implement,
 # and every Anthropic-shaped request 404s.
@@ -26,5 +31,5 @@ export LITELLM_USE_CHAT_COMPLETIONS_URL_FOR_ANTHROPIC_MESSAGES=1
 # omitting the flag would make the binding invisible: every doc in this repo
 # once said "127.0.0.1:4000" while lsof said "*:4000". State it, whichever it is.
 exec uv run --python 3.12 --with "$LITELLM_PIN" \
-  litellm --config gateway/config.yaml \
+  litellm --config "${GATEWAY_CONFIG:-gateway/config.yaml}" \
   --host "${GATEWAY_HOST:-0.0.0.0}" --port "${GATEWAY_PORT:-4000}"

@@ -29,3 +29,9 @@ MULTIPART_PIN="python-multipart==0.0.32"
 # removed pkg_resources outright, so unpinned resolves to 84.x and mlx_audio
 # dies on import. Any 70-80 works; nothing above 81 does.
 SETUPTOOLS_PIN="setuptools>=70,<81"
+
+# llama.cpp is a winget binary rather than a uv --with, so this RECORDS the
+# build the text lane was last verified against instead of pinning it:
+# scripts/serve-llamacpp.sh cannot install its own server. Bump it with
+# `winget upgrade --id ggml.llamacpp`, then run ./scripts/smoke.sh.
+LLAMACPP_BUILD="b10869"

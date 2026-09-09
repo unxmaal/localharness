@@ -1,0 +1,65 @@
+# The gateway on a machine with an NVIDIA card. Same shape as config.yaml, and
+# it differs only in which weights each alias names.
+#
+# THE NAMES ARE GGUF FILENAME STEMS, because that is what llama-server's router
+# reports for a file in --models-dir: qwen2.5-0.5b-instruct-q4_k_m.gguf is
+# served as "qwen2.5-0.5b-instruct-q4_k_m". A name with no file behind it is a
+# 400 from the router rather than a silent fallback to whatever is loaded,
+# which is what makes an alias per model safe here.
+#
+# One api_base for all of them: the router holds the models and swaps by the
+# `model` field, the same way mlx_lm.server does. scripts/serve-llamacpp.sh
+# caps it at one resident model, because four on a 12 GB card is an
+# out-of-memory.
+#
+#   GATEWAY_CONFIG=gateway/config.cuda.yaml ./scripts/serve-gateway.sh
+model_list:
+  - model_name: local-small
+    litellm_params:
+      model: openai/qwen2.5-0.5b-instruct-q4_k_m
+      api_base: http://127.0.0.1:8081/v1
+      api_key: not-needed
+  - model_name: local-mid
+    litellm_params:
+      model: openai/qwen2.5-1.5b-instruct-q4_k_m
+      api_base: http://127.0.0.1:8081/v1
+      api_key: not-needed
+  - model_name: local-large
+    litellm_params:
+      model: openai/qwen2.5-7b-instruct-q4_k_m
+      api_base: http://127.0.0.1:8081/v1
+      api_key: not-needed
+
+  # ---- Qwen3, the same candidates the Mac config carries ------------------
+  - model_name: q3-1.7b
+    litellm_params:
+      model: openai/qwen3-1.7b-q4_k_m
+      api_base: http://127.0.0.1:8081/v1
+      api_key: not-needed
+  - model_name: q3-4b
+    litellm_params:
+      model: openai/qwen3-4b-instruct-2507-q4_k_m
+      api_base: http://127.0.0.1:8081/v1
+      api_key: not-needed
+  - model_name: q3-8b
+    litellm_params:
+      model: openai/qwen3-8b-q4_k_m
+      api_base: http://127.0.0.1:8081/v1
+      api_key: not-needed
+  - model_name: q3-14b
+    litellm_params:
+      model: openai/qwen3-14b-q4_k_m
+      api_base: http://127.0.0.1:8081/v1
+      api_key: not-needed
+
+  # q3-30b and q3-coder are absent rather than broken. Both are 30B-A3B at
+  # ~17 GB, over the 12 GB this was written against, and harness/memory.py
+  # refuses them here. llama.cpp can put the MoE experts on the CPU with
+  # --n-cpu-moe and run them anyway, which is a different measurement from the
+  # Mac's and needs its own row rather than the same alias.
+
+litellm_settings:
+  drop_params: true
+  # llama-server implements /v1/chat/completions and not /v1/responses, so the
+  # same routing workaround the Mac config needs applies unchanged.
+  use_chat_completions_url_for_anthropic_messages: true

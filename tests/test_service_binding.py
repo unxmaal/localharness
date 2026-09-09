@@ -20,6 +20,10 @@ SERVICES = {
     "scripts/serve-gateway.sh": "GATEWAY_HOST",
     "scripts/serve-mlx.sh": "MLX_HOST",
     "scripts/serve-tts.sh": "TTS_HOST",
+    # The text lane's server on a machine with an NVIDIA card. Same rule: the
+    # address is a parameter, and it listens everywhere by default because the
+    # point is that the other machine can use this one's GPU.
+    "scripts/serve-llamacpp.sh": "LLAMACPP_HOST",
 }
 
 

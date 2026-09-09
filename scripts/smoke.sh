@@ -64,6 +64,19 @@ curl -sf "$G/v1/messages" -H 'Content-Type: application/json' \
   -d '{"model":"local-mid","max_tokens":80,"messages":[{"role":"user","content":"Weather in Paris? Use the tool."}],"tools":[{"name":"get_weather","input_schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}]}' \
   | grep -q '"type": *"tool_use"' && ok "anthropic tool calling" || no "anthropic tool calling"
 
+# An alias with no weights behind it must FAIL rather than be answered with
+# whatever is loaded. gateway/config.cuda.yaml names GGUF files by filename
+# stem, so a typo there would measure the resident model under another
+# candidate's name and report the two as a tie, with nothing saying so.
+# llama-server answers 400 "model not found"; mlx_lm.server cannot fetch an
+# unknown repo under HF_HUB_OFFLINE and fails as well.
+missing="$(curl -s --max-time 30 "$E/v1/chat/completions"   -H 'Content-Type: application/json'   -d '{"model":"localharness-no-such-model","messages":[{"role":"user","content":"hi"}],"max_tokens":2}' 2>/dev/null)"
+if printf '%s' "$missing" | grep -q '"content"'; then
+  no "engine answered for a model that does not exist"
+else
+  ok "an unknown model is refused rather than served"
+fi
+
 # ---- audio ------------------------------------------------------------------
 #
 # Half the goal, and until now nothing guarded it the way the text seam is
