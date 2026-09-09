@@ -477,6 +477,20 @@ It resamples the *cases*, not the runs, because case difficulty is the largest
 source of variance: every speech model here shares the same worst clip. An
 interval spanning zero prints `not separable` instead of a ranking.
 
+**Is that constant doing anything?** Fourteen numbers decide what gets
+proposed, screened and fetched. `lh sensitivity` varies each one against cached
+data and says whether the output moved at all -- inert, inside a band, or on an
+edge where the value next door behaves differently.
+
+```bash
+lh sensitivity                 # all eleven probes, about four minutes, no network
+lh sensitivity --list          # and the constants nothing covers, with reasons
+```
+
+It compares rankings position by position rather than by pass rate, because a
+count over a set cannot see a reordering. `HALF_LIFE_DAYS` was recorded inert
+on exactly that mistake and in fact moves 22 of 25 positions.
+
 To put two finished runs side by side:
 
 ```bash
