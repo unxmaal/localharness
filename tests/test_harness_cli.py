@@ -312,6 +312,11 @@ def test_hear_transcribes_an_existing_file(tmp_path, capsys):
 
 @respx.mock
 def test_hear_records_first_when_given_no_file(monkeypatch, tmp_path, capsys):
+    # A `rec` for record_argv to find. It refuses outright on a machine with no
+    # sox, and what this asserts is the CLI's order of operations rather than
+    # whether this particular box has a microphone.
+    monkeypatch.setattr(cli.audio.shutil, "which",
+                        lambda name: "/usr/bin/rec" if name == "rec" else None)
     recorded = []
 
     def fake_run(argv, **k):

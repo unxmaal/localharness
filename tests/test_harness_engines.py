@@ -115,6 +115,127 @@ def test_h3_seconds_and_frames_are_mutually_exclusive():
         argv("h3", frames=22, seconds=2)
 
 
+# ---- diffusers, the image lane on a machine with an NVIDIA card -----------
+#
+# A different tool for the same lane. mflux is MLX and does not run here, so
+# the engine is named for what it runs rather than for the lane it serves,
+# the same way mflux and h3 are.
+
+
+def test_diffusers_is_an_image_engine_producing_png():
+    eng = resolve("diffusers:stabilityai/sdxl-turbo")
+    assert eng.modality == "image"
+    assert eng.output_suffix == ".png"
+    assert "sdxl-turbo" in eng.name
+
+
+def test_diffusers_passes_the_model_prompt_and_output():
+    _, a = argv("diffusers:stabilityai/sdxl-turbo")
+    assert a[a.index("--model") + 1] == "stabilityai/sdxl-turbo"
+    assert a[a.index("--prompt") + 1] == "a red fox"
+    assert a[a.index("--output") + 1] == str(OUT)
+
+
+def test_diffusers_forwards_the_generation_params():
+    _, a = argv("diffusers:stabilityai/sdxl-turbo",
+                steps=4, width=768, height=768, seed=7)
+    for flag, value in (("--steps", "4"), ("--width", "768"),
+                        ("--height", "768"), ("--seed", "7")):
+        assert a[a.index(flag) + 1] == value
+
+
+def test_diffusers_omits_a_param_that_was_never_set():
+    """--seed None is a seed of the string None, which reproduces nothing."""
+    _, a = argv("diffusers:stabilityai/sdxl-turbo")
+    assert "--seed" not in a
+
+
+def test_diffusers_spec_defaults_are_overridden_by_call_params():
+    _, a = argv("diffusers:stabilityai/sdxl-turbo,steps=1", steps=8)
+    assert a[a.index("--steps") + 1] == "8"
+
+
+def test_the_diffusers_generator_is_a_path_not_a_name(monkeypatch, tmp_path):
+    """Same reason H3_BIN is overridable: this one is a script in the checkout
+    rather than something installed onto PATH, and a test or another machine
+    has to be able to point it elsewhere."""
+    fake = tmp_path / "image-cuda.sh"
+    monkeypatch.setenv("IMAGE_CUDA_BIN", str(fake))
+    _, a = argv("diffusers:stabilityai/sdxl-turbo")
+    assert a[0] == str(fake)
+
+
+def test_diffusers_rejects_an_unknown_option_before_the_model_loads():
+    with pytest.raises(ValueError) as e:
+        resolve("diffusers:stabilityai/sdxl-turbo,quantise=4")
+    assert "quantise" in str(e.value)
+
+
+def test_diffusers_needs_a_model():
+    with pytest.raises(ValueError):
+        resolve("diffusers")
+
+
+# ---- diffusers-video (the video lane on a machine with an NVIDIA card) ----
+#
+# h3 is Metal shaders over a 134 GiB checkpoint and has no build that runs
+# here, so this lane is a different model as well as a different tool. WHICH
+# model is left to the eval: the engine takes any diffusers video repo id, the
+# same way the image one takes any text-to-image id.
+
+
+def test_diffusers_video_is_a_video_engine_producing_mp4():
+    eng = resolve("diffusers-video:Lightricks/LTX-Video")
+    assert eng.modality == "video"
+    assert eng.output_suffix == ".mp4"
+    assert "LTX-Video" in eng.name
+
+
+def test_diffusers_video_passes_the_model_prompt_and_output():
+    _, a = argv("diffusers-video:Lightricks/LTX-Video")
+    assert a[a.index("--model") + 1] == "Lightricks/LTX-Video"
+    assert a[a.index("--prompt") + 1] == "a red fox"
+    assert a[a.index("--output") + 1] == str(OUT)
+
+
+def test_diffusers_video_forwards_the_generation_params():
+    _, a = argv("diffusers-video:Lightricks/LTX-Video",
+                frames=25, steps=30, width=512, height=512, seed=7)
+    for flag, value in (("--frames", "25"), ("--steps", "30"),
+                        ("--width", "512"), ("--height", "512"),
+                        ("--seed", "7")):
+        assert a[a.index(flag) + 1] == value
+
+
+def test_diffusers_video_offloads_to_host_memory_by_default():
+    """A video model does not fit 12 GB resident. Offloading is what makes the
+    lane run at all here, so it is the default rather than a flag to remember."""
+    _, a = argv("diffusers-video:Lightricks/LTX-Video")
+    assert "--no-offload" not in a
+
+
+def test_diffusers_video_offload_can_be_turned_off_on_a_larger_card():
+    _, a = argv("diffusers-video:Lightricks/LTX-Video", offload=False)
+    assert "--no-offload" in a
+
+
+def test_the_video_generator_is_a_path_not_a_name(monkeypatch, tmp_path):
+    fake = tmp_path / "video-cuda.sh"
+    monkeypatch.setenv("VIDEO_CUDA_BIN", str(fake))
+    _, a = argv("diffusers-video:Lightricks/LTX-Video")
+    assert a[0] == str(fake)
+
+
+def test_diffusers_video_gets_the_long_timeout_a_video_needs():
+    """The image engine's 15 minutes is not enough; h3 allows six hours."""
+    assert resolve("diffusers-video:Lightricks/LTX-Video").timeout >= 3600
+
+
+def test_diffusers_video_needs_a_model():
+    with pytest.raises(ValueError):
+        resolve("diffusers-video")
+
+
 # ---- spec parsing ---------------------------------------------------------
 
 def test_unknown_engine_names_the_known_ones():

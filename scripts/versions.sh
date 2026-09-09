@@ -29,3 +29,30 @@ MULTIPART_PIN="python-multipart==0.0.32"
 # removed pkg_resources outright, so unpinned resolves to 84.x and mlx_audio
 # dies on import. Any 70-80 works; nothing above 81 does.
 SETUPTOOLS_PIN="setuptools>=70,<81"
+
+# llama.cpp is a winget binary rather than a uv --with, so this RECORDS the
+# build the text lane was last verified against instead of pinning it:
+# scripts/serve-llamacpp.sh cannot install its own server. Bump it with
+# `winget upgrade --id ggml.llamacpp`, then run ./scripts/smoke.sh.
+LLAMACPP_BUILD="b10869"
+
+# The audio lanes on a machine with an NVIDIA card, served by
+# harness/audio_server.py. The two nvidia wheels carry the CUDA runtime that
+# CTranslate2 needs, which is why no system CUDA install appears anywhere here.
+FASTER_WHISPER_PIN="faster-whisper==1.2.1"
+KOKORO_ONNX_PIN="kokoro-onnx==0.6.1"
+SOUNDFILE_PIN="soundfile==0.14.0"
+NVIDIA_CUBLAS_PIN="nvidia-cublas-cu12==12.9.2.10"
+NVIDIA_CUDNN_PIN="nvidia-cudnn-cu12==9.25.1.1"
+
+# The image lane on a machine with an NVIDIA card, built by
+# scripts/image-cuda.sh into a venv of its own. torch+cu124 is only on
+# PyTorch's index and the rest are only on PyPI, which is why the script
+# installs them in two steps.
+TORCH_CUDA_INDEX="https://download.pytorch.org/whl/cu124"
+TORCH_CUDA_PIN="torch==2.6.0+cu124"
+DIFFUSERS_PIN="diffusers==0.40.0"
+TRANSFORMERS_PIN="transformers==5.17.0"
+ACCELERATE_PIN="accelerate==1.15.0"
+SAFETENSORS_PIN="safetensors==0.8.0"
+PILLOW_PIN="pillow==12.3.0"

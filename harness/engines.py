@@ -23,7 +23,7 @@ from typing import Callable
 
 Argv = Callable[[str, Path, dict], list[str]]
 
-GRAMMAR = "engine:model[,key=value,...]  (engines: mflux, h3)"
+GRAMMAR = "engine:model[,key=value,...]  (engines: mflux, h3, diffusers, diffusers-video)"
 
 
 def spec_error(spec: str) -> str:
@@ -244,7 +244,85 @@ def _h3(spec: str, model: str, options: dict) -> Engine:
                   cwd=str(Path(binary).parent))
 
 
+# ---- diffusers (the image lane on a machine with an NVIDIA card) ----------
+
+_DIFFUSERS_OPTIONS = {"steps", "width", "height", "guidance"}
+
+#: A script in the checkout rather than something on PATH, for the same reason
+#: H3_BIN is: it carries the pinned torch and diffusers versions, and mflux's
+#: trick of installing as a `uv tool` would put a 2.5 GB CUDA torch in one.
+IMAGE_CUDA_DEFAULT_BIN = str(
+    Path(__file__).resolve().parent.parent / "scripts" / "image-cuda.sh")
+
+
+def _diffusers(spec: str, model: str, options: dict) -> Engine:
+    if not model:
+        raise ValueError(
+            f"{spec_error(spec)}: diffusers needs a model, e.g. "
+            f"diffusers:stabilityai/sdxl-turbo")
+    _check_options(options, _DIFFUSERS_OPTIONS, spec)
+    defaults = dict(options)
+
+    def argv(prompt: str, out: Path, params: dict) -> list[str]:
+        p = {**defaults, **{k: v for k, v in params.items() if v is not None}}
+        cmd = [os.environ.get("IMAGE_CUDA_BIN", IMAGE_CUDA_DEFAULT_BIN),
+               "--model", model, "--prompt", prompt, "--output", str(out)]
+        for name in ("width", "height", "steps", "seed", "guidance"):
+            _flag(cmd, f"--{name}", p.get(name))
+        return cmd
+
+    # Named for the model rather than the repo owner: two owners publishing the
+    # same name would collide, and the eval table has one column for this.
+    return Engine(name=f"diffusers/{model.rsplit('/', 1)[-1]}", spec=spec,
+                  argv=argv, modality="image", output_suffix=".png",
+                  timeout=900.0)
+
+
+# ---- diffusers-video (the video lane on a machine with an NVIDIA card) ----
+
+_DIFFUSERS_VIDEO_OPTIONS = {"steps", "width", "height", "frames", "fps",
+                            "guidance", "offload"}
+
+VIDEO_CUDA_DEFAULT_BIN = str(
+    Path(__file__).resolve().parent.parent / "scripts" / "video-cuda.sh")
+
+
+def _diffusers_video(spec: str, model: str, options: dict) -> Engine:
+    """h3 is Metal over a 134 GiB checkpoint and does not build here, so this
+    lane changes model as well as tool. Which model is the eval's business:
+    this takes any diffusers video repo id."""
+    if not model:
+        raise ValueError(
+            f"{spec_error(spec)}: diffusers-video needs a model, e.g. "
+            f"diffusers-video:Lightricks/LTX-Video")
+    _check_options(options, _DIFFUSERS_VIDEO_OPTIONS, spec)
+    defaults = dict(options)
+
+    def argv(prompt: str, out: Path, params: dict) -> list[str]:
+        p = {**defaults, **{k: v for k, v in params.items() if v is not None}}
+        cmd = [os.environ.get("VIDEO_CUDA_BIN", VIDEO_CUDA_DEFAULT_BIN),
+               "--model", model, "--prompt", prompt, "--output", str(out)]
+        for name in ("width", "height", "frames", "fps", "steps", "seed",
+                     "guidance"):
+            _flag(cmd, f"--{name}", p.get(name))
+        # Offloading the model to host memory between stages is what lets a
+        # video model run on 12 GB at all, so it is on unless a bigger card
+        # says otherwise. Same shape as h3's --ssd-streaming.
+        if str(p.get("offload", True)).lower() in ("false", "0", "no"):
+            cmd.append("--no-offload")
+        return cmd
+
+    return Engine(name=f"diffusers-video/{model.rsplit('/', 1)[-1]}", spec=spec,
+                  argv=argv, modality="video", output_suffix=".mp4",
+                  # Minutes per second of video on this card, and a first run
+                  # downloads the weights. h3 allows six hours for the same
+                  # reason.
+                  timeout=6 * 3600.0, stream=True)
+
+
 _BUILDERS: dict[str, Callable[[str, str, dict], Engine]] = {
     "mflux": _mflux,
     "h3": _h3,
+    "diffusers": _diffusers,
+    "diffusers-video": _diffusers_video,
 }

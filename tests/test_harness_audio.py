@@ -6,6 +6,9 @@ handling of its two real failure modes, not the model.
 from pathlib import Path
 
 import httpx
+import os
+import sys
+import shutil
 import pytest
 import respx
 
@@ -131,6 +134,8 @@ def test_transcribe_handles_a_response_with_no_text_key(tmp_path):
 def test_record_builds_a_sox_command_with_an_explicit_format():
     """`rec` guesses rate and channels from the file suffix otherwise, and the
     STT model wants 16k mono."""
+    if shutil.which("rec") is None and sys.platform != "darwin":
+        pytest.skip("no sox on this machine; record_argv refuses instead")
     out = Path("/tmp/x.wav")
     cmd = audio.record_argv(out, seconds=5)
     assert cmd[0].endswith("rec")
@@ -144,7 +149,20 @@ def test_record_builds_a_sox_command_with_an_explicit_format():
 def test_record_argv_uses_an_absolute_path_for_gui_spawned_shells():
     """wezterm hands children PATH=/usr/bin:/bin:/usr/sbin:/sbin, so a bare
     `rec` is not found when Claude Code is launched from the GUI."""
-    assert audio.record_argv(Path("/tmp/x.wav"), seconds=1)[0].startswith("/")
+    if shutil.which("rec") is None and sys.platform != "darwin":
+        pytest.skip("no sox on this machine; the refusal is the test below")
+    assert os.path.isabs(audio.record_argv(Path("/tmp/x.wav"), seconds=1)[0])
+
+
+def test_a_machine_without_sox_says_so_rather_than_naming_a_homebrew_path():
+    """The Windows box has no microphone and no sox. Falling back to
+    /opt/homebrew/bin/rec there produces a FileNotFoundError naming a path from
+    another operating system, which sends the reader somewhere irrelevant."""
+    if shutil.which("rec") is not None or sys.platform == "darwin":
+        pytest.skip("this machine has sox")
+    with pytest.raises(audio.AudioError) as exc:
+        audio.record_argv(Path("x.wav"), seconds=1)
+    assert "sox" in str(exc.value)
 
 
 @respx.mock

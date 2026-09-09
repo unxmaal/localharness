@@ -64,6 +64,19 @@ curl -sf "$G/v1/messages" -H 'Content-Type: application/json' \
   -d '{"model":"local-mid","max_tokens":80,"messages":[{"role":"user","content":"Weather in Paris? Use the tool."}],"tools":[{"name":"get_weather","input_schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}]}' \
   | grep -q '"type": *"tool_use"' && ok "anthropic tool calling" || no "anthropic tool calling"
 
+# An alias with no weights behind it must FAIL rather than be answered with
+# whatever is loaded. gateway/config.cuda.yaml names GGUF files by filename
+# stem, so a typo there would measure the resident model under another
+# candidate's name and report the two as a tie, with nothing saying so.
+# llama-server answers 400 "model not found"; mlx_lm.server cannot fetch an
+# unknown repo under HF_HUB_OFFLINE and fails as well.
+missing="$(curl -s --max-time 30 "$E/v1/chat/completions"   -H 'Content-Type: application/json'   -d '{"model":"localharness-no-such-model","messages":[{"role":"user","content":"hi"}],"max_tokens":2}' 2>/dev/null)"
+if printf '%s' "$missing" | grep -q '"content"'; then
+  no "engine answered for a model that does not exist"
+else
+  ok "an unknown model is refused rather than served"
+fi
+
 # ---- audio ------------------------------------------------------------------
 #
 # Half the goal, and until now nothing guarded it the way the text seam is
@@ -73,11 +86,19 @@ curl -sf "$G/v1/messages" -H 'Content-Type: application/json' \
 # when misaki is missing, and it answers 200 then closes mid-stream when the
 # requested voice is not in the local cache. Assert on the bytes.
 A="http://$H:${TTS_PORT:-8890}/v1"
+
+# WHICH MODEL TO ASK FOR IS A PROPERTY OF THE MACHINE. The Mac transcribes with
+# parakeet under MLX; the CUDA box runs faster-whisper and refuses a parakeet
+# request rather than answering it with Whisper under another name. Reading the
+# defaults from harness/audio.py keeps one source of truth: hardcoding them
+# here made this check fail on the machine whose lane was working.
+SMOKE_TTS_MODEL="${SMOKE_TTS_MODEL:-$(uv run python -c   'from harness import audio; print(audio.DEFAULT_TTS_MODEL)' 2>/dev/null || echo mlx-community/Kokoro-82M-bf16)}"
+SMOKE_STT_MODEL="${SMOKE_STT_MODEL:-$(uv run python -c   'from harness import audio; print(audio.DEFAULT_STT_MODEL)' 2>/dev/null || echo mlx-community/parakeet-tdt-0.6b-v2)}"
 WAV="$(mktemp -t smoke-tts).wav"
 trap 'rm -f "$WAV"' EXIT
 
 if curl -sf --max-time 60 "$A/audio/speech" -H 'Content-Type: application/json' \
-     -d "{\"model\":\"mlx-community/Kokoro-82M-bf16\",\"input\":\"the gateway is up\",\"voice\":\"${TTS_VOICE:-bm_george}\",\"response_format\":\"wav\"}" \
+     -d "{\"model\":\"$SMOKE_TTS_MODEL\",\"input\":\"the gateway is up\",\"voice\":\"${TTS_VOICE:-bm_george}\",\"response_format\":\"wav\"}" \
      -o "$WAV" 2>/dev/null; then
   # 8000 bytes is a fifth of a second at 16k mono. A bare 44-byte WAV header
   # passes `test -s` and plays as silence.
@@ -93,7 +114,7 @@ fi
 
 if [ -s "$WAV" ]; then
   curl -sf --max-time 60 "$A/audio/transcriptions" \
-    -F "file=@$WAV" -F "model=mlx-community/parakeet-tdt-0.6b-v2" \
+    -F "file=@$WAV" -F "model=$SMOKE_STT_MODEL" \
     | grep -qi 'gateway' && ok "stt transcription round trip" \
     || no "stt transcription round trip"
 else

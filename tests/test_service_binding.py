@@ -20,6 +20,13 @@ SERVICES = {
     "scripts/serve-gateway.sh": "GATEWAY_HOST",
     "scripts/serve-mlx.sh": "MLX_HOST",
     "scripts/serve-tts.sh": "TTS_HOST",
+    # The text lane's server on a machine with an NVIDIA card. Same rule: the
+    # address is a parameter, and it listens everywhere by default because the
+    # point is that the other machine can use this one's GPU.
+    "scripts/serve-llamacpp.sh": "LLAMACPP_HOST",
+    # The audio lanes on the same machine. mlx_audio serves these two
+    # endpoints on the Mac; harness/audio_server.py serves them here.
+    "scripts/serve-audio-cuda.sh": "AUDIO_HOST",
 }
 
 
