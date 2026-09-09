@@ -155,3 +155,44 @@ def test_no_machine_is_left_without_a_query(lane):
     finding belongs."""
     for m in (APPLE, CARD, LINUX_CARD, CPU_ONLY):
         assert discover.lane_queries(lane, m), f"{lane} is empty on {m.describe()}"
+
+
+# ---- the command a proposal carries ---------------------------------------
+
+def test_an_image_proposal_names_an_engine_this_machine_has():
+    """FOUND BY RUNNING A REAL SWEEP. Every image proposal came back as
+    `--candidates mflux:<id>` on a box with no mflux, for a diffusers model.
+    The whole contract of a proposal is that it carries the command that would
+    test it, and that command could not run."""
+    how = discover.how_to_measure("image", CARD)
+    assert "diffusers:" in how
+    assert "mflux" not in how
+
+
+def test_a_mac_image_proposal_still_names_mflux():
+    assert "mflux:" in discover.how_to_measure("image", APPLE)
+
+
+def test_a_video_proposal_names_the_engine_where_one_exists():
+    """The video row read "needs a runner", which was true everywhere when it
+    was written and is false on a machine with diffusers-video."""
+    assert "diffusers-video:" in discover.how_to_measure("video", CARD)
+    assert "needs a runner" in discover.how_to_measure("video", APPLE)
+
+
+def test_every_lane_says_something_about_how_to_measure_it():
+    for lane in LANES + ("svg",):
+        for m in (APPLE, CARD, CPU_ONLY):
+            assert discover.how_to_measure(lane, m), f"{lane} on {m.describe()}"
+
+
+def test_a_lane_with_no_table_entry_still_carries_the_id():
+    """Found in a live sweep. Every proposal from the recap feed, whose lane is
+    "all", came back as `--candidates <no engine known>`: the id it exists to
+    offer had been replaced by a placeholder. A command that names no candidate
+    is not a lead, and this is the fallback, so it is what an unrecognised lane
+    gets."""
+    for m in (APPLE, CARD, CPU_ONLY):
+        how = discover.how_to_measure("all", m).format(id="owner/model")
+        assert "owner/model" in how, how
+        assert "<" not in how, how

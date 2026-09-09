@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 
 from harness import discover, feeds
+from harness import machine as mach
+from harness.memory import Accelerator
 from harness.feeds import FeedError, Source
 
 FIX = Path(__file__).parent / "fixtures" / "feeds"
@@ -278,34 +280,52 @@ def test_github_links_are_tools_not_model_candidates(week):
     assert kinds.get("inclusionAI/LLaDA-Image") == "repo"
 
 
-# ---- apple silicon relevance (#45) ----------------------------------------
+# ---- relevance to the machine asking (#45) --------------------------------
+#
+# These say APPLE explicitly. They were written on a Mac and read as facts
+# about scoring, but three of the four were facts about that machine: run
+# unchanged on the box with the card they assert that a 4090 result is
+# irrelevant to a 4070. See tests/test_harness_feeds_machine.py for the other
+# direction.
+
+APPLE = mach.Machine(frozenset({"mlx", "cpu"}),
+                     Accelerator("unified", 32.0, 25.0, "Mac16,1"))
+
 
 def test_native_mlx_outranks_a_generic_model():
     """Measured 2026-09-07: 0/25 and 1/25 of the reddit weekly entries mention
     Apple Silicon at all, so an MLX result must not be ranked identically to a
     generic GGUF one."""
-    mlx = feeds.relevance("SDMLX - Speeds up SDXL workflows on Mac using native MLX.")
-    plain = feeds.relevance("Ling-3.0-tiny - Low-cost local AI reasoning model.")
+    mlx = feeds.relevance(
+        "SDMLX - Speeds up SDXL workflows on Mac using native MLX.", APPLE)
+    plain = feeds.relevance(
+        "Ling-3.0-tiny - Low-cost local AI reasoning model.", APPLE)
     assert mlx > plain
 
 
 def test_hardware_this_machine_does_not_have_scores_negative():
-    assert feeds.relevance("ninfer-4090 - Runs Qwen3.8-27B on one RTX 4090.") < 0
-    assert feeds.relevance("needs CUDA and 24GB VRAM") < 0
+    assert feeds.relevance(
+        "ninfer-4090 - Runs Qwen3.8-27B on one RTX 4090.", APPLE) < 0
+    assert feeds.relevance("needs CUDA and 24GB VRAM", APPLE) < 0
 
 
 def test_relevance_is_zero_when_the_text_says_neither_way():
-    assert feeds.relevance("A compact model that tops benchmarks.") == 0
+    """True on any machine: text that names no hardware favours none."""
+    assert feeds.relevance("A compact model that tops benchmarks.", APPLE) == 0
 
 
 def test_a_term_repeated_does_not_inflate_the_score():
-    once = feeds.relevance("mlx")
-    many = feeds.relevance("mlx mlx mlx mlx mlx")
+    once = feeds.relevance("mlx", APPLE)
+    many = feeds.relevance("mlx mlx mlx mlx mlx", APPLE)
     assert once == many
 
 
 def test_candidates_carry_their_relevance(recap):
-    props = {p.name: p for p in feeds.candidates(recap[:1])}
+    """Scored for APPLE because the fixture is an Apple-flavoured thread. The
+    CI runner has no accelerator, so unpinned this asserted that a machine
+    which can run none of this hardware nonetheless finds some of it
+    relevant."""
+    props = {p.name: p for p in feeds.candidates(recap[:1], machine=APPLE)}
     assert any(p.relevance > 0 for p in props.values())
 
 
