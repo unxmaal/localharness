@@ -14,6 +14,8 @@ import json
 import pytest
 
 from harness import discover
+from harness import machine as _mach
+from harness.memory import Accelerator as _Accelerator
 
 
 def test_a_capability_knows_whether_it_has_been_measured():
@@ -319,7 +321,11 @@ def test_an_implemented_primitive_is_a_candidate_not_a_gap(tmp_path):
 def test_a_declined_tool_is_recorded_where_people_look():
     """Issue #20. The ComfyUI decision lived only in PLAN.md, so it kept being
     rediscovered. Same job the BROKEN state does for a broken stage."""
-    caps = {c.name: c for c in discover.not_adopted()}
+    # Pinned to the machine the argument was made for. Unpinned, this asserted
+    # whatever the local machine is told, and the decision rests on mflux
+    # shipping the workflows natively -- which is no argument on a box that has
+    # neither mflux nor MLX.
+    caps = {c.name: c for c in discover.not_adopted(_APPLE)}
     comfy = caps["ComfyUI"]
     assert comfy.kind == "decision"
     assert not comfy.present
@@ -328,10 +334,14 @@ def test_a_declined_tool_is_recorded_where_people_look():
 
 
 def test_declined_tools_appear_in_the_capability_list():
-    assert "ComfyUI" in {c.name for c in discover.capabilities()}
+    assert "ComfyUI" in {c.name for c in discover.not_adopted(_APPLE)}
 
 
 def test_a_declined_tool_is_not_a_gap():
     """It is not something you close by running a command."""
     gaps = {c.name for c in discover.gaps()}
     assert "ComfyUI" not in gaps
+
+
+_APPLE = _mach.Machine(frozenset({"mlx", "cpu"}),
+                       _Accelerator("unified", 32.0, 25.0, "Mac16,1"))

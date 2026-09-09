@@ -1,0 +1,21 @@
+# What the judge should know when scoring for a machine with an NVIDIA card.
+#
+# The mirror of mlx.yaml, and the reason these are fragments: the same rubric
+# scored CUDA candidates down on a machine bought to run them, because the
+# claims were written on a Mac. Nothing here names an operating system. A Linux
+# box and a Windows box with the same card get this same file.
+what_scores_high:
+  - Native CUDA. This machine has an NVIDIA card, so something that runs on it
+    beats a better result on hardware it does not have.
+  - A GGUF, a diffusers pipeline or anything else that loads on an NVIDIA card
+    without a rewrite.
+
+scores_nothing_by_itself:
+  - Running on CUDA at all. Every candidate has already been read from its
+    source and found to run here, so this is the price of entry.
+
+what_scores_low:
+  - Anything that requires MLX, Metal or Apple Silicon, which this machine does
+    not have.
+  - Anything needing more VRAM than this card holds. Host memory is not a
+    substitute at a useful speed.
