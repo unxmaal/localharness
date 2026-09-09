@@ -87,17 +87,58 @@ lh svg "a settings gear icon"
 That prints a path. Open it. For speech, also start `./scripts/serve-tts.sh` and
 run `lh say "hello"`.
 
+Those two servers are MLX. On Windows the install and the suite work, and the
+text lanes need an OpenAI-compatible server of your own in `gateway/config.yaml`
+in place of `serve-mlx.sh`.
+
 ## What it is not
 
 Before you invest an afternoon:
 
-- **Apple Silicon only.** It is built on MLX and Metal. There is no Linux or
-  Intel path and there is not going to be one.
+- **The generators are Apple Silicon.** mflux for images, h3 for video,
+  mlx_lm.server for text and mlx-audio for speech are all MLX and Metal, and
+  none of them runs anywhere else. There is no Linux path.
+- **The harness itself also runs on Windows.** The suite, the checks and the
+  eval runner work there; nothing that makes a picture, a video or a token
+  does. See "A second machine" below for what that is for.
 - **It needs disk.** The models this uses run 4 GB to 31 GB each.
 - **Video takes about 40 minutes a generation** on an M2 Pro with 32 GB. It
   works; it is not something you will use casually.
 - **It is a workshop, not a product.** There is no GUI, and some lanes are better
   than others.
+
+## A second machine
+
+A Windows box runs everything except the generators, card or no card. The
+gateway is LiteLLM, so any OpenAI-compatible server on that machine answers the
+text lanes, and the same cases then score against the same metrics on different
+hardware. `./scripts/serve-mlx.sh` is Apple Silicon and does not start there.
+
+An NVIDIA card is what makes the numbers below mean anything. Without one the
+harness still runs, and reports system RAM as its budget.
+
+**Two of the checks needed a second implementation rather than a port.** Text in
+a generated image is read by Apple's Vision on macOS and by Windows.Media.Ocr on
+Windows. HTML is rasterised by Chrome, or by Edge, which is Chromium and is
+already on every Windows install. Neither is named by the caller: each is found
+by asking the platform and the import, and a machine with neither warns and
+withholds the metric instead of failing the candidate.
+
+**A result records what produced it.** `hw_model` identifies the GPU on Apple
+Silicon because it is the same part. On a PC it says nothing about it, so
+results.json carries an `accelerator` field with the kind, the name and the
+memory. Without it a run from the mini and a run from the 4070 are the same row
+to a score sheet, which is the one thing this suite exists to tell apart.
+
+**The memory ceiling is read off the card.** Unified memory hands the GPU a
+fraction of system RAM. A discrete card is a wall, and the 61.6 GB of RAM behind
+a 12 GB 4070 is not budget: computing it that way produced 46 GB that does not
+exist. Qwen3-30B-A3B at 4-bit is too big for that card and fits a 24 GB one, the
+same candidate and two answers.
+
+Not built there: service supervision, since launchd has no Windows counterpart,
+and any image or video generator. Those lanes report as unavailable, which is a
+different thing from a lane that ran and lost.
 
 ---
 
