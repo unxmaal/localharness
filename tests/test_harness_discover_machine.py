@@ -155,3 +155,32 @@ def test_no_machine_is_left_without_a_query(lane):
     finding belongs."""
     for m in (APPLE, CARD, LINUX_CARD, CPU_ONLY):
         assert discover.lane_queries(lane, m), f"{lane} is empty on {m.describe()}"
+
+
+# ---- the command a proposal carries ---------------------------------------
+
+def test_an_image_proposal_names_an_engine_this_machine_has():
+    """FOUND BY RUNNING A REAL SWEEP. Every image proposal came back as
+    `--candidates mflux:<id>` on a box with no mflux, for a diffusers model.
+    The whole contract of a proposal is that it carries the command that would
+    test it, and that command could not run."""
+    how = discover.how_to_measure("image", CARD)
+    assert "diffusers:" in how
+    assert "mflux" not in how
+
+
+def test_a_mac_image_proposal_still_names_mflux():
+    assert "mflux:" in discover.how_to_measure("image", APPLE)
+
+
+def test_a_video_proposal_names_the_engine_where_one_exists():
+    """The video row read "needs a runner", which was true everywhere when it
+    was written and is false on a machine with diffusers-video."""
+    assert "diffusers-video:" in discover.how_to_measure("video", CARD)
+    assert "needs a runner" in discover.how_to_measure("video", APPLE)
+
+
+def test_every_lane_says_something_about_how_to_measure_it():
+    for lane in LANES + ("svg",):
+        for m in (APPLE, CARD, CPU_ONLY):
+            assert discover.how_to_measure(lane, m), f"{lane} on {m.describe()}"

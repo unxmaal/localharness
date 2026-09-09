@@ -438,14 +438,52 @@ def lane_queries(lane: str, machine=None) -> list[str]:
         out += _LANE_QUERIES.get(runtime, {}).get(lane, [])
     return out
 
+#: The command that would measure a proposal, per lane. A proposal exists to
+#: carry one, so a lane whose engine differs by machine has to differ here too:
+#: a real sweep on the box with the card proposed every image model as
+#: `mflux:<id>`, an engine that machine does not have, for weights mflux cannot
+#: load. The rows without a {id} are lanes with no per-model engine yet.
 _HOW = {
     "text": "--modality extract --candidates <alias for {id}>",
     "stt": "--modality stt --candidates stt:{id}",
     "tts": "--modality tts --candidates tts:{id}",
-    "image": "--modality image --candidates mflux:{id}",
     "svg": "--modality svg --candidates <needs a runner: see issue #3>",
+    "image": "--modality image --candidates <needs an engine>",
     "video": "--modality video --candidates <needs a runner>",
 }
+
+#: runtime -> the lanes whose engine that runtime provides. Overrides _HOW for
+#: a machine that has the runtime.
+_HOW_BY_RUNTIME = {
+    "mlx": {
+        "image": "--modality image --candidates mflux:{id}",
+    },
+    "cuda": {
+        "image": "--modality image --candidates diffusers:{id}",
+        "video": "--modality video --candidates diffusers-video:{id}",
+    },
+    "rocm": {
+        "image": "--modality image --candidates diffusers:{id}",
+        "video": "--modality video --candidates diffusers-video:{id}",
+    },
+}
+
+
+def how_to_measure(lane: str, machine=None) -> str:
+    """The command template for `lane` on this machine.
+
+    A machine with more than one runtime takes the first that provides an
+    engine for the lane, in sorted order, which is arbitrary and only reachable
+    on a machine with two accelerators.
+    """
+    if machine is None:
+        from harness import machine as _machine
+        machine = _machine.detect()
+    for runtime in sorted(machine.runtimes):
+        override = _HOW_BY_RUNTIME.get(runtime, {}).get(lane)
+        if override:
+            return override
+    return _HOW.get(lane, f"--modality {lane} --candidates <no engine known>")
 
 
 def _hf_models(query: str, limit: int) -> list[dict]:
@@ -493,7 +531,7 @@ def external(lane: str, limit: int = 8) -> list[Capability]:
             out.append(Capability(
                 "model", repo, lane,
                 f"https://huggingface.co/{repo}",
-                _HOW.get(lane, "--candidates {id}").format(id=repo),
+                how_to_measure(lane).format(id=repo),
                 note=f"registry last modified {when or 'unknown'}; "
                      f"{m.get('downloads', 0):,} downloads"))
     return out[:limit]
@@ -667,7 +705,7 @@ def from_feeds(sources=None, reader=None, verify=True,
             tag = f" [apple silicon +{p.relevance}]" if p.relevance > 0 else ""
             out.append(Capability(
                 "proposal", repo, src.lane, p.url or src.url,
-                _HOW.get(src.lane, "--candidates {id}").format(id=repo),
+                how_to_measure(src.lane).format(id=repo),
                 measured=False,
                 note=f"{p.why[:120]}{tag} [{src.name} {p.when}]"))
             out[-1].relevance = p.relevance
