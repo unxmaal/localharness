@@ -1103,8 +1103,8 @@ def build_parser() -> argparse.ArgumentParser:
                         "posts per source. The comparative judgements live "
                         "there, not in the post")
     d.add_argument("--platform", action="store_true",
-                   help="with --feeds, only what looks like it runs on Apple "
-                        "Silicon")
+                   help="with --feeds, only what looks like it runs on "
+                        "THIS machine")
     d.add_argument("--no-verify", action="store_true",
                    help="with --feeds, skip resolving prose names against the "
                         "registry. Faster, and QUIETER: every unresolved name "
