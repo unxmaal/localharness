@@ -379,7 +379,7 @@ def transcribe_fluidaudio(path, model: str = DEFAULT_FLUIDAUDIO_MODEL,
         out = Path(tmp) / "t.json"
         _run_whisperkit(fluidaudio_argv(path, model, language, out), timeout)
         try:
-            return str(json.loads(out.read_text()).get("text") or "").strip()
+            return str(json.loads(out.read_text(encoding="utf-8")).get("text") or "").strip()
         except (OSError, ValueError) as exc:
             raise AudioError(f"fluidaudiocli wrote no usable json: {exc}") from exc
 

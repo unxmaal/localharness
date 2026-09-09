@@ -4,6 +4,7 @@ Tests here never invoke a real generator: they assert the command line built,
 the exit status, and what the user is told. Whether mflux draws a good fox is
 the eval suite's question.
 """
+import os
 import struct
 from pathlib import Path
 
@@ -209,7 +210,7 @@ def test_svg_writes_the_recovered_document(tmp_path):
         "viewBox='0 0 24 24'><circle cx='12' cy='12' r='8'/></svg>\n```"))
     dest = tmp_path / "g.svg"
     assert cli.main(["svg", "a gear", "-o", str(dest)]) == 0
-    body = dest.read_text()
+    body = dest.read_text(encoding="utf-8")
     assert body.startswith("<svg") and "sure!" not in body
 
 
@@ -220,7 +221,7 @@ def test_web_writes_html_and_checks_it(tmp_path):
         "<body><p>hi</p></body></html>"))
     dest = tmp_path / "p.html"
     assert cli.main(["web", "a landing page", "-o", str(dest)]) == 0
-    assert "<html" in dest.read_text()
+    assert "<html" in dest.read_text(encoding="utf-8")
 
 
 @respx.mock
@@ -343,7 +344,9 @@ def test_the_output_path_is_absolute_when_the_cwd_changes(spy, tmp_path, monkeyp
     monkeypatch.chdir(tmp_path)
     cli.main(["video", "fox", "-o", "clip.mp4"])
     argv = spy[0]["argv"]
-    assert argv[argv.index("-o") + 1].startswith("/")
+    # isabs, not startswith("/"): an absolute Windows path begins with a
+    # drive letter. The behaviour under test is that it is ABSOLUTE.
+    assert os.path.isabs(argv[argv.index("-o") + 1])
 
 
 # ---- code -----------------------------------------------------------------
@@ -369,7 +372,7 @@ def test_code_writes_a_file_when_asked(tmp_path):
         return_value=completion("```python\nx = 1\n```"))
     dest = tmp_path / "m.py"
     assert cli.main(["code", "set x", "-o", str(dest)]) == 0
-    assert dest.read_text().strip() == "x = 1"
+    assert dest.read_text(encoding="utf-8").strip() == "x = 1"
 
 
 @respx.mock
@@ -389,7 +392,7 @@ def test_code_asks_for_code_and_nothing_else(capsys):
 @respx.mock
 def test_extract_answers_from_a_file(tmp_path, capsys):
     log = tmp_path / "build.log"
-    log.write_text("ok\nok\n3 tests failed\n")
+    log.write_text("ok\nok\n3 tests failed\n", encoding="utf-8")
     respx.post(f"{GW}/v1/chat/completions").mock(return_value=completion("3"))
     assert cli.main(["extract", "how many tests failed?", "-f", str(log)]) == 0
     assert capsys.readouterr().out.strip() == "3"
@@ -401,7 +404,7 @@ def test_extract_puts_the_material_before_the_question(tmp_path):
     one that reads the question and has to remember it through forty lines."""
     import json
     log = tmp_path / "build.log"
-    log.write_text("3 tests failed")
+    log.write_text("3 tests failed", encoding="utf-8")
     route = respx.post(f"{GW}/v1/chat/completions").mock(
         return_value=completion("3"))
     cli.main(["extract", "how many failed?", "-f", str(log)])
@@ -437,7 +440,7 @@ def test_not_found_is_passed_through_as_the_answer(tmp_path, capsys):
     """The system prompt asks for NOT FOUND when the material lacks the answer.
     That is a successful extraction, not a failure."""
     log = tmp_path / "a.log"
-    log.write_text("nothing relevant")
+    log.write_text("nothing relevant", encoding="utf-8")
     respx.post(f"{GW}/v1/chat/completions").mock(
         return_value=completion("NOT FOUND"))
     assert cli.main(["extract", "how many?", "-f", str(log)]) == 0
@@ -515,7 +518,7 @@ def test_svg_trace_runs_the_image_engine_then_vectorizes(spy, tmp_path, monkeypa
                         lambda p, **kw: traced.append(p) or "<svg><path d='M0 0'/></svg>")
     dest = tmp_path / "frog.svg"
     assert cli.main(["svg", "a frog", "--method", "trace", "-o", str(dest)]) == 0
-    assert dest.read_text().startswith("<svg")
+    assert dest.read_text(encoding="utf-8").startswith("<svg")
     assert traced, "the image was never vectorized"
     assert "mflux" in spy[0]["argv"][0]
 
@@ -602,7 +605,7 @@ def test_json_reports_a_failure_as_data_not_a_stderr_line(tmp_path, capsys):
 @respx.mock
 def test_json_on_extract_carries_the_answer(tmp_path, capsys):
     log = tmp_path / "b.log"
-    log.write_text("3 tests failed")
+    log.write_text("3 tests failed", encoding="utf-8")
     respx.post(f"{GW}/v1/chat/completions").mock(return_value=completion("3"))
     assert cli.main(["extract", "how many?", "-f", str(log), "--json"]) == 0
     assert last_json(capsys)["body"] == "3"

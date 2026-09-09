@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+import shells
+
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "h3-weights-status.sh"
 
@@ -20,7 +22,7 @@ def run_status(dest, extra_env=None):
     env.pop("H3_DOWNLOAD_PIDFILE", None)
     if extra_env:
         env.update(extra_env)
-    p = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True,
+    p = subprocess.run([shells.BASH, str(SCRIPT)], capture_output=True, text=True,
                        env=env)
     return p.returncode, p.stdout
 
@@ -59,8 +61,16 @@ def test_unrelated_process_is_not_mistaken_for_the_downloader(tmp_path):
 def test_live_downloader_reports_running(tmp_path):
     """A real download in flight, identified by its pidfile, reports RUNNING."""
     pidfile = tmp_path / "pid"
-    proc = subprocess.Popen(["sleep", "20"])
-    pidfile.write_text(str(proc.pid))
+    # The sleeper writes its OWN pid, from the shell, which is what
+    # fetch-h3-weights.sh does. A pid captured on the Python side is a Windows
+    # pid, and the `kill -0` in the status script runs under MSYS bash, which
+    # numbers processes differently -- so a live download read as stopped.
+    proc = subprocess.Popen(
+        [shells.BASH, "-c", f'echo $$ > "{pidfile.as_posix()}"; exec sleep 20'])
+    for _ in range(100):
+        if pidfile.exists() and pidfile.read_text(encoding="utf-8").strip():
+            break
+        time.sleep(0.05)
     (tmp_path / "chunk").write_bytes(b"x" * 1024)
     try:
         code, out = run_status(tmp_path, {"H3_DOWNLOAD_PIDFILE": str(pidfile)})
@@ -76,7 +86,7 @@ def test_stale_pidfile_is_not_running(tmp_path):
     pidfile = tmp_path / "pid"
     proc = subprocess.Popen(["sleep", "0.1"])
     proc.wait()
-    pidfile.write_text(str(proc.pid))
+    pidfile.write_text(str(proc.pid), encoding="utf-8")
     code, out = run_status(tmp_path, {"H3_DOWNLOAD_PIDFILE": str(pidfile)})
     assert "RUNNING" not in out
     assert code == 2

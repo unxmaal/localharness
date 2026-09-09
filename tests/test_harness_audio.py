@@ -131,9 +131,13 @@ def test_transcribe_handles_a_response_with_no_text_key(tmp_path):
 def test_record_builds_a_sox_command_with_an_explicit_format():
     """`rec` guesses rate and channels from the file suffix otherwise, and the
     STT model wants 16k mono."""
-    cmd = audio.record_argv(Path("/tmp/x.wav"), seconds=5)
+    out = Path("/tmp/x.wav")
+    cmd = audio.record_argv(out, seconds=5)
     assert cmd[0].endswith("rec")
-    assert "16000" in cmd and "/tmp/x.wav" in cmd
+    # str(out), not the literal: a Path renders with backslashes on
+    # Windows, and the assertion is about what was passed, not about
+    # which separator this machine spells it with.
+    assert "16000" in cmd and str(out) in cmd
     assert cmd[cmd.index("trim") + 2] == "5"
 
 
@@ -533,7 +537,7 @@ def test_the_transcript_is_read_from_json_never_stdout(tmp_path, monkeypatch):
 
     def fake_run(argv, timeout):
         out = Path(argv[argv.index("--output-json") + 1])
-        out.write_text(_json.dumps({"text": "the real transcript"}))
+        out.write_text(_json.dumps({"text": "the real transcript"}), encoding="utf-8")
         return ("E5RT encountered an STL exception... zero shape error."
                 "the real transcript")
 

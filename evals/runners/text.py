@@ -26,7 +26,11 @@ class CompletionRunner(BaseRunner):
     def generate(self, case: Case):
         import time
 
-        started = time.monotonic()
+        # perf_counter, not monotonic: `monotonic` is GetTickCount64 on
+        # Windows and quantises to 15.6ms, which measured a 0.15s run as
+        # 0.14 in 75 of 200 tries. This number is reported as a result and
+        # divided into token counts, so its resolution is the measurement.
+        started = time.perf_counter()
         try:
             text, usage = completion.complete_with_usage(
                 case.prompt, model=self.candidate, gateway=self.gateway,
@@ -40,7 +44,7 @@ class CompletionRunner(BaseRunner):
         # a terse model from a fast one. Absent when the server reports no
         # usage -- MISSING rather than zero, because a zero would rank as the
         # slowest candidate rather than as an unknown.
-        elapsed = time.monotonic() - started
+        elapsed = time.perf_counter() - started
         out = int(usage.get("completion_tokens") or 0)
         self.last_metrics = {}
         if out and elapsed > 0:

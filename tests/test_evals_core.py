@@ -9,6 +9,7 @@ import json
 import pytest
 import yaml
 
+from harness.checks import render
 from evals.core import Case, Result, load_cases, score, summarize
 
 
@@ -18,7 +19,7 @@ def write_case(d, name, **over):
             "assert": {"min_shapes": 1}}
     body.update(over)
     p = d / f"{name}.yaml"
-    p.write_text(yaml.safe_dump(body))
+    p.write_text(yaml.safe_dump(body), encoding="utf-8")
     return p
 
 
@@ -40,7 +41,7 @@ def test_cases_are_ordered_deterministically(tmp_path):
 
 def test_malformed_case_names_the_file(tmp_path):
     """A broken case must not fail anonymously in a 50-case run."""
-    (tmp_path / "bad.yaml").write_text("id: bad\nmodality: svg\n")  # no prompt
+    (tmp_path / "bad.yaml").write_text("id: bad\nmodality: svg\n", encoding="utf-8")  # no prompt
     with pytest.raises(ValueError, match="bad.yaml"):
         load_cases(tmp_path)
 
@@ -136,7 +137,7 @@ def test_summary_of_nothing_is_empty_not_a_crash():
 def test_params_are_loaded_separately_from_assertions(tmp_path):
     (tmp_path / "i.yaml").write_text(yaml.safe_dump({
         "id": "i", "modality": "image", "prompt": "a fox",
-        "params": {"width": 512, "height": 512, "seed": 42}}))
+        "params": {"width": 512, "height": 512, "seed": 42}}), encoding="utf-8")
     c = load_cases(tmp_path)[0]
     assert c.params == {"width": 512, "height": 512, "seed": 42}
     assert c.assertions == {}
@@ -144,7 +145,7 @@ def test_params_are_loaded_separately_from_assertions(tmp_path):
 
 def test_a_case_with_neither_block_is_fine(tmp_path):
     (tmp_path / "i.yaml").write_text(yaml.safe_dump({
-        "id": "i", "modality": "image", "prompt": "a fox"}))
+        "id": "i", "modality": "image", "prompt": "a fox"}), encoding="utf-8")
     c = load_cases(tmp_path)[0]
     assert c.params == {} and c.assertions == {}
 
@@ -154,7 +155,7 @@ def test_a_misspelled_param_is_caught_at_load_not_after_the_run(tmp_path):
     size, and the case would pass."""
     (tmp_path / "i.yaml").write_text(yaml.safe_dump({
         "id": "i", "modality": "image", "prompt": "a fox",
-        "params": {"widht": 512}}))
+        "params": {"widht": 512}}), encoding="utf-8")
     with pytest.raises(ValueError, match="widht"):
         load_cases(tmp_path)
 
@@ -170,7 +171,7 @@ def test_a_text_assertion_on_an_image_case_is_rejected_rather_than_ignored(tmp_p
     the suite can OCR, saying so is better than a silent pass."""
     (tmp_path / "i.yaml").write_text(yaml.safe_dump({
         "id": "i", "modality": "image", "prompt": "a sign reading OPEN",
-        "assert": {"must_contain": ["OPEN"]}}))
+        "assert": {"must_contain": ["OPEN"]}}), encoding="utf-8")
     with pytest.raises(ValueError, match="must_contain"):
         load_cases(tmp_path)
 
@@ -306,7 +307,7 @@ def test_metrics_are_json_serializable():
 def test_max_wer_is_a_valid_assertion_for_tts(tmp_path):
     (tmp_path / "t.yaml").write_text(yaml.safe_dump({
         "id": "t", "modality": "tts", "prompt": "hello there",
-        "assert": {"max_wer": 0.2}, "params": {"speed": 1.0}}))
+        "assert": {"max_wer": 0.2}, "params": {"speed": 1.0}}), encoding="utf-8")
     c = load_cases(tmp_path)[0]
     assert c.assertions["max_wer"] == 0.2
 
@@ -314,7 +315,7 @@ def test_max_wer_is_a_valid_assertion_for_tts(tmp_path):
 def test_min_shapes_is_not_a_valid_assertion_for_tts(tmp_path):
     (tmp_path / "t.yaml").write_text(yaml.safe_dump({
         "id": "t", "modality": "tts", "prompt": "hello",
-        "assert": {"min_shapes": 2}}))
+        "assert": {"min_shapes": 2}}), encoding="utf-8")
     with pytest.raises(ValueError, match="min_shapes"):
         load_cases(tmp_path)
 
@@ -325,7 +326,19 @@ def render_text(path, text):
     from PIL import Image, ImageDraw, ImageFont
     im = Image.new("RGB", (512, 512), (250, 250, 250))
     d = ImageDraw.Draw(im)
-    font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", 96)
+    # A real typeface on whichever machine this is. load_default() is a small
+    # bitmap font that OCR reads as nothing at all, which fails the test for a
+    # reason that has nothing to do with what it is checking.
+    font = None
+    for candidate in ("/System/Library/Fonts/Supplemental/Arial.ttf",
+                      "C:/Windows/Fonts/arial.ttf"):
+        try:
+            font = ImageFont.truetype(candidate, 96)
+            break
+        except OSError:
+            continue
+    if font is None:  # pragma: no cover - fallback for a stripped system
+        font = ImageFont.load_default()
     d.text((40, 200), text, fill=(10, 10, 10), font=font)
     im.save(path)
     return path
@@ -387,7 +400,7 @@ def test_an_image_case_with_no_text_assertion_never_runs_ocr(tmp_path):
 def test_text_is_a_valid_assertion_for_image_cases(tmp_path):
     (tmp_path / "i.yaml").write_text(yaml.safe_dump({
         "id": "i", "modality": "image", "prompt": "a sign reading OPEN",
-        "assert": {"text": "OPEN", "max_cer": 0.3}}))
+        "assert": {"text": "OPEN", "max_cer": 0.3}}), encoding="utf-8")
     c = load_cases(tmp_path)[0]
     assert c.assertions["text"] == "OPEN"
 
@@ -403,7 +416,7 @@ def test_an_svg_that_parses_but_draws_nothing_visible_fails():
     """Two shapes, valid markup, an xmlns, a viewBox -- and it renders as an
     empty rectangle. Every structural check the suite had says it is fine."""
     import shutil
-    if shutil.which("rsvg-convert") is None:
+    if render.rasterizer_path() is None:
         pytest.skip("needs rsvg-convert")
     case = Case(id="s", modality="svg", prompt="a gear",
                 assertions={"min_shapes": 2})
@@ -414,7 +427,7 @@ def test_an_svg_that_parses_but_draws_nothing_visible_fails():
 
 def test_a_drawn_svg_reports_its_ink_coverage():
     import shutil
-    if shutil.which("rsvg-convert") is None:
+    if render.rasterizer_path() is None:
         pytest.skip("needs rsvg-convert")
     case = Case(id="s", modality="svg", prompt="a gear",
                 assertions={"min_shapes": 1})
@@ -617,7 +630,7 @@ def test_a_case_can_carry_context(tmp_path):
     (tmp_path / "c.yaml").write_text(yaml.safe_dump({
         "id": "c", "modality": "extract", "prompt": "Which line is the error?",
         "context": "INFO ok\nERROR disk full\nINFO done",
-        "assert": {"must_contain": ["disk full"]}}))
+        "assert": {"must_contain": ["disk full"]}}), encoding="utf-8")
     c = load_cases(tmp_path)[0]
     assert "disk full" in c.context
     assert c.prompt == "Which line is the error?"
@@ -630,17 +643,17 @@ def test_context_defaults_to_empty(tmp_path):
 
 def test_context_can_come_from_a_file_beside_the_case(tmp_path):
     """A realistic log is hundreds of lines and does not belong inline."""
-    (tmp_path / "build.log").write_text("INFO ok\nFATAL out of memory\n")
+    (tmp_path / "build.log").write_text("INFO ok\nFATAL out of memory\n", encoding="utf-8")
     (tmp_path / "c.yaml").write_text(yaml.safe_dump({
         "id": "c", "modality": "extract", "prompt": "What failed?",
-        "context_file": "build.log"}))
+        "context_file": "build.log"}), encoding="utf-8")
     assert "out of memory" in load_cases(tmp_path)[0].context
 
 
 def test_a_missing_context_file_names_the_case(tmp_path):
     (tmp_path / "c.yaml").write_text(yaml.safe_dump({
         "id": "c", "modality": "extract", "prompt": "x",
-        "context_file": "nope.log"}))
+        "context_file": "nope.log"}), encoding="utf-8")
     with pytest.raises(ValueError, match="c.yaml"):
         load_cases(tmp_path)
 
@@ -648,7 +661,7 @@ def test_a_missing_context_file_names_the_case(tmp_path):
 def test_context_and_context_file_together_are_rejected(tmp_path):
     (tmp_path / "c.yaml").write_text(yaml.safe_dump({
         "id": "c", "modality": "extract", "prompt": "x",
-        "context": "inline", "context_file": "f.log"}))
+        "context": "inline", "context_file": "f.log"}), encoding="utf-8")
     with pytest.raises(ValueError, match="context"):
         load_cases(tmp_path)
 
@@ -732,7 +745,7 @@ def test_code_pass_is_higher_is_better():
 def test_a_code_case_must_declare_checks(tmp_path):
     """Without them the case passes every model."""
     (tmp_path / "c.yaml").write_text(yaml.safe_dump({
-        "id": "c", "modality": "code", "prompt": "Write slugify."}))
+        "id": "c", "modality": "code", "prompt": "Write slugify."}), encoding="utf-8")
     with pytest.raises(ValueError, match="checks"):
         load_cases(tmp_path)
 
@@ -740,7 +753,7 @@ def test_a_code_case_must_declare_checks(tmp_path):
 def test_checks_is_a_valid_assertion_only_for_code(tmp_path):
     (tmp_path / "c.yaml").write_text(yaml.safe_dump({
         "id": "c", "modality": "svg", "prompt": "x",
-        "assert": {"checks": ["1 == 1"]}}))
+        "assert": {"checks": ["1 == 1"]}}), encoding="utf-8")
     with pytest.raises(ValueError, match="checks"):
         load_cases(tmp_path)
 
@@ -757,21 +770,21 @@ def test_an_stt_case_carries_the_audio_it_transcribes(tmp_path):
     clip.write_bytes(b"x" * 9000)
     (tmp_path / "c.yaml").write_text(yaml.safe_dump({
         "id": "c", "modality": "stt", "prompt": "the quick brown fox",
-        "audio_file": "a.wav", "assert": {"max_wer": 0.2}}))
+        "audio_file": "a.wav", "assert": {"max_wer": 0.2}}), encoding="utf-8")
     c = load_cases(tmp_path)[0]
     assert c.audio == clip
 
 
 def test_a_missing_audio_file_names_the_case(tmp_path):
     (tmp_path / "c.yaml").write_text(yaml.safe_dump({
-        "id": "c", "modality": "stt", "prompt": "x", "audio_file": "nope.wav"}))
+        "id": "c", "modality": "stt", "prompt": "x", "audio_file": "nope.wav"}), encoding="utf-8")
     with pytest.raises(ValueError, match="c.yaml"):
         load_cases(tmp_path)
 
 
 def test_an_stt_case_needs_audio(tmp_path):
     (tmp_path / "c.yaml").write_text(yaml.safe_dump({
-        "id": "c", "modality": "stt", "prompt": "x"}))
+        "id": "c", "modality": "stt", "prompt": "x"}), encoding="utf-8")
     with pytest.raises(ValueError, match="audio_file"):
         load_cases(tmp_path)
 
@@ -782,7 +795,7 @@ def test_an_absolute_audio_path_is_used_as_given(tmp_path):
     clip.write_bytes(b"x" * 9000)
     (tmp_path / "c.yaml").write_text(yaml.safe_dump({
         "id": "c", "modality": "stt", "prompt": "x",
-        "audio_file": str(clip)}))
+        "audio_file": str(clip)}), encoding="utf-8")
     assert load_cases(tmp_path)[0].audio == clip
 
 
@@ -814,7 +827,7 @@ def test_max_wer_is_the_assertion_for_stt(tmp_path):
     clip.write_bytes(b"x" * 9000)
     (tmp_path / "c.yaml").write_text(yaml.safe_dump({
         "id": "c", "modality": "stt", "prompt": "x", "audio_file": "a.wav",
-        "assert": {"min_shapes": 2}}))
+        "assert": {"min_shapes": 2}}), encoding="utf-8")
     with pytest.raises(ValueError, match="min_shapes"):
         load_cases(tmp_path)
 
@@ -858,9 +871,9 @@ def test_the_worst_row_is_still_the_worst_row():
 
 def test_a_case_declares_its_language_and_defaults_to_english(tmp_path):
     (tmp_path / "a.yaml").write_text(
-        "id: en\nmodality: tts\nprompt: hello there\n")
+        "id: en\nmodality: tts\nprompt: hello there\n", encoding="utf-8")
     (tmp_path / "b.yaml").write_text(
-        "id: fr\nmodality: tts\nprompt: bonjour\nlanguage: fr\n")
+        "id: fr\nmodality: tts\nprompt: bonjour\nlanguage: fr\n", encoding="utf-8")
     by_id = {c.id: c for c in load_cases(tmp_path)}
     assert by_id["en"].language == "en"
     assert by_id["fr"].language == "fr"
@@ -990,8 +1003,8 @@ def test_an_out_of_memory_crash_is_also_the_instrument():
 def test_a_case_can_declare_which_methods_it_is_fair_to(tmp_path):
     (tmp_path / "a.yaml").write_text(
         "id: bars\nmodality: svg\nprompt: draw bars\nmethods: [llm]\n"
-        "assert:\n  must_contain: ['text']\n")
-    (tmp_path / "b.yaml").write_text("id: gear\nmodality: svg\nprompt: a gear\n")
+        "assert:\n  must_contain: ['text']\n", encoding="utf-8")
+    (tmp_path / "b.yaml").write_text("id: gear\nmodality: svg\nprompt: a gear\n", encoding="utf-8")
     by = {c.id: c for c in load_cases(tmp_path)}
     assert by["bars"].methods == ("llm",)
     assert by["gear"].methods == (), "no declaration means fair to every method"

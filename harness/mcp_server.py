@@ -121,7 +121,7 @@ def _text_tool(verb: str, prompt: str, model: str = "") -> str:
     run_lh(argv)
     if not out.exists():
         raise RuntimeError(f"lh {verb} exited 0 but wrote nothing to {out}")
-    return out.read_text()
+    return out.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

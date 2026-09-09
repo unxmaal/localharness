@@ -36,9 +36,23 @@
 #   HF_MIN_FREE_GB  how much room a location must have
 
 HF_MIN_FREE_GB="${HF_MIN_FREE_GB:-160}"
+
+# THE LIST SEPARATOR IS NOT ALWAYS A COLON. A Windows path carries a colon
+# after its drive letter, so a colon-separated list splits "C:/models" into "C"
+# and "/models" and HF_HOME silently becomes "C". PATH itself is
+# semicolon-separated on Windows for exactly this reason.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*) HF_SEP="${HF_SEP:-;}" ;;
+  *)                    HF_SEP="${HF_SEP:-:}" ;;
+esac
 # Ordered by measured throughput, ending somewhere that exists on any Mac so a
 # machine with no external volume still works without hand configuration.
-HF_CANDIDATES="${HF_CANDIDATES:-/Volumes/Models/hf:/Volumes/T7/hf:$HOME/.cache/huggingface}"
+if [ "$HF_SEP" = ";" ]; then
+  # No /Volumes to search. See the note in harness/env.py.
+  HF_CANDIDATES="${HF_CANDIDATES:-$HOME/.cache/huggingface}"
+else
+  HF_CANDIDATES="${HF_CANDIDATES:-/Volumes/Models/hf:/Volumes/T7/hf:$HOME/.cache/huggingface}"
+fi
 
 # The volume a path lives on, resolved via its nearest existing ancestor so an
 # as-yet-uncreated target still answers. Empty if nothing resolves.
@@ -60,7 +74,9 @@ _hf_mountpoint() {
 }
 
 # Free space in whole GB on the volume holding a path, via its nearest existing
-# ancestor. df -g reports whole gigabytes, which is the resolution wanted here.
+# ancestor. `df -Pk` forces 1024-byte blocks on BSD and GNU alike; plain
+# `df -g` is BSD-only and GNU answers "unknown option -- g", which read as
+# a machine with no disk rather than as a wrong flag.
 _hf_free_gb() {
   local p="$1" parent
   while [ -n "$p" ] && [ ! -e "$p" ]; do
@@ -69,7 +85,7 @@ _hf_free_gb() {
     p="$parent"
   done
   [ -e "$p" ] || return 1
-  df -g "$p" 2>/dev/null | awk 'NR==2 { print $4 }'
+  df -Pk "$p" 2>/dev/null | awk 'NR==2 { print int($4 / 1048576) }'
 }
 
 # True if a path is writable and has room for the weights.
@@ -78,6 +94,12 @@ _hf_free_gb() {
 # should not litter empty directories on the volumes that lose the race.
 _hf_usable() {
   local cand="$1" mp anchor free parent
+  # The PARENT must exist. Without this, walking up to the nearest existing
+  # ancestor reaches the filesystem root, and any candidate at all is accepted
+  # on a machine where the root is writable. harness/env.py carries the same
+  # rule; test_the_shipped_candidates_match_the_ones_env_sh_searches is what
+  # catches the two drifting apart.
+  [ -d "$(dirname "$cand")" ] || return 1
   mp="$(_hf_mountpoint "$cand")" || return 1
   [ -n "$mp" ] || return 1
 
@@ -140,8 +162,8 @@ else
   HF_ROOT=""
   _hf_rest="$HF_CANDIDATES"
   while [ -n "$_hf_rest" ]; do
-    _cand="${_hf_rest%%:*}"
-    if [ "$_hf_rest" = "$_cand" ]; then _hf_rest=""; else _hf_rest="${_hf_rest#*:}"; fi
+    _cand="${_hf_rest%%$HF_SEP*}"
+    if [ "$_hf_rest" = "$_cand" ]; then _hf_rest=""; else _hf_rest="${_hf_rest#*$HF_SEP}"; fi
     [ -n "$_cand" ] || continue
     if _hf_usable "$_cand"; then HF_ROOT="$_cand"; break; fi
   done

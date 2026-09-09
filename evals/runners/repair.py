@@ -50,7 +50,11 @@ class RepairRunner(BaseRunner):
     def generate(self, case: Case):
         import time
 
-        started = time.monotonic()
+        # perf_counter, not monotonic: `monotonic` is GetTickCount64 on
+        # Windows and quantises to 15.6ms, which measured a 0.15s run as
+        # 0.14 in 75 of 200 tries. This number is reported as a result and
+        # divided into token counts, so its resolution is the measurement.
+        started = time.perf_counter()
         spent = 0
         artifact = ""
         reason = ""
@@ -87,7 +91,7 @@ class RepairRunner(BaseRunner):
         import time
 
         out: dict = {"attempts": attempts}
-        elapsed = time.monotonic() - started
+        elapsed = time.perf_counter() - started
         if spent and elapsed > 0:
             out["completion_tokens"] = spent
             out["tokens_per_s"] = round(spent / elapsed, 1)

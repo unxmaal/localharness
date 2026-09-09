@@ -8,6 +8,7 @@ rect. The only way to catch that is to draw it and look.
 
 rsvg-convert is librsvg's CLI and is already installed here.
 """
+import sys
 import shutil
 from pathlib import Path
 
@@ -15,8 +16,8 @@ import pytest
 
 from harness.checks import render
 
-pytestmark = pytest.mark.skipif(shutil.which("rsvg-convert") is None,
-                                reason="needs rsvg-convert (brew install librsvg)")
+pytestmark = pytest.mark.skipif(render.rasterizer_path() is None,
+                                reason="needs rsvg-convert (brew install librsvg / pacman -S mingw-w64-x86_64-librsvg)")
 
 CIRCLE = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
           '<circle cx="12" cy="12" r="10" fill="black"/></svg>')
@@ -62,7 +63,13 @@ def test_unrenderable_markup_raises_rather_than_reading_as_blank(tmp_path):
 def test_a_missing_rasterizer_is_reported_as_such(tmp_path, monkeypatch):
     """Not as an SVG that draws nothing. That would fail every candidate at
     once and look like a model regression."""
-    monkeypatch.setattr(render.shutil, "which", lambda _: None)
+    # The CANDIDATE LIST is what models a machine without it. Stubbing
+    # shutil.which only models one that is not on PATH, and the resolver also
+    # looks in known locations -- so the rasterizer was still found and this
+    # test passed for the wrong reason on any machine that has one installed
+    # off PATH.
+    monkeypatch.setattr(render, "RASTERIZER_CANDIDATES",
+                        ("definitely-not-a-rasterizer-xyz",))
     with pytest.raises(render.RenderError, match="rsvg-convert"):
         render.rasterize_svg(CIRCLE, tmp_path / "a.png")
 
@@ -199,10 +206,29 @@ def test_the_shot_does_not_wait_for_chrome_to_exit(tmp_path):
     """Issue #29: with its own profile chrome writes the PNG and then hangs, so
     waiting on the process is waiting for the timeout."""
     out = tmp_path / "shot.png"
-    argv = ["/bin/sh", "-c",
-            f"printf x > {out}; sleep 30"]
+    # The stand-in is python, not `/bin/sh`: there is no /bin/sh to exec on
+    # Windows, and a path interpolated into a shell string arrives with
+    # backslashes, which sh reads as escapes. !r lets the child receive the
+    # path exactly as written on either platform.
+    argv = [sys.executable, "-c",
+            f"import pathlib, time; "
+            f"pathlib.Path({str(out)!r}).write_bytes(b'x'); "
+            f"time.sleep(30)"]
     import time as _t
     start = _t.monotonic()
     render._shoot(argv, out, str(tmp_path), timeout=20.0)
     assert _t.monotonic() - start < 10, "waited for a process that never exits"
     assert out.exists()
+
+
+def test_a_chromium_family_browser_is_found_where_this_os_puts_it():
+    """Chrome is not on PATH on Windows and there is no /Applications there.
+
+    Edge IS Chromium and ships with every Windows install, which is the same
+    role `/Applications/Google Chrome.app` plays on a Mac: not the deliberate
+    install, but the one that happens to be there. Without it the html lane
+    has no rasterizer on a stock Windows box and every page goes unrendered.
+    """
+    found = render.chrome_path()
+    assert found, "no Chromium-family browser found on this machine"
+    assert Path(found).exists(), found

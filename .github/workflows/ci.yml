@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
+  check-macos:
     # Apple Silicon, and standard runners are free for public repos. Larger
     # runners are NOT free, so this label must stay standard.
     runs-on: macos-latest
@@ -52,6 +52,55 @@ jobs:
       - name: What did not run
         # A test that silently skips reports green for something it never
         # checked. Say so in the job summary, every run, pass or fail.
+        if: always()
+        run: |
+          {
+            echo "### Skipped on this runner"
+            echo
+            echo '```'
+            grep -E '^SKIPPED' /tmp/check.log || echo 'nothing skipped'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  check-windows:
+    # The second measurement machine. Nothing here is Apple Silicon, so the MLX
+    # lanes skip and the "What did not run" step below prints which ones.
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        # Git Bash. scripts/env.sh is sourced by the tests, and the Makefile
+        # shells out to bash for its syntax check.
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Tools make check needs
+        # make and shellcheck for `make lint`; ffmpeg for the video checks.
+        run: choco install -y make shellcheck ffmpeg
+
+      - name: librsvg
+        # Not in winget and not in chocolatey. MSYS2 carries it and the runner
+        # image already has MSYS2 at C:\msys64. render.py resolves the binary
+        # by location, so mingw64\bin is never put on PATH, where its gcc and
+        # python would sit in front of the ones this job installed.
+        run: |
+          /c/msys64/usr/bin/pacman -Sy --noconfirm
+          /c/msys64/usr/bin/pacman -S --noconfirm mingw-w64-x86_64-librsvg
+
+      - run: uv sync --python 3.12
+
+      - name: make check
+        # The same command the macOS job runs, and the same one a person runs
+        # locally.
+        run: set -o pipefail && make check 2>&1 | tee /tmp/check.log
+
+      - name: What did not run
         if: always()
         run: |
           {

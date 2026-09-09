@@ -5,6 +5,7 @@ weights and a venv of its own, and a test that needs those asserts this Mac
 rather than the runner.
 """
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -29,11 +30,11 @@ import json, os, pathlib, sys
 args = dict(zip(sys.argv[1::2], sys.argv[2::2]))
 out = pathlib.Path(args["--output"])
 out.mkdir(parents=True, exist_ok=True)
-(out / "0001_gear.svg").write_text({SVG!r})
+(out / "0001_gear.svg").write_text({SVG!r}, encoding="utf-8")
 record = os.environ.get("OMNISVG_TEST_RECORD")
 if record:
     pathlib.Path(record).write_text(json.dumps(
-        {{"argv": sys.argv, "prompt": pathlib.Path(args["--input"]).read_text()}}))
+        {{"argv": sys.argv, "prompt": pathlib.Path(args["--input"]).read_text(encoding="utf-8")}}))
 '''
 
 WRITES_NOTHING = '''
@@ -48,8 +49,23 @@ def checkout(tmp_path, body):
     inference.py."""
     root = tmp_path / "omnisvg"
     (root / ".venv" / "bin").mkdir(parents=True)
-    (root / "inference.py").write_text(body)
-    (root / ".venv" / "bin" / "python").symlink_to(sys.executable)
+    (root / "inference.py").write_text(body, encoding="utf-8")
+    interpreter = root / ".venv" / "bin" / "python"
+    try:
+        interpreter.symlink_to(sys.executable)
+    except OSError:
+        # An unprivileged Windows process cannot create a symlink (WinError
+        # 1314). A hardlink is the same file and answers the same question.
+        os.link(sys.executable, interpreter)
+    # A symlinked interpreter resolves back to the venv it came from and reads
+    # that venv's pyvenv.cfg. A hardlink has no path back, so python looks
+    # beside itself, finds nothing and exits 106 "No pyvenv.cfg file". Writing
+    # one makes the fake checkout a real venv under either kind of link.
+    (root / ".venv" / "pyvenv.cfg").write_text(
+        f"""home = {sys.base_prefix}
+include-system-site-packages = false
+""",
+        encoding="utf-8")
     return root
 
 
@@ -90,7 +106,7 @@ def test_the_prompt_and_the_flags_reach_the_script(tmp_path, cached, monkeypatch
     r = OmniSVGRunner("4B", candidates=3, root=root).run(case("a gear icon"))
     assert r.passed, r.detail
 
-    seen = json.loads(record.read_text())
+    seen = json.loads(record.read_text(encoding="utf-8"))
     assert seen["prompt"].strip() == "a gear icon"
     argv = seen["argv"]
     assert argv[argv.index("--num-candidates") + 1] == "3"

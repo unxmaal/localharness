@@ -74,20 +74,20 @@ def test_a_metric_where_higher_is_better_reverses_the_verdict():
 def test_a_run_with_no_such_metric_says_so_rather_than_dividing_by_zero(tmp_path):
     p = tmp_path / "results.json"
     p.write_text(json.dumps({"rows": [{"candidate": "a", "case_id": "c",
-                                       "metrics": {"seconds": 1.0}}]}))
+                                       "metrics": {"seconds": 1.0}}]}), encoding="utf-8")
     assert compare.main([str(p), "--metric", "wer"]) == 1
 
 
 def test_an_unknown_baseline_names_the_candidates_that_exist(tmp_path, capsys):
     p = tmp_path / "results.json"
-    p.write_text(json.dumps({"rows": rows({"a": [(1, 10)], "b": [(2, 10)]})}))
+    p.write_text(json.dumps({"rows": rows({"a": [(1, 10)], "b": [(2, 10)]})}), encoding="utf-8")
     assert compare.main([str(p), "--baseline", "nope"]) == 1
     assert "a, b" in capsys.readouterr().out
 
 
 def test_a_run_directory_is_accepted_as_well_as_a_file(tmp_path):
     (tmp_path / "results.json").write_text(
-        json.dumps({"rows": rows({"a": [(1, 10)]})}))
+        json.dumps({"rows": rows({"a": [(1, 10)]})}), encoding="utf-8")
     assert compare.load(tmp_path)["rows"]
 
 
@@ -104,7 +104,7 @@ def test_the_absolute_rate_is_reported_with_its_sample(capsys, tmp_path):
     into prose as a property of the model. Issue #88."""
     p = tmp_path / "results.json"
     p.write_text(json.dumps({"rows": rows({"a": [(1, 10)] * 5,
-                                           "b": [(2, 10)] * 5})}))
+                                           "b": [(2, 10)] * 5})}), encoding="utf-8")
     compare.main([str(p), "--baseline", "a", "--resamples", "50"])
     out = capsys.readouterr().out
     assert "ON THIS SAMPLE" in out and "corpus " in out

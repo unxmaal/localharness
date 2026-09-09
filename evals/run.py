@@ -494,7 +494,7 @@ def main(argv: list[str] | None = None) -> int:
                 ext = {"svg": "svg", "web": "html", "code": "py"}.get(
                     case.modality, "txt")
                 (outdir / f"{runner.candidate.replace('/', '_')}--{case.id}.{ext}"
-                 ).write_text(r.artifact)
+                 ).write_text(r.artifact, encoding="utf-8")
 
     if not results:
         raise SystemExit("nothing ran: no candidate matched any case")
@@ -516,7 +516,8 @@ def main(argv: list[str] | None = None) -> int:
              "environment": capture(),
              "receipt": receipt.as_dict(),
              "summary": summarize(results),
-             "rows": [vars(r) for r in results]}, indent=2))
+             "rows": [vars(r) for r in results]}, indent=2),
+            encoding="utf-8")
         print(f"\nartifacts + results.json in {outdir}")
     return 0
 
@@ -536,7 +537,7 @@ def compare_runs(files: list[str]) -> int:
     loaded = []
     for f in files:
         try:
-            data = json.loads(Path(f).read_text())
+            data = json.loads(Path(f).read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             print(f"cannot read {f}: {exc}")
             return 1

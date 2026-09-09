@@ -9,7 +9,8 @@ every check the suite had. The only way to catch it is to draw it and look.
 
 rsvg-convert is librsvg's CLI. It is an OPTIONAL dependency: when it is absent
 the check warns and passes, because a missing tool that failed every candidate
-at once would look exactly like a model regression.
+at once would look exactly like a model regression. It is found by name on PATH
+or by location -- see RASTERIZER_CANDIDATES for why the second is needed.
 
 HTML goes through headless Chrome, which is already on this machine, so it
 needs no Playwright and no npm. Same failure being caught: a page can parse,
@@ -17,8 +18,10 @@ have a body, be perfectly self-contained, and render as a white rectangle.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -26,13 +29,34 @@ from pathlib import Path
 from harness.checks.base import CheckResult
 
 RASTERIZER = "rsvg-convert"
-# Chromium first, since a `chromium` on PATH is the deliberate install; the .app
-# is the one that happens to be there on any Mac.
+# Same shape as CHROME_CANDIDATES: the name on PATH is the deliberate install,
+# then the places it lands when it was not put on PATH at all. librsvg is not
+# in winget; the route to it on Windows is MSYS2, and pacman does not add
+# mingw64\\bin to PATH -- so a machine that HAS rsvg-convert still answered
+# "not installed" and skipped the whole ink lane. Naming the location is the
+# alternative to putting all of MSYS2 on PATH, where its gcc and python would
+# shadow the real ones.
+RASTERIZER_CANDIDATES = (
+    "rsvg-convert",
+    r"C:\msys64\mingw64\bin\rsvg-convert.exe",
+    r"C:\msys64\ucrt64\bin\rsvg-convert.exe",
+    r"C:\Program Files\MSYS2\mingw64\bin\rsvg-convert.exe",
+)
+# Chromium first, since a `chromium` on PATH is the deliberate install; the
+# rest are the ones that happen to be there. Chrome is NOT on PATH on Windows,
+# so the deliberate install has to be named by location too -- and Edge is
+# Chromium and ships with every Windows install, which makes it that machine's
+# equivalent of the .app on any Mac. Without it a stock Windows box has no
+# rasterizer and the whole html lane goes unmeasured.
 CHROME_CANDIDATES = (
     "chromium",
     "chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
 )
 DEFAULT_WIDTH = 256
 # A quarter of one percent of the canvas. Below that there is nothing a person
@@ -44,15 +68,33 @@ class RenderError(RuntimeError):
     """The document could not be drawn."""
 
 
-def chrome_path() -> str | None:
-    """The browser to render HTML with, or None if there is not one."""
-    for candidate in CHROME_CANDIDATES:
-        if candidate.startswith("/"):
+def _first_available(candidates) -> str | None:
+    """The first candidate that exists, by PATH lookup or by location.
+
+    A bare name is asked of PATH; anything already absolute is asked whether it
+    is there. isabs, not startswith("/"): an absolute Windows path begins with
+    a drive letter, and handing one to shutil.which asks PATHEXT about a file
+    that is already fully named.
+    """
+    for candidate in candidates:
+        if os.path.isabs(candidate):
             if Path(candidate).exists():
                 return candidate
-        elif shutil.which(candidate):
-            return shutil.which(candidate)
+        else:
+            found = shutil.which(candidate)
+            if found:
+                return found
     return None
+
+
+def chrome_path() -> str | None:
+    """The browser to render HTML with, or None if there is not one."""
+    return _first_available(CHROME_CANDIDATES)
+
+
+def rasterizer_path() -> str | None:
+    """The SVG rasterizer, or None. Still OPTIONAL -- see the module docstring."""
+    return _first_available(RASTERIZER_CANDIDATES)
 
 
 def chrome_argv(src: Path, out: Path, width: int,
@@ -99,14 +141,57 @@ def rasterize_html(html: str, out: str | Path, width: int = 800) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists():
         out.unlink()
-    with tempfile.TemporaryDirectory() as d:
+    # mkdtemp with an explicit removal, not TemporaryDirectory: its cleanup
+    # raises on the first refusal, and on Windows the browser is still letting
+    # go of the profile at that moment.
+    d = tempfile.mkdtemp()
+    try:
         src = Path(d) / "page.html"
-        src.write_text(html)
+        src.write_text(html, encoding="utf-8")
         profile = Path(d) / "chrome-profile"
         stderr = _shoot(chrome_argv(src, out, width, profile=profile), out, d)
+    finally:
+        _remove_tree(Path(d))
     if not out.exists():
         raise RenderError(f"chrome produced no screenshot: {stderr[:300]}")
     return out
+
+
+def _kill_tree(proc) -> None:
+    """Reap chrome's renderer and GPU processes, which outlive the parent.
+
+    POSIX allows unlinking a file another process still holds, so the scratch
+    profile can be removed with them running. Windows refuses it with
+    WinError 32, and the temporary directory then fails to clean up.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def _remove_tree(path: Path, attempts: int = 20, delay: float = 0.1) -> None:
+    """Remove a directory a just-killed browser may still be holding open.
+
+    The handles go within a moment of the tree dying, so this retries rather
+    than giving up on the first refusal. Ignoring the error outright would
+    leave a chrome profile in the temporary directory on every render.
+    """
+    for attempt in range(attempts):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError:
+            if attempt == attempts - 1:
+                shutil.rmtree(path, ignore_errors=True)
+                return
+            time.sleep(delay)
 
 
 def _shoot(argv: list[str], out: Path, cwd: str, timeout: float = 60.0) -> str:
@@ -139,6 +224,7 @@ def _shoot(argv: list[str], out: Path, cwd: str, timeout: float = 60.0) -> str:
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait(timeout=5)
+        _kill_tree(proc)
         err.seek(0)
         return err.read().strip()
     finally:
@@ -183,9 +269,11 @@ def check_html(html: str, min_ink: float = 0.0005) -> CheckResult:
 
 def rasterize_svg(svg: str, out: str | Path, width: int = DEFAULT_WIDTH) -> Path:
     """Render `svg` (markup, not a path) to a PNG at `out`."""
-    if shutil.which(RASTERIZER) is None:
+    binary = rasterizer_path()
+    if binary is None:
         raise RenderError(
-            f"{RASTERIZER} is not installed (brew install librsvg)")
+            f"{RASTERIZER} is not installed "
+            f"(brew install librsvg / pacman -S mingw-w64-x86_64-librsvg)")
 
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -196,7 +284,7 @@ def rasterize_svg(svg: str, out: str | Path, width: int = DEFAULT_WIDTH) -> Path
         src = fh.name
     try:
         proc = subprocess.run(
-            [RASTERIZER, "--width", str(width), "--height", str(width),
+            [binary, "--width", str(width), "--height", str(width),
              "--keep-aspect-ratio", "--background-color", "white",
              "-o", str(out), src],
             capture_output=True, text=True, timeout=30)
@@ -232,11 +320,17 @@ def ink(svg: str, width: int = DEFAULT_WIDTH) -> float:
 def check(svg: str, min_ink: float = MIN_INK,
           rasterizer: str | None = RASTERIZER) -> CheckResult:
     """Does this SVG actually draw anything?"""
-    if rasterizer is None or shutil.which(rasterizer) is None:
+    # None still disables the check outright. Otherwise resolve it the same way
+    # rasterize_svg does -- gating this on PATH alone while the rasterizer runs
+    # from a known location made every SVG pass unmeasured, which is the one
+    # failure mode this check exists to prevent.
+    resolved = None if rasterizer is None else _first_available(
+        RASTERIZER_CANDIDATES if rasterizer == RASTERIZER else (rasterizer,))
+    if resolved is None:
         return CheckResult(
             True, "",
             [f"not rasterized: {RASTERIZER} is not installed "
-             f"(brew install librsvg)"])
+             f"(brew install librsvg / pacman -S mingw-w64-x86_64-librsvg)"])
 
     try:
         coverage = ink(svg)

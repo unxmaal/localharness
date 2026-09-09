@@ -26,7 +26,7 @@ SERVICES = {
 @pytest.mark.parametrize("script,var", SERVICES.items())
 def test_the_listening_address_is_a_variable(script, var):
     """A hardcoded --host cannot be changed without editing the script."""
-    text = (REPO / script).read_text()
+    text = (REPO / script).read_text(encoding="utf-8")
     assert f"${{{var}:-" in text, f"{script} should read its host from ${var}"
     assert not re.search(r'--host\s+["\']?127\.0\.0\.1["\']?\s', text), (
         f"{script} still hardcodes 127.0.0.1")
@@ -34,7 +34,7 @@ def test_the_listening_address_is_a_variable(script, var):
 
 @pytest.mark.parametrize("script,var", SERVICES.items())
 def test_the_default_is_every_interface(script, var):
-    text = (REPO / script).read_text()
+    text = (REPO / script).read_text(encoding="utf-8")
     assert re.search(rf'\$\{{{var}:-0\.0\.0\.0\}}', text), (
         f"{script} should default {var} to 0.0.0.0")
 
@@ -43,7 +43,7 @@ def test_the_default_is_every_interface(script, var):
 def test_the_choice_is_argued_for_where_it_is_made(script):
     """A service on every interface with no auth must not look accidental to
     whoever reads this next. It was 0.0.0.0 by accident once already."""
-    text = (REPO / script).read_text().lower()
+    text = (REPO / script).read_text(encoding="utf-8").lower()
     assert "lan" in text or "no auth" in text or "every interface" in text, (
         f"{script} binds every interface without saying why")
 
@@ -51,6 +51,6 @@ def test_the_choice_is_argued_for_where_it_is_made(script):
 def test_smoke_can_be_pointed_at_another_host():
     """If the Studio serves and the mini is a client, the smoke test has to be
     runnable against the Studio."""
-    text = (REPO / "scripts" / "smoke.sh").read_text()
+    text = (REPO / "scripts" / "smoke.sh").read_text(encoding="utf-8")
     assert "${SMOKE_HOST:-" in text
     assert not re.search(r'="http://127\.0\.0\.1:', text)

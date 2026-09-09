@@ -75,6 +75,6 @@ def test_nothing_in_the_tree_still_writes_to_a_relative_out():
     for src in list((root / "harness").rglob("*.py")) + list((root / "evals").rglob("*.py")):
         if "__pycache__" in str(src) or src.name == "paths.py":
             continue
-        text = src.read_text()
+        text = src.read_text(encoding="utf-8")
         assert 'Path("out")' not in text, f"{src} writes to a relative out/"
         assert "localharness-out" not in text, f"{src} uses the old MCP path"

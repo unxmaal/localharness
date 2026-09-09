@@ -60,14 +60,18 @@ class BaseRunner:
         return {}
 
     def run(self, case: Case) -> Result:
-        started = time.monotonic()
+        # perf_counter, not monotonic: `monotonic` is GetTickCount64 on
+        # Windows and quantises to 15.6ms, which measured a 0.15s run as
+        # 0.14 in 75 of 200 tries. This number is reported as a result and
+        # divided into token counts, so its resolution is the measurement.
+        started = time.perf_counter()
         try:
             artifact, peak_kb = self.generate(case)
         except RunnerError as exc:
             return Result(case.id, self.candidate, False,
-                          round(time.monotonic() - started, 3),
+                          round(time.perf_counter() - started, 3),
                           exc.peak_kb, exc.detail)
-        elapsed = time.monotonic() - started
+        elapsed = time.perf_counter() - started
 
         row = score(case, artifact, **self.score_kwargs())
         row.candidate = self.candidate

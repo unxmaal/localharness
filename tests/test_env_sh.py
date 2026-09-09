@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+import shells
+
 REPO = Path(__file__).resolve().parents[1]
 MOUNTED = Path("/Volumes/Models")
 
@@ -23,6 +25,9 @@ pytestmark = pytest.mark.skipif(
 
 def run_env(hf_root=None, candidates=None, shell="bash", min_free_gb=None):
     """Source env.sh in a clean shell; return (exit_code, HF_HOME, stderr)."""
+    exe = shells.resolve(shell)
+    if exe is None:
+        pytest.skip(f"no {shell} on this machine")
     env = {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"]}
     # Isolate the "where did we land last time" record. Without this, every
     # auto-pick test inherits the real one from $HOME and trips the guard
@@ -36,7 +41,7 @@ def run_env(hf_root=None, candidates=None, shell="bash", min_free_gb=None):
     if min_free_gb is not None:
         env["HF_MIN_FREE_GB"] = min_free_gb
     p = subprocess.run(
-        [shell, "-c", f'source "{REPO}/scripts/env.sh" && echo "HF_HOME=$HF_HOME"'],
+        [exe, "-c", f'source "{REPO}/scripts/env.sh" && echo "HF_HOME=$HF_HOME"'],
         capture_output=True, text=True, env=env)
     home = ""
     for line in p.stdout.splitlines():
@@ -135,7 +140,7 @@ def test_hf_home_is_exported_to_children(scratch):
     env = {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"],
            "HF_ROOT": str(scratch / "hf")}
     p = subprocess.run(
-        ["bash", "-c",
+        [shells.BASH, "-c",
          f'source "{REPO}/scripts/env.sh" && python3 -c '
          f'"import os; print(os.environ[\'HF_HOME\'])"'],
         capture_output=True, text=True, env=env)
@@ -182,7 +187,7 @@ def test_the_default_threshold_holds_the_largest_checkpoint():
     """MiniMax-H3 FL2VA alone is 134GiB; fetch-h3-weights.sh wants 160GB of
     headroom. A threshold below that would let the guard pass and the download
     fail."""
-    text = (REPO / "scripts" / "env.sh").read_text()
+    text = (REPO / "scripts" / "env.sh").read_text(encoding="utf-8")
     import re
     m = re.search(r"HF_MIN_FREE_GB:-(\d+)", text)
     assert m, "env.sh has no default free-space threshold"
@@ -232,7 +237,7 @@ def test_a_roomy_internal_disk_is_the_last_resort_not_the_first(scratch):
     """The shipped candidate list must end somewhere that works on a machine
     with no external volume, or the Studio needs hand configuration on day
     one."""
-    text = (REPO / "scripts" / "env.sh").read_text()
+    text = (REPO / "scripts" / "env.sh").read_text(encoding="utf-8")
     import re
     m = re.search(r'HF_CANDIDATES:-([^"]+)"', text)
     assert m, "env.sh has no default candidate list"
@@ -277,7 +282,7 @@ def test_helper_functions_print_nothing_but_their_answer(scratch):
 def test_a_directory_that_cannot_be_listed_is_fatal(scratch, monkeypatch):
     """Existence and writability are not enough; the guard must actually read
     it."""
-    text = (REPO / "scripts" / "env.sh").read_text()
+    text = (REPO / "scripts" / "env.sh").read_text(encoding="utf-8")
     assert "_hf_readable" in text or "ls " in text or "listing" in text.lower(), (
         "env.sh never tries to READ the directory it selects")
 
@@ -285,7 +290,7 @@ def test_a_directory_that_cannot_be_listed_is_fatal(scratch, monkeypatch):
 def test_the_fatal_message_explains_the_tcc_case():
     """Whoever hits this needs to be told what to click, not just that it
     failed."""
-    text = (REPO / "scripts" / "env.sh").read_text()
+    text = (REPO / "scripts" / "env.sh").read_text(encoding="utf-8")
     assert "Full Disk Access" in text
     assert "launchd" in text.lower() or "background" in text.lower()
 

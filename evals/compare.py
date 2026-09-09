@@ -36,7 +36,7 @@ def load(run: str | Path) -> dict:
     path = Path(run)
     if path.is_dir():
         path = path / "results.json"
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def paired(rows: list[dict], metric: str) -> tuple[dict, list[str]]:

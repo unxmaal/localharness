@@ -92,7 +92,7 @@ def trace(image: str | Path, *, colormode: str = "color",
             raise VectorError(f"vtracer failed on {image.name}: {exc}") from exc
         if not out.exists():
             raise VectorError(f"vtracer wrote nothing for {image.name}")
-        svg = _ensure_viewbox(out.read_text())
+        svg = _ensure_viewbox(out.read_text(encoding="utf-8"))
 
     from harness.checks import render
     try:

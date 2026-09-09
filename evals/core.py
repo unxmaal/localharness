@@ -468,7 +468,7 @@ def load_cases(directory: str | Path) -> list[Case]:
     directory = Path(directory)
     cases: list[Case] = []
     for path in sorted(directory.rglob("*.yaml")):
-        raw = yaml.safe_load(path.read_text()) or {}
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         # Name the file in every error: a broken case in a 50-case run must not
         # fail anonymously.
         for required in ("id", "modality", "prompt"):
@@ -509,7 +509,7 @@ def _load_context(path: Path, raw: dict) -> str:
         if not source.exists():
             raise ValueError(f"{path.name}: context_file '{filename}' not found "
                              f"beside the case")
-        return source.read_text()
+        return source.read_text(encoding="utf-8")
     return inline or ""
 
 

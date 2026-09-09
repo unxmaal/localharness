@@ -20,7 +20,7 @@ def test_the_offline_client_never_fetches(tmp_path):
     c = probes.offline(cache=tmp_path)
     assert c.budget == 0
     (tmp_path / f"{github._slug('repos/a/b')}.json").write_text(
-        json.dumps({"fetched": 0, "path": "repos/a/b", "data": {"id": 1}}))
+        json.dumps({"fetched": 0, "path": "repos/a/b", "data": {"id": 1}}), encoding="utf-8")
     # Ancient by any real TTL, and served anyway.
     assert c.repo("a/b") == {"id": 1}
     assert c.spent == 0
@@ -51,7 +51,7 @@ def test_clone_directory_names_map_back_to_repo_names(tmp_path, monkeypatch):
     monkeypatch.setattr(probes, "clones", lambda: tmp_path)
     (tmp_path / "owner__repo").mkdir()
     (tmp_path / "not-a-repo").mkdir()
-    (tmp_path / "a-file").write_text("x")
+    (tmp_path / "a-file").write_text("x", encoding="utf-8")
     assert probes._repos_on_disk() == ["owner/repo"]
 
 

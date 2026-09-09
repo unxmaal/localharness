@@ -24,7 +24,7 @@ def fake_corpus(tmp_path):
             uid = f"{speaker}-{chapter}-{i:04d}"
             (d / f"{uid}.flac").write_bytes(b"fLaC" + b"\0" * 900)
             lines.append(f"{uid} HELLO THERE UTTERANCE {i}")
-        (d / f"{speaker}-{chapter}.trans.txt").write_text("\n".join(lines) + "\n")
+        (d / f"{speaker}-{chapter}.trans.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return tmp_path
 
 
@@ -79,7 +79,7 @@ def test_writes_loadable_cases(fake_corpus, tmp_path):
 def test_generated_cases_use_absolute_audio_paths(fake_corpus, tmp_path):
     out = tmp_path / "stt"
     corpora.write_cases(corpora.librispeech(fake_corpus, limit=1, seed=1), out)
-    body = yaml.safe_load(next(out.glob("*.yaml")).read_text())
+    body = yaml.safe_load(next(out.glob("*.yaml")).read_text(encoding="utf-8"))
     assert Path(body["audio_file"]).is_absolute()
 
 
@@ -96,5 +96,5 @@ def test_the_transcript_is_normalized_to_readable_text(fake_corpus, tmp_path):
     but a case file a person has to read should not shout."""
     out = tmp_path / "stt"
     corpora.write_cases(corpora.librispeech(fake_corpus, limit=1, seed=1), out)
-    body = yaml.safe_load(next(out.glob("*.yaml")).read_text())
+    body = yaml.safe_load(next(out.glob("*.yaml")).read_text(encoding="utf-8"))
     assert body["prompt"] != body["prompt"].upper()

@@ -87,17 +87,75 @@ lh svg "a settings gear icon"
 That prints a path. Open it. For speech, also start `./scripts/serve-tts.sh` and
 run `lh say "hello"`.
 
+Those two servers are MLX. On Windows the install and the suite work, and the
+text lanes need an OpenAI-compatible server of your own in `gateway/config.yaml`
+in place of `serve-mlx.sh`.
+
 ## What it is not
 
 Before you invest an afternoon:
 
-- **Apple Silicon only.** It is built on MLX and Metal. There is no Linux or
-  Intel path and there is not going to be one.
+- **Half the lanes have no tool on Windows yet.** The harness, the checks and
+  the eval runner all run there. The generators do not: every one that ships is
+  MLX or Metal. Those gaps are being filled. See "A second
+  machine" below for which lane is where.
+- **There is no Linux path.**
 - **It needs disk.** The models this uses run 4 GB to 31 GB each.
 - **Video takes about 40 minutes a generation** on an M2 Pro with 32 GB. It
   works; it is not something you will use casually.
 - **It is a workshop, not a product.** There is no GUI, and some lanes are better
   than others.
+
+## A second machine
+
+**Every lane is meant to run on either machine, with a different tool on each.**
+What draws an image on Apple Silicon is not what will draw one on an NVIDIA
+card, and it is not meant to be. What has to match is that the lane has an
+implementation on both, that the implementation is tested there, and that the
+result says which one produced it. A lane that exists on one machine and not the
+other is unfinished.
+
+The checks work that way now. Text in a generated image is read by Apple's
+Vision on macOS and by Windows.Media.Ocr on Windows. HTML is rasterised by
+Chrome, or by Edge, which is Chromium and is already on every Windows install.
+Neither is named by the caller: each is found by asking the platform and the
+import, and a machine with neither warns and withholds the metric instead of
+failing the candidate.
+
+The generators do not yet. This is where each lane stands:
+
+| lane | Apple Silicon | Windows and NVIDIA |
+|---|---|---|
+| web, code, extract | mlx_lm.server behind the gateway | any OpenAI-compatible server, no script yet |
+| image | mflux | not built |
+| video | h3 | not built |
+| tts | mlx-audio | not built |
+| stt | mlx-audio, mlx-whisper | not built |
+| svg | traced from an image, or a text model | follows image and text |
+| ocr check | Apple Vision | Windows.Media.Ocr |
+| html render | Chrome | Chrome or Edge |
+| svg rasterise | rsvg-convert | rsvg-convert |
+
+The gateway is LiteLLM, so an OpenAI-compatible server on the Windows box
+answers the text lanes today by editing `gateway/config.yaml`. There is no
+`serve-*.sh` for it yet, and `./scripts/serve-mlx.sh` is Apple Silicon and does
+not start there.
+
+**A result records what produced it.** `hw_model` identifies the GPU on Apple
+Silicon because it is the same part. On a PC it says nothing about it, so
+results.json carries an `accelerator` field with the kind, the name and the
+memory. Without it a run from the mini and a run from the 4070 are the same row
+to a score sheet, which is the one thing this suite exists to tell apart.
+
+**The memory ceiling is read off the card.** Unified memory hands the GPU a
+fraction of system RAM. A discrete card is a wall, and the 61.6 GB of RAM behind
+a 12 GB 4070 is not budget: computing it that way produced 46 GB that does not
+exist. Qwen3-30B-A3B at 4-bit is too big for that card and fits a 24 GB one, the
+same candidate and two answers. Without a card the harness still runs and
+reports system RAM as its budget.
+
+Service supervision is the one thing that is not a lane and has no Windows
+counterpart: launchd is macOS, and nothing replaces it there yet.
 
 ---
 
