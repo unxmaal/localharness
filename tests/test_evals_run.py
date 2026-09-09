@@ -251,9 +251,10 @@ def report_unrun(cases, candidates):
 
 def test_a_higher_is_better_metric_ranks_the_larger_value_first(capsys):
     """`ink` and `motion` were ranked ascending like an error rate, so the
-    candidate that drew least came top."""
-    s = summarize([Result("c", "sparse", True, 1.0, 0, "", metrics={"ink": 0.02}),
-                   Result("c", "rich", True, 1.0, 0, "", metrics={"ink": 0.40})])
+    candidate that moved least came top. `ink` has since become neutral --
+    see test_ink_is_a_floor_and_is_not_ranked_on -- so `motion` carries this."""
+    s = summarize([Result("c", "sparse", True, 1.0, 0, "", metrics={"motion": 0.02}),
+                   Result("c", "rich", True, 1.0, 0, "", metrics={"motion": 0.40})])
     report(s)
     lines = [ln for ln in capsys.readouterr().out.splitlines()
              if ln.startswith(("sparse", "rich"))]
@@ -519,6 +520,39 @@ def test_a_trace_candidate_becomes_a_trace_runner(tmp_path):
     assert r.candidate.startswith("trace/")
 
 
+def test_an_omnisvg_candidate_becomes_an_omnisvg_runner(tmp_path):
+    from evals.runners.omnisvg import OmniSVGRunner
+    r = build_runner("omnisvg:4B", "http://gw", tmp_path)
+    assert isinstance(r, OmniSVGRunner)
+    assert r.candidate == "omnisvg:4B"
+
+
+def test_an_omnisvg_candidate_needs_no_output_directory(tmp_path):
+    # It returns SVG text, not a file this suite has to place.
+    assert build_runner("omnisvg:4B", "http://gw", None).size == "4B"
+
+
+def test_an_omnisvg_candidate_only_gets_svg_cases(tmp_path):
+    from evals.run import cases_for
+    cases = [Case(id="s", modality="svg", prompt="a gear"),
+             Case(id="i", modality="image", prompt="a fox",
+                  params={"width": 64, "height": 64})]
+    assert [c.id for c in cases_for("omnisvg:4B", cases)] == ["s"]
+
+
+def test_a_bad_omnisvg_size_is_caught_before_anything_runs(tmp_path):
+    with pytest.raises(SystemExit) as e:
+        build_runner("omnisvg:2B", "http://gw", tmp_path)
+    assert "2B" in str(e.value)
+
+
+def test_an_unknown_omnisvg_option_is_named(tmp_path):
+    with pytest.raises(SystemExit) as e:
+        build_runner("omnisvg:4B,temperature=0.5", "http://gw", tmp_path)
+    assert "temperature" in str(e.value)
+    assert "candidates" in str(e.value)
+
+
 def test_a_trace_candidate_only_gets_svg_cases(tmp_path):
     from evals.run import cases_for
     cases = [Case(id="s", modality="svg", prompt="a gear"),
@@ -767,3 +801,22 @@ def test_screen_does_not_mutate_the_case_it_was_given():
     c = Case(id="a", modality="image", prompt="p", params={"width": 1024})
     screen_cases([c])
     assert c.params["width"] == 1024
+
+
+def test_omnisvg_is_not_an_llm_for_the_purpose_of_case_methods():
+    # It emits move/line/curve/arc/close and nothing else, so a case that needs
+    # a <text> element is measuring the method, not the candidate. Caught live:
+    # chart-bars failed omnisvg for "missing required content: <text".
+    from evals.run import method_of
+    assert method_of("omnisvg:4B") == "omnisvg"
+    assert method_of("local-large") == "llm"
+    assert method_of("trace:mflux:flux2-klein-4b") == "trace"
+
+
+def test_a_text_only_case_is_withheld_from_omnisvg():
+    from evals.run import cases_for
+    cases = [Case(id="chart", modality="svg", prompt="a bar chart",
+                  methods=("llm",)),
+             Case(id="gear", modality="svg", prompt="a gear")]
+    assert [c.id for c in cases_for("omnisvg:4B", cases)] == ["gear"]
+    assert [c.id for c in cases_for("local-large", cases)] == ["chart", "gear"]

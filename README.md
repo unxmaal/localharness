@@ -442,8 +442,12 @@ method can beat a better model:
 ```bash
 --candidates trace:mflux:flux2-klein-4b        # draw a picture, then trace it to vector
 --candidates trace-icon:mflux:flux2-klein-4b   # same, tuned small: 3.2x fewer bytes
+--candidates omnisvg:4B                        # a model that emits SVG draw commands as tokens
 --candidates repair:q3-4b                      # generate, check it, fix it, repeat
 ```
+
+`omnisvg` needs `./scripts/setup-omnisvg.sh` first: it has its own checkout, its
+own venv and 16 GiB of weights.
 
 `repair` costs nothing extra, so it is the one to understand. Everything already
 checks its own output. It runs the code it wrote, draws the SVG to see whether

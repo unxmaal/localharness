@@ -258,7 +258,14 @@ MODALITIES = set(CHECKERS)
 METRIC_DIRECTION = {
     "wer": "lower",        # word error rate
     "cer": "lower",        # character error rate of OCR'd text
-    "ink": "higher",       # fraction of an SVG canvas actually marked
+    # NEUTRAL: reported, never ranked on. It exists as a FLOOR -- it catches
+    # SVG that passes every structural check and renders as an empty
+    # rectangle -- and the checker already fails those outright, so the
+    # direction adds nothing above zero. As "higher" it crowned OmniSVG,
+    # which had the worst pass rate in the svg lane and the best ink,
+    # because drawing one big filled blob instead of the three shapes the
+    # case asked for is what marking 85% of the canvas looks like.
+    "ink": "neutral",      # fraction of an SVG canvas actually marked
     "motion": "higher",    # change between video frames
     "adherence": "higher",  # how well the picture matches the prompt
     # Does the clone sound like its reference? A WER cannot see this at

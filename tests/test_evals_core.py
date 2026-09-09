@@ -504,7 +504,7 @@ def test_every_published_metric_declares_a_direction():
     from evals.core import METRIC_DIRECTION
     for name in ("wer", "cer", "ink", "motion"):
         assert name in METRIC_DIRECTION, f"{name} has no declared direction"
-        assert METRIC_DIRECTION[name] in ("lower", "higher")
+        assert METRIC_DIRECTION[name] in ("lower", "higher", "neutral")
 
 
 def test_error_rates_are_lower_is_better():
@@ -515,16 +515,25 @@ def test_error_rates_are_lower_is_better():
 
 def test_coverage_metrics_are_higher_is_better():
     from evals.core import METRIC_DIRECTION
-    assert METRIC_DIRECTION["ink"] == "higher"
     assert METRIC_DIRECTION["motion"] == "higher"
 
 
+def test_ink_is_a_floor_and_is_not_ranked_on():
+    """It catches SVG that renders as an empty rectangle, and the checker
+    already fails those outright, so above zero the direction says nothing.
+    As "higher" it crowned the worst candidate in the svg lane: OmniSVG drew
+    one filled blob where three shapes were asked for, and marking 85% of the
+    canvas is what that looks like to this metric."""
+    from evals.core import METRIC_DIRECTION
+    assert METRIC_DIRECTION["ink"] == "neutral"
+
+
 def test_the_worst_case_of_a_higher_is_better_metric_is_its_minimum():
-    """metrics_worst took a max unconditionally, so the 'worst' ink was the
-    best-drawn case in the run."""
-    rows = [Result("a", "k", True, 1.0, 0, "", metrics={"ink": 0.02}),
-            Result("b", "k", True, 1.0, 0, "", metrics={"ink": 0.40})]
-    assert summarize(rows)["k"]["metrics_worst"]["ink"] == 0.02
+    """metrics_worst took a max unconditionally, so the 'worst' motion was the
+    liveliest case in the run."""
+    rows = [Result("a", "k", True, 1.0, 0, "", metrics={"motion": 0.02}),
+            Result("b", "k", True, 1.0, 0, "", metrics={"motion": 0.40})]
+    assert summarize(rows)["k"]["metrics_worst"]["motion"] == 0.02
 
 
 def test_the_worst_case_of_a_lower_is_better_metric_is_still_its_maximum():
