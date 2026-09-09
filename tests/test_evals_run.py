@@ -519,6 +519,39 @@ def test_a_trace_candidate_becomes_a_trace_runner(tmp_path):
     assert r.candidate.startswith("trace/")
 
 
+def test_an_omnisvg_candidate_becomes_an_omnisvg_runner(tmp_path):
+    from evals.runners.omnisvg import OmniSVGRunner
+    r = build_runner("omnisvg:4B", "http://gw", tmp_path)
+    assert isinstance(r, OmniSVGRunner)
+    assert r.candidate == "omnisvg:4B"
+
+
+def test_an_omnisvg_candidate_needs_no_output_directory(tmp_path):
+    # It returns SVG text, not a file this suite has to place.
+    assert build_runner("omnisvg:4B", "http://gw", None).size == "4B"
+
+
+def test_an_omnisvg_candidate_only_gets_svg_cases(tmp_path):
+    from evals.run import cases_for
+    cases = [Case(id="s", modality="svg", prompt="a gear"),
+             Case(id="i", modality="image", prompt="a fox",
+                  params={"width": 64, "height": 64})]
+    assert [c.id for c in cases_for("omnisvg:4B", cases)] == ["s"]
+
+
+def test_a_bad_omnisvg_size_is_caught_before_anything_runs(tmp_path):
+    with pytest.raises(SystemExit) as e:
+        build_runner("omnisvg:2B", "http://gw", tmp_path)
+    assert "2B" in str(e.value)
+
+
+def test_an_unknown_omnisvg_option_is_named(tmp_path):
+    with pytest.raises(SystemExit) as e:
+        build_runner("omnisvg:4B,temperature=0.5", "http://gw", tmp_path)
+    assert "temperature" in str(e.value)
+    assert "candidates" in str(e.value)
+
+
 def test_a_trace_candidate_only_gets_svg_cases(tmp_path):
     from evals.run import cases_for
     cases = [Case(id="s", modality="svg", prompt="a gear"),

@@ -36,6 +36,7 @@ from evals.runners.process import ProcessRunner
 from evals.runners.chain import ChainRunner
 from evals.runners.repair import RepairRunner
 from evals.runners.speech import SpeechRunner
+from evals.runners.omnisvg import DEFAULT_CANDIDATES, OmniSVGRunner
 from evals.runners.trace import TraceRunner
 from evals.runners.text import CompletionRunner
 from evals.runners.transcription import TranscriptionRunner
@@ -55,6 +56,11 @@ TRACE_PREFIXES = {"trace": "illustration", "trace-icon": "icon"}
 #: `repair:local-large` are different products. See evals/runners/repair.py.
 REPAIR_PREFIX = "repair"
 REPAIR_OPTIONS = {"attempts"}
+#: The svg lane's THIRD method: a model that emits draw commands as tokens.
+#: `omnisvg:4B` -- a size, not an engine spec, because the weights it needs
+#: are two fixed repos rather than anything the caller chooses.
+OMNISVG_PREFIX = "omnisvg"
+OMNISVG_OPTIONS = {"candidates"}
 #: Two-stage image workflows, named for their second stage. See
 #: evals/runners/chain.py -- this is the ComfyUI vocabulary mflux already ships.
 from evals.runners.chain import STAGES as CHAIN_STAGES  # noqa: E402
@@ -73,6 +79,8 @@ def kind_of(candidate: str) -> str:
         return head
     if head in TRACE_PREFIXES:
         return head
+    if head == OMNISVG_PREFIX:
+        return OMNISVG_PREFIX
     if head == REPAIR_PREFIX:
         return REPAIR_PREFIX
     if head in CHAIN_STAGES:
@@ -89,6 +97,8 @@ def modality_of(candidate: str) -> str | None:
     if kind in TRACE_PREFIXES:
         # It answers svg cases; the engine underneath makes images, which is
         # the whole point and would be the wrong modality to select on.
+        return "svg"
+    if kind == OMNISVG_PREFIX:
         return "svg"
     if kind == REPAIR_PREFIX:
         # A text candidate wearing a loop: it runs every text lane, same as
@@ -238,6 +248,24 @@ def build_runner(candidate: str, gateway: str, outdir: Path | None,
         if outdir is None:
             raise SystemExit(f"{candidate} writes images; pass --out")
         return ChainRunner(engine, stage, outdir)
+    if kind == OMNISVG_PREFIX:
+        _, _, rest = candidate.partition(":")
+        size, _, optstr = rest.partition(",")
+        try:
+            options = parse_options(optstr, candidate)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        unknown = set(options) - OMNISVG_OPTIONS
+        if unknown:
+            raise SystemExit(
+                f"unknown omnisvg option(s) {', '.join(sorted(unknown))}; "
+                f"allowed: {', '.join(sorted(OMNISVG_OPTIONS))}")
+        try:
+            return OmniSVGRunner(
+                size.strip() or "4B",
+                candidates=int(options.get("candidates", DEFAULT_CANDIDATES)))
+        except ValueError as exc:
+            raise SystemExit(f"{candidate}: {exc}") from exc
     if kind in TRACE_PREFIXES:
         spec = candidate.partition(":")[2].strip()
         if not spec:
