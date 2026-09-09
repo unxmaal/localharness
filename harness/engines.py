@@ -23,7 +23,7 @@ from typing import Callable
 
 Argv = Callable[[str, Path, dict], list[str]]
 
-GRAMMAR = "engine:model[,key=value,...]  (engines: mflux, h3)"
+GRAMMAR = "engine:model[,key=value,...]  (engines: mflux, h3, diffusers)"
 
 
 def spec_error(spec: str) -> str:
@@ -244,7 +244,42 @@ def _h3(spec: str, model: str, options: dict) -> Engine:
                   cwd=str(Path(binary).parent))
 
 
+# ---- diffusers (the image lane on a machine with an NVIDIA card) ----------
+
+_DIFFUSERS_OPTIONS = {"steps", "width", "height", "guidance"}
+
+#: A script in the checkout rather than something on PATH, for the same reason
+#: H3_BIN is: it carries the pinned torch and diffusers versions, and mflux's
+#: trick of installing as a `uv tool` would put a 2.5 GB CUDA torch in one.
+IMAGE_CUDA_DEFAULT_BIN = str(
+    Path(__file__).resolve().parent.parent / "scripts" / "image-cuda.sh")
+
+
+def _diffusers(spec: str, model: str, options: dict) -> Engine:
+    if not model:
+        raise ValueError(
+            f"{spec_error(spec)}: diffusers needs a model, e.g. "
+            f"diffusers:stabilityai/sdxl-turbo")
+    _check_options(options, _DIFFUSERS_OPTIONS, spec)
+    defaults = dict(options)
+
+    def argv(prompt: str, out: Path, params: dict) -> list[str]:
+        p = {**defaults, **{k: v for k, v in params.items() if v is not None}}
+        cmd = [os.environ.get("IMAGE_CUDA_BIN", IMAGE_CUDA_DEFAULT_BIN),
+               "--model", model, "--prompt", prompt, "--output", str(out)]
+        for name in ("width", "height", "steps", "seed", "guidance"):
+            _flag(cmd, f"--{name}", p.get(name))
+        return cmd
+
+    # Named for the model rather than the repo owner: two owners publishing the
+    # same name would collide, and the eval table has one column for this.
+    return Engine(name=f"diffusers/{model.rsplit('/', 1)[-1]}", spec=spec,
+                  argv=argv, modality="image", output_suffix=".png",
+                  timeout=900.0)
+
+
 _BUILDERS: dict[str, Callable[[str, str, dict], Engine]] = {
     "mflux": _mflux,
     "h3": _h3,
+    "diffusers": _diffusers,
 }

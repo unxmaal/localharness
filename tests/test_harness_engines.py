@@ -115,6 +115,67 @@ def test_h3_seconds_and_frames_are_mutually_exclusive():
         argv("h3", frames=22, seconds=2)
 
 
+# ---- diffusers, the image lane on a machine with an NVIDIA card -----------
+#
+# A different tool for the same lane. mflux is MLX and does not run here, so
+# the engine is named for what it runs rather than for the lane it serves,
+# the same way mflux and h3 are.
+
+
+def test_diffusers_is_an_image_engine_producing_png():
+    eng = resolve("diffusers:stabilityai/sdxl-turbo")
+    assert eng.modality == "image"
+    assert eng.output_suffix == ".png"
+    assert "sdxl-turbo" in eng.name
+
+
+def test_diffusers_passes_the_model_prompt_and_output():
+    _, a = argv("diffusers:stabilityai/sdxl-turbo")
+    assert a[a.index("--model") + 1] == "stabilityai/sdxl-turbo"
+    assert a[a.index("--prompt") + 1] == "a red fox"
+    assert a[a.index("--output") + 1] == str(OUT)
+
+
+def test_diffusers_forwards_the_generation_params():
+    _, a = argv("diffusers:stabilityai/sdxl-turbo",
+                steps=4, width=768, height=768, seed=7)
+    for flag, value in (("--steps", "4"), ("--width", "768"),
+                        ("--height", "768"), ("--seed", "7")):
+        assert a[a.index(flag) + 1] == value
+
+
+def test_diffusers_omits_a_param_that_was_never_set():
+    """--seed None is a seed of the string None, which reproduces nothing."""
+    _, a = argv("diffusers:stabilityai/sdxl-turbo")
+    assert "--seed" not in a
+
+
+def test_diffusers_spec_defaults_are_overridden_by_call_params():
+    _, a = argv("diffusers:stabilityai/sdxl-turbo,steps=1", steps=8)
+    assert a[a.index("--steps") + 1] == "8"
+
+
+def test_the_diffusers_generator_is_a_path_not_a_name(monkeypatch, tmp_path):
+    """Same reason H3_BIN is overridable: this one is a script in the checkout
+    rather than something installed onto PATH, and a test or another machine
+    has to be able to point it elsewhere."""
+    fake = tmp_path / "image-cuda.sh"
+    monkeypatch.setenv("IMAGE_CUDA_BIN", str(fake))
+    _, a = argv("diffusers:stabilityai/sdxl-turbo")
+    assert a[0] == str(fake)
+
+
+def test_diffusers_rejects_an_unknown_option_before_the_model_loads():
+    with pytest.raises(ValueError) as e:
+        resolve("diffusers:stabilityai/sdxl-turbo,quantise=4")
+    assert "quantise" in str(e.value)
+
+
+def test_diffusers_needs_a_model():
+    with pytest.raises(ValueError):
+        resolve("diffusers")
+
+
 # ---- spec parsing ---------------------------------------------------------
 
 def test_unknown_engine_names_the_known_ones():
