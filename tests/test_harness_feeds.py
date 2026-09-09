@@ -315,13 +315,17 @@ def test_relevance_is_zero_when_the_text_says_neither_way():
 
 
 def test_a_term_repeated_does_not_inflate_the_score():
-    once = feeds.relevance("mlx")
-    many = feeds.relevance("mlx mlx mlx mlx mlx")
+    once = feeds.relevance("mlx", APPLE)
+    many = feeds.relevance("mlx mlx mlx mlx mlx", APPLE)
     assert once == many
 
 
 def test_candidates_carry_their_relevance(recap):
-    props = {p.name: p for p in feeds.candidates(recap[:1])}
+    """Scored for APPLE because the fixture is an Apple-flavoured thread. The
+    CI runner has no accelerator, so unpinned this asserted that a machine
+    which can run none of this hardware nonetheless finds some of it
+    relevant."""
+    props = {p.name: p for p in feeds.candidates(recap[:1], machine=APPLE)}
     assert any(p.relevance > 0 for p in props.values())
 
 

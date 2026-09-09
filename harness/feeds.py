@@ -342,7 +342,8 @@ def comments(permalink: str, fetcher=None) -> list[Entry]:
     return parse((fetcher or fetch)(comment_url(permalink)))
 
 
-def candidates(entries: list[Entry], source: str = "") -> list[Proposal]:
+def candidates(entries: list[Entry], source: str = "",
+               machine=None) -> list[Proposal]:
     """What a feed is talking about, best evidence first.
 
     A LINKED repo is a real id and is offered as such. A name lifted from prose
@@ -361,7 +362,7 @@ def candidates(entries: list[Entry], source: str = "") -> list[Proposal]:
             return
         why = why.strip()[:160]
         out[key] = Proposal(name, why, source, link, when, kind,
-                            relevance(f"{name} {why}"))
+                            relevance(f"{name} {why}", machine))
 
     # Two passes so a name linked on BOTH huggingface and github is recorded as
     # the model, which is the thing the eval can actually run.

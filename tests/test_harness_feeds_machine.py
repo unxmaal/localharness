@@ -22,6 +22,10 @@ CARD = mach.Machine(frozenset({"cuda", "cpu"}),
                     Accelerator("discrete", 12.0, 10.5, "RTX 4070"))
 LINUX_CARD = mach.Machine(frozenset({"cuda", "cpu"}),
                           Accelerator("discrete", 12.0, 10.5, "RTX 4070"))
+#: What a CI runner is, and what a laptop with no card is. Every accelerated
+#: technique is foreign to it, which is the honest answer and not an oversight.
+CPU_ONLY = mach.Machine(frozenset({"cpu"}),
+                        Accelerator("unified", 16.0, 16.0, "x86_64"))
 
 CUDA_TECHNIQUE = ("a LoRA that makes SDXL five times faster on a 4090, "
                   "tested at 12GB VRAM with CUDA 12")
@@ -74,3 +78,23 @@ def test_every_runtime_has_terms_to_recognise_it(runtime):
     a machine detecting it would rank its own techniques as though they named
     no hardware at all."""
     assert feeds.RUNTIME_TERMS.get(runtime) is not None
+
+
+def test_a_machine_with_no_accelerator_finds_accelerated_work_foreign():
+    """It can run neither, and saying so is the point. The failure this
+    prevents is the opposite one: a test that asserts something scores positive
+    and passes only because the machine running it happened to have the card
+    that text names."""
+    assert feeds.relevance(CUDA_TECHNIQUE, CPU_ONLY) < 0
+    assert feeds.relevance(MLX_TECHNIQUE, CPU_ONLY) < 0
+    assert feeds.relevance(NEUTRAL, CPU_ONLY) == 0
+
+
+def test_nothing_is_dropped_for_being_irrelevant_by_default():
+    """Relevance sorts; it filters only under --platform. On a machine with no
+    accelerator everything hardware-shaped is negative, and a sweep that
+    returned nothing at all would be the wrong reading of that."""
+    entries = [feeds.Entry(title="LoRA for SDXL", link="https://x/1",
+                           body="https://github.com/someone/sdxl-turbo-lora "
+                                + CUDA_TECHNIQUE, updated="2026-09-01")]
+    assert feeds.candidates(entries, "test", machine=CPU_ONLY)
