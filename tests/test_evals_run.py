@@ -251,9 +251,10 @@ def report_unrun(cases, candidates):
 
 def test_a_higher_is_better_metric_ranks_the_larger_value_first(capsys):
     """`ink` and `motion` were ranked ascending like an error rate, so the
-    candidate that drew least came top."""
-    s = summarize([Result("c", "sparse", True, 1.0, 0, "", metrics={"ink": 0.02}),
-                   Result("c", "rich", True, 1.0, 0, "", metrics={"ink": 0.40})])
+    candidate that moved least came top. `ink` has since become neutral --
+    see test_ink_is_a_floor_and_is_not_ranked_on -- so `motion` carries this."""
+    s = summarize([Result("c", "sparse", True, 1.0, 0, "", metrics={"motion": 0.02}),
+                   Result("c", "rich", True, 1.0, 0, "", metrics={"motion": 0.40})])
     report(s)
     lines = [ln for ln in capsys.readouterr().out.splitlines()
              if ln.startswith(("sparse", "rich"))]
