@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -140,14 +141,57 @@ def rasterize_html(html: str, out: str | Path, width: int = 800) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists():
         out.unlink()
-    with tempfile.TemporaryDirectory() as d:
+    # mkdtemp with an explicit removal, not TemporaryDirectory: its cleanup
+    # raises on the first refusal, and on Windows the browser is still letting
+    # go of the profile at that moment.
+    d = tempfile.mkdtemp()
+    try:
         src = Path(d) / "page.html"
         src.write_text(html, encoding="utf-8")
         profile = Path(d) / "chrome-profile"
         stderr = _shoot(chrome_argv(src, out, width, profile=profile), out, d)
+    finally:
+        _remove_tree(Path(d))
     if not out.exists():
         raise RenderError(f"chrome produced no screenshot: {stderr[:300]}")
     return out
+
+
+def _kill_tree(proc) -> None:
+    """Reap chrome's renderer and GPU processes, which outlive the parent.
+
+    POSIX allows unlinking a file another process still holds, so the scratch
+    profile can be removed with them running. Windows refuses it with
+    WinError 32, and the temporary directory then fails to clean up.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def _remove_tree(path: Path, attempts: int = 20, delay: float = 0.1) -> None:
+    """Remove a directory a just-killed browser may still be holding open.
+
+    The handles go within a moment of the tree dying, so this retries rather
+    than giving up on the first refusal. Ignoring the error outright would
+    leave a chrome profile in the temporary directory on every render.
+    """
+    for attempt in range(attempts):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError:
+            if attempt == attempts - 1:
+                shutil.rmtree(path, ignore_errors=True)
+                return
+            time.sleep(delay)
 
 
 def _shoot(argv: list[str], out: Path, cwd: str, timeout: float = 60.0) -> str:
@@ -180,6 +224,7 @@ def _shoot(argv: list[str], out: Path, cwd: str, timeout: float = 60.0) -> str:
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait(timeout=5)
+        _kill_tree(proc)
         err.seek(0)
         return err.read().strip()
     finally:
