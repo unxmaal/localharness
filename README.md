@@ -95,10 +95,9 @@ in place of `serve-mlx.sh`.
 
 Before you invest an afternoon:
 
-- **Half the lanes have no tool on Windows yet.** The harness, the checks and
-  the eval runner all run there. The generators do not: every one that ships is
-  MLX or Metal. Those gaps are being filled. See "A second
-  machine" below for which lane is where.
+- **Every lane runs on both machines, with a different tool on each.** What is
+  missing on Windows is voice cloning and service supervision. See "A second
+  machine" below for which tool serves which lane.
 - **There is no Linux path.**
 - **It needs disk.** The models this uses run 4 GB to 31 GB each.
 - **Video takes about 40 minutes a generation** on an M2 Pro with 32 GB. It
@@ -122,24 +121,38 @@ Neither is named by the caller: each is found by asking the platform and the
 import, and a machine with neither warns and withholds the metric instead of
 failing the candidate.
 
-The generators do not yet. This is where each lane stands:
+The generators do too, each through whatever tool suits the machine:
 
 | lane | Apple Silicon | Windows and NVIDIA |
 |---|---|---|
-| web, code, extract | mlx_lm.server behind the gateway | any OpenAI-compatible server, no script yet |
-| image | mflux | not built |
-| video | h3 | not built |
-| tts | mlx-audio | not built |
-| stt | mlx-audio, mlx-whisper | not built |
+| web, code, extract | mlx_lm.server | llama.cpp's router |
+| image | mflux | diffusers |
+| video | h3 | diffusers |
+| tts | mlx-audio | Kokoro through onnxruntime |
+| stt | mlx-audio, mlx-whisper | faster-whisper |
 | svg | traced from an image, or a text model | follows image and text |
 | ocr check | Apple Vision | Windows.Media.Ocr |
 | html render | Chrome | Chrome or Edge |
 | svg rasterise | rsvg-convert | rsvg-convert |
 
-The gateway is LiteLLM, so an OpenAI-compatible server on the Windows box
-answers the text lanes today by editing `gateway/config.yaml`. There is no
-`serve-*.sh` for it yet, and `./scripts/serve-mlx.sh` is Apple Silicon and does
-not start there.
+Neither generator column names a model, which is on purpose. `mflux:z-image-turbo`
+and `diffusers:stabilityai/sdxl-turbo` are both specs an eval reads, so which
+model a lane should run on either machine is a row in a results table rather
+than a line in this file.
+
+Each machine has its own launchers and its own gateway config, and one
+`serve-gateway.sh` reads whichever it is given:
+
+```bash
+GATEWAY_CONFIG=gateway/config.cuda.yaml ./scripts/serve-gateway.sh &
+./scripts/serve-llamacpp.sh &      # the text lanes
+./scripts/serve-audio-cuda.sh &    # tts and stt
+```
+
+The image and video generators need no server. `harness/engines.py` turns a
+spec into a command line and the two scripts build their own environment on
+first use, which keeps a 2.5 GB CUDA torch out of the venv the test suite
+creates.
 
 **A result records what produced it.** `hw_model` identifies the GPU on Apple
 Silicon because it is the same part. On a PC it says nothing about it, so
@@ -154,8 +167,12 @@ exist. Qwen3-30B-A3B at 4-bit is too big for that card and fits a 24 GB one, the
 same candidate and two answers. Without a card the harness still runs and
 reports system RAM as its budget.
 
-Service supervision is the one thing that is not a lane and has no Windows
-counterpart: launchd is macOS, and nothing replaces it there yet.
+Two things are still missing there, and both are gaps rather than decisions.
+Voice cloning: the Mac's default voice is cloned from a reference clip by
+Chatterbox, Kokoro has a fixed table of 54, and a request carrying a reference
+is refused rather than answered in a substitute voice. Service supervision:
+launchd is macOS and nothing replaces it, so the machine does not come back
+serving after a reboot.
 
 ---
 
