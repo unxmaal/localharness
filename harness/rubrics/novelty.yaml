@@ -29,6 +29,10 @@ what_scores_high:
 # to run here, so RUNNING IS NOT MERIT. Scoring it as merit put six unrelated
 # candidates at 10/10 in one sweep.
 scores_nothing_by_itself:
+  - Running on this machine at all. Every candidate has already been read from
+    its source and found to run here, so this is the price of entry and not a
+    distinction. Scoring it as merit put six unrelated candidates at 10/10 in
+    one sweep.
   - Having weights that fit this machine. Same reason.
 
 what_scores_low:

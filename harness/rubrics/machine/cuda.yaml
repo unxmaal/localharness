@@ -10,10 +10,6 @@ what_scores_high:
   - A GGUF, a diffusers pipeline or anything else that loads on an NVIDIA card
     without a rewrite.
 
-scores_nothing_by_itself:
-  - Running on CUDA at all. Every candidate has already been read from its
-    source and found to run here, so this is the price of entry.
-
 what_scores_low:
   - Anything that requires MLX, Metal or Apple Silicon, which this machine does
     not have.

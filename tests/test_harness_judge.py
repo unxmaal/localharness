@@ -2,6 +2,8 @@
 import pytest
 
 from harness import judge
+from harness import machine as _mach
+from harness.memory import Accelerator as _Acc
 from harness.judge import JudgeError, describe, load, parse_score
 
 
@@ -15,6 +17,10 @@ def fake(replies):
     return complete
 
 
+_APPLE = _mach.Machine(frozenset({"mlx", "cpu"}),
+                       _Acc("unified", 32.0, 25.0, "Mac16,1"))
+
+
 def test_the_shipped_rubric_loads_and_is_versioned():
     r = load()
     assert r.version >= 1
@@ -23,7 +29,10 @@ def test_the_shipped_rubric_loads_and_is_versioned():
 
 
 def test_the_rubric_prompt_carries_both_directions():
-    p = load().prompt
+    # Pinned: what a rubric says about hardware depends on the machine, and CI
+    # has no card. The lesson about judging below is machine-neutral and stays
+    # unpinned on purpose.
+    p = load(machine=_APPLE).prompt
     assert "SCORES HIGH" in p and "SCORES LOW" in p
     assert "composition" in p.lower()
     assert "cuda" in p.lower()
@@ -181,6 +190,9 @@ def test_every_control_item_carries_the_same_inspect_verdict():
 
 
 def test_the_rubric_says_running_here_is_not_merit():
+    """Unpinned deliberately. Scoring the price of entry as merit is a lesson
+    about judging rather than about hardware, so every machine has to be told
+    it, including one with no accelerator at all."""
     p = load().prompt.lower()
     assert "price of entry" in p or "not merit" in p
     assert "5 at most" in p

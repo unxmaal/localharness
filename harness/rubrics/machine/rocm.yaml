@@ -7,9 +7,6 @@ what_scores_high:
   - Native ROCm, or PyTorch that runs on ROCm without a CUDA-only kernel. This
     machine has an AMD card.
 
-scores_nothing_by_itself:
-  - Running on ROCm at all, which is the price of entry here.
-
 what_scores_low:
   - Anything requiring CUDA-only kernels, MLX, Metal or Apple Silicon.
   - Anything needing more VRAM than this card holds.
