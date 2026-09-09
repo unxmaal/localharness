@@ -340,11 +340,18 @@ def hf_size(model_id: str, fetch=None, cache: dict | None = None) -> int:
 
 
 def decide(fit: Fit, ceiling: int | None = None, dead_days: int = DEAD_DAYS,
-           now: float | None = None) -> Fit:
+           now: float | None = None, machine=None) -> Fit:
     """Turn what was read into one verdict and the reason for it.
 
-    Order matters. CUDA first because it is absolute on this machine: a repo
-    that cannot run here at any size is not a size question.
+    Order matters. The runtime comes first because it is absolute: a repo that
+    cannot run here at any size is not a size question.
+
+    THE VERDICT NAMES THE RUNTIME, NOT THE PLATFORM. This used to read "CUDA is
+    absolute on this machine", which was true of the Mac it was written on and
+    made every CUDA candidate a rejection on a box bought to run them, while an
+    MLX repo that cannot start there passed the same gate. Asking which runtime
+    a candidate needs, and whether this machine has it, reads correctly from
+    either direction and makes a third kind of machine a row of data.
     """
     import time
     from datetime import datetime, timezone
@@ -354,18 +361,35 @@ def decide(fit: Fit, ceiling: int | None = None, dead_days: int = DEAD_DAYS,
     # the module first.
     if ceiling is None:
         ceiling = ceiling_bytes()
-    # Only a DECLARED dependency disqualifies. apple/coreai-models mentions
-    # torch.cuda in one export recipe and is an Apple on-device repo; calling
-    # that "needs CUDA" threw away the most relevant candidate in the sweep.
-    # An MLX import is positive proof the project runs on Apple Silicon, so a
-    # CUDA pin alongside it is an OPTIONAL non-Mac build path rather than a
-    # requirement. ml-explore/mlx itself was reported as needs-cuda: its
-    # setup.py adds nvidia-* inside `if toolkit == 12:`, a branch never taken
-    # here.
-    if fit.cuda and not fit.mlx:
-        fit.verdict, fit.why = "needs-cuda", f"depends on {', '.join(fit.cuda[:3])}"
-        return fit
+    if machine is None:
+        from harness import machine as _machine
+        machine = _machine.detect()
+
+    # Which runtimes the repo OFFERS. Only a DECLARED dependency counts:
+    # apple/coreai-models mentions torch.cuda in one export recipe and is an
+    # Apple on-device repo, and calling that "needs CUDA" threw away the most
+    # relevant candidate in a sweep. ml-explore/mlx itself was reported the
+    # same way, from nvidia-* inside `if toolkit == 12:`.
+    offered = []
+    if fit.mlx:
+        offered.append("mlx")
     if fit.cuda:
+        offered.append("cuda")
+
+    # A repo offering more than one runs wherever ONE of them lands. An MLX
+    # import beside a CUDA pin is a project with two paths, and each machine
+    # has one of them; refusing it on either was the old rule's mistake in the
+    # one case it got right for the wrong reason.
+    if offered and all(machine.refuses(r) for r in offered):
+        fit.verdict = machine.refuses(offered[0])
+        detail = ", ".join(fit.cuda[:3]) if "cuda" in offered else "mlx"
+        fit.why = f"depends on {detail}, and this machine has no {offered[0]}"
+        return fit
+
+    # Kept as a mention rather than a requirement once the machine can satisfy
+    # it: the field is read downstream as evidence, and a satisfied dependency
+    # is not evidence against.
+    if fit.cuda and "cuda" not in machine.runtimes:
         fit.cuda_mentioned = sorted(set(fit.cuda_mentioned) | set(fit.cuda))
         fit.cuda = []
     # THE SMALLEST decides, not the largest, and this was measured the hard
@@ -424,6 +448,7 @@ def inspect(repo: str, workdir: Path, *, meta: dict | None = None,
             sizer=None, facts=hf_facts, run=_run,
             ceiling: int | None = None,
             dead_days: int = DEAD_DAYS,
+            machine=None,
             kb_cap: int = CLONE_KB_CAP) -> Fit:
     """Clone a candidate's source, read it, and say whether it can run here."""
     if sizer is not None:      # older callers and tests pass a size-only stub
@@ -476,4 +501,4 @@ def inspect(repo: str, workdir: Path, *, meta: dict | None = None,
             pass
     fit.largest = max(fit.weights.values(), default=0)
     fit.smallest = min(fit.weights.values(), default=0)
-    return decide(fit, ceiling=ceiling, dead_days=dead_days)
+    return decide(fit, ceiling=ceiling, dead_days=dead_days, machine=machine)

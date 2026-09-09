@@ -1,0 +1,12 @@
+# What the judge should know when scoring for a machine with an AMD card.
+#
+# UNTESTED. Written so that a ROCm box is a file rather than a fork, and so
+# that machine.py detecting rocm cannot leave the judge scoring for a machine
+# nobody described. Correct it against a real one before trusting a sweep.
+what_scores_high:
+  - Native ROCm, or PyTorch that runs on ROCm without a CUDA-only kernel. This
+    machine has an AMD card.
+
+what_scores_low:
+  - Anything requiring CUDA-only kernels, MLX, Metal or Apple Silicon.
+  - Anything needing more VRAM than this card holds.

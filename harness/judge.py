@@ -41,7 +41,32 @@ class Rubric:
         return f"{self.name}@{self.version}"
 
 
-def load(name: str = DEFAULT_RUBRIC, directory: Path | None = None) -> Rubric:
+def _machine_sections(machine, directory: Path) -> dict:
+    """The rubric fragments for the runtimes this machine has.
+
+    A rubric describes what to reward, and half of that depends on what the
+    machine can run: telling a judge that CUDA disqualifies a candidate is
+    correct on a Mac and removes the whole point of a box with a card. The
+    machine-specific claims live in one file per runtime so that a third kind
+    of machine is a file rather than a fork of the rubric, and so that nothing
+    here has to ask which operating system it is on.
+    """
+    if machine is None:
+        from harness import machine as _machine
+        machine = _machine.detect()
+    merged: dict = {}
+    for runtime in sorted(machine.runtimes):
+        fragment = Path(directory) / "machine" / f"{runtime}.yaml"
+        if not fragment.exists():
+            continue
+        raw = yaml.safe_load(fragment.read_text(encoding="utf-8")) or {}
+        for key, items in raw.items():
+            merged.setdefault(key, []).extend(items)
+    return merged
+
+
+def load(name: str = DEFAULT_RUBRIC, directory: Path | None = None,
+         machine=None) -> Rubric:
     path = Path(directory or RUBRIC_DIR) / f"{name}.yaml"
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -49,6 +74,9 @@ def load(name: str = DEFAULT_RUBRIC, directory: Path | None = None) -> Rubric:
         known = sorted(p.stem for p in Path(directory or RUBRIC_DIR).glob("*.yaml"))
         raise JudgeError(f"no rubric {name!r} at {path} "
                          f"(known: {', '.join(known) or 'none'})") from exc
+    for key, items in _machine_sections(
+            machine, Path(directory or RUBRIC_DIR)).items():
+        raw[key] = list(raw.get(key) or []) + list(items)
     scale = raw.get("scale") or [1, 10]
     body = [raw.get("question", "").strip(), ""]
     # Every section a rubric can declare. A key not listed here is SILENTLY

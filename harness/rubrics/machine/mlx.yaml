@@ -1,0 +1,14 @@
+# What the judge should know when scoring for a machine that runs MLX.
+#
+# These claims used to sit in novelty.yaml, where they were true of the Mac it
+# was written on and wrong anywhere else. Kept as a fragment so the rubric
+# itself says only what holds on any machine.
+what_scores_high:
+  - Native Apple Silicon or MLX. This machine runs MLX, so something that runs
+    natively here beats a better result on hardware it does not have.
+
+  - Running natively on Apple Silicon, on Metal, or on a Mac at all.
+
+what_scores_low:
+  - Anything that requires CUDA or an NVIDIA card, which this machine does not
+    have.

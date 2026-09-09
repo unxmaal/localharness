@@ -1,4 +1,4 @@
-version: 4
+version: 5
 name: novelty
 model: q3-4b
 scale: [1, 10]
@@ -17,9 +17,6 @@ what_scores_high:
       nothing. Adding a NEW model or package as a second stage is NOT this. It
       is a new dependency wearing the word composition, and it scores on its
       own merits like anything else that has to be downloaded first.
-  - Native Apple Silicon or MLX. This machine has no CUDA and never will, so
-    something that runs natively here beats a better result on hardware we do
-    not have.
   - A concrete measured claim, with a number and the hardware it was measured
     on.
   - A technique, workflow or method rather than another model.
@@ -32,18 +29,17 @@ what_scores_high:
 # to run here, so RUNNING IS NOT MERIT. Scoring it as merit put six unrelated
 # candidates at 10/10 in one sweep.
 scores_nothing_by_itself:
-  - Being MLX-native. Every candidate has already been read from its source and
-    found to run here, so this is the price of entry and not a distinction.
+  - Running on this machine at all. Every candidate has already been read from
+    its source and found to run here, so this is the price of entry and not a
+    distinction. Scoring it as merit put six unrelated candidates at 10/10 in
+    one sweep.
   - Having weights that fit this machine. Same reason.
-  - Running natively on Apple Silicon, on Metal, or on a Mac at all.
 
 what_scores_low:
   - Another model in an already crowded family, with no claim distinguishing it.
   - >-
       Marketing adjectives with no measurement, such as supercharges,
       revolutionary, state-of-the-art or blazing fast, with nothing behind them.
-  - Anything that requires CUDA, an NVIDIA card, or more memory than a 32 GB
-    Mac.
   - A rename, a re-upload, or a quantisation of something already known here,
     unless the quantisation itself is the interesting part.
   - Vague capability claims with no way to check them.

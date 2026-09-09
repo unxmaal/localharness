@@ -60,14 +60,23 @@ def test_an_entry_point_is_found(tmp_path):
 
 # ---- the verdict -----------------------------------------------------------
 
-def fit(**kw):
-    return ins.decide(ins.Fit(repo="a/b", entry_points=["main.py"], **kw))
+def fit(machine=None, **kw):
+    """A verdict for one candidate. `machine` pins which machine is deciding;
+    left out, the local one answers, which is right for the checks that do not
+    depend on a runtime and wrong for the ones that do."""
+    return ins.decide(ins.Fit(repo="a/b", entry_points=["main.py"], **kw),
+                      machine=machine)
 
 
 def test_a_declared_cuda_dependency_outranks_everything(tmp_path):
-    """Absolute on this machine: a repo that cannot run here at any size is
-    not a size question."""
-    assert fit(cuda=["flash_attn"], smallest=1).verdict == "needs-cuda"
+    """Absolute on a machine without CUDA: a repo that cannot run at any size
+    is not a size question.
+
+    Pinned to a Mac rather than left to whatever runs the suite. Unpinned, this
+    asserted the local machine's answer, which is the confusion the runtime
+    verdicts exist to remove: on a card the same repo correctly fits."""
+    assert fit(cuda=["flash_attn"], smallest=1,
+               machine=_APPLE).verdict == "needs-cuda"
 
 
 def test_the_smallest_weight_decides_not_the_largest():
@@ -220,14 +229,16 @@ def test_an_mlx_project_is_not_disqualified_by_an_optional_cuda_build(tmp_path):
     inside `if toolkit == 12:`, a branch this machine never takes, and an
     `import mlx` is positive proof the project runs on Apple Silicon."""
     got = ins.decide(ins.Fit(repo="ml-explore/mlx", entry_points=["setup.py"],
-                             mlx=True, cuda=["nvidia-cublas"]))
+                             mlx=True, cuda=["nvidia-cublas"]),
+                     machine=_APPLE)
     assert got.verdict == "fits"
     assert "nvidia-cublas" in got.cuda_mentioned
 
 
 def test_a_non_mlx_project_is_still_disqualified_by_a_cuda_dependency():
     got = ins.decide(ins.Fit(repo="a/b", entry_points=["setup.py"], mlx=False,
-                             cuda=["nvidia-resiliency-ext"]))
+                             cuda=["nvidia-resiliency-ext"]),
+                     machine=_APPLE)
     assert got.verdict == "needs-cuda"
 
 
@@ -450,3 +461,65 @@ def test_a_weight_over_the_cards_vram_is_too_big_for_that_card():
                             memory.Accelerator("discrete", 24.0, 22.0)))
     assert small.verdict == "too-big"
     assert roomy.verdict != "too-big"
+
+
+# ---- which runtime a candidate needs --------------------------------------
+# The verdict names the RUNTIME, not the platform. "CUDA is absolute on this
+# machine" was true of the Mac it was written on and made every CUDA candidate
+# a rejection on a box bought to run them, while an MLX repo that cannot start
+# there passed the same gate.
+
+from harness import machine as mach  # noqa: E402
+from harness.memory import Accelerator  # noqa: E402
+
+_APPLE = mach.Machine(frozenset({"mlx", "cpu"}),
+                      Accelerator("unified", 32.0, 25.0, "Mac16,1"))
+_CARD = mach.Machine(frozenset({"cuda", "cpu"}),
+                     Accelerator("discrete", 12.0, 10.5, "RTX 4070"))
+_LINUX_CARD = mach.Machine(frozenset({"cuda", "cpu"}),
+                           Accelerator("discrete", 12.0, 10.5, "RTX 4070"))
+
+
+def _fit(**kw):
+    base = dict(repo="x/y", weights=["w"], smallest=1 * ins.GIB,
+                entry_points=["run.py"])
+    base.update(kw)
+    return ins.Fit(**base)
+
+
+def test_a_cuda_repo_runs_on_a_card_and_not_on_a_mac():
+    assert ins.decide(_fit(cuda=["torch.cuda"]), machine=_CARD).verdict != "needs-cuda"
+    assert ins.decide(_fit(cuda=["torch.cuda"]), machine=_APPLE).verdict == "needs-cuda"
+
+
+def test_an_mlx_repo_runs_on_a_mac_and_not_on_a_card():
+    """The half that was missing. An MLX-only repo was accepted on a machine
+    with no MLX, so a sweep queued weights that cannot load."""
+    assert ins.decide(_fit(mlx=True), machine=_APPLE).verdict != "needs-mlx"
+    assert ins.decide(_fit(mlx=True), machine=_CARD).verdict == "needs-mlx"
+
+
+def test_a_repo_offering_both_runs_on_either():
+    """An MLX import beside a CUDA pin is a project with two paths, and both
+    machines have one of them. This is the case the old rule got right."""
+    # A FRESH Fit per machine: decide() mutates what it is given, moving a
+    # satisfied cuda dependency into cuda_mentioned, so a shared one arrives at
+    # the second machine already altered.
+    for m in (_APPLE, _CARD):
+        both = _fit(mlx=True, cuda=["torch.cuda"])
+        assert ins.decide(both, machine=m).verdict not in ("needs-cuda", "needs-mlx")
+
+
+def test_a_repo_needing_neither_runs_anywhere():
+    """Pure python has no runtime requirement, so no machine refuses it."""
+    for m in (_APPLE, _CARD):
+        assert ins.decide(_fit(), machine=m).verdict not in ("needs-cuda", "needs-mlx")
+
+
+
+def test_linux_and_windows_with_the_same_card_reach_the_same_verdict():
+    """Nothing in decide() may consult the platform."""
+    for kw in ({"cuda": ["torch.cuda"]}, {"mlx": True}, {}):
+        # Fresh Fits for the same reason as above.
+        assert (ins.decide(_fit(**kw), machine=_CARD).verdict
+                == ins.decide(_fit(**kw), machine=_LINUX_CARD).verdict)
