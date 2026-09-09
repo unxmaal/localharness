@@ -94,6 +94,12 @@ _hf_free_gb() {
 # should not litter empty directories on the volumes that lose the race.
 _hf_usable() {
   local cand="$1" mp anchor free parent
+  # The PARENT must exist. Without this, walking up to the nearest existing
+  # ancestor reaches the filesystem root, and any candidate at all is accepted
+  # on a machine where the root is writable. harness/env.py carries the same
+  # rule; test_the_shipped_candidates_match_the_ones_env_sh_searches is what
+  # catches the two drifting apart.
+  [ -d "$(dirname "$cand")" ] || return 1
   mp="$(_hf_mountpoint "$cand")" || return 1
   [ -n "$mp" ] || return 1
 

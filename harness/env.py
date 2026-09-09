@@ -84,6 +84,20 @@ def _writable(anchor: Path) -> bool:
 
 
 def usable(path: str, min_free_gb: int = HF_MIN_FREE_GB) -> bool:
+    # THE PARENT MUST EXIST. Walking up to the nearest existing ancestor
+    # accepts anything at all on a machine whose filesystem root is
+    # writable: /no/such/volume/hf climbs to the drive root, a CI runner can
+    # write to the root of its work drive, and the candidate was taken. The
+    # weights would then have gone into a four-deep tree invented under it.
+    # On macOS the same walk is saved by / not being user-writable, which is
+    # a backstop rather than a rule.
+    #
+    # One level is what a cache root needs: /Volumes/Models has to be mounted
+    # before /Volumes/Models/hf is a place, and a drive has to be there
+    # before a directory on it is. That is what the mount check was always
+    # asking.
+    if not Path(path).parent.exists():
+        return False
     anchor = _anchor(path)
     if anchor is None or not _writable(anchor):
         return False
