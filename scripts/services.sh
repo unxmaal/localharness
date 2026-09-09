@@ -95,6 +95,17 @@ start_one() {
       rm -f "$(pidfile "$name")"
       return 1 ;;
   esac
+  # LOOK AGAIN BEFORE SAYING IT STARTED. Start-Process returns a pid for a
+  # process that has already exited, so a launcher that dies on its first line
+  # is reported as running and the pid file backs the claim up. That is the
+  # failure this whole file exists to avoid: a service nobody knows is down.
+  sleep 2
+  if ! alive "$pid"; then
+    echo "$name exited immediately:" >&2
+    tail -3 "$LOGS/$name.err.log" 2>/dev/null | sed 's/^/  /' >&2
+    rm -f "$(pidfile "$name")"
+    return 1
+  fi
   echo "$name started (pid $pid)"
 }
 

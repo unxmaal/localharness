@@ -94,7 +94,11 @@ A="http://$H:${TTS_PORT:-8890}/v1"
 # here made this check fail on the machine whose lane was working.
 SMOKE_TTS_MODEL="${SMOKE_TTS_MODEL:-$(uv run python -c   'from harness import audio; print(audio.DEFAULT_TTS_MODEL)' 2>/dev/null || echo mlx-community/Kokoro-82M-bf16)}"
 SMOKE_STT_MODEL="${SMOKE_STT_MODEL:-$(uv run python -c   'from harness import audio; print(audio.DEFAULT_STT_MODEL)' 2>/dev/null || echo mlx-community/parakeet-tdt-0.6b-v2)}"
-WAV="$(mktemp -t smoke-tts).wav"
+# A full template, not `-t prefix`: BSD mktemp invents the suffix and GNU
+# refuses without XXXXXX, so the bare form fails on Git Bash, prints "too
+# few X's" and leaves $WAV as ".wav" in the working directory.
+WAV="$(mktemp "${TMPDIR:-/tmp}/smoke-tts.XXXXXX")"
+mv "$WAV" "$WAV.wav" && WAV="$WAV.wav"
 trap 'rm -f "$WAV"' EXIT
 
 if curl -sf --max-time 60 "$A/audio/speech" -H 'Content-Type: application/json' \
