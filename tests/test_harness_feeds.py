@@ -19,12 +19,12 @@ RECAP = FIX / "reddit-recap-search.xml"
 
 @pytest.fixture
 def week():
-    return feeds.parse(WEEK.read_text())
+    return feeds.parse(WEEK.read_text(encoding="utf-8"))
 
 
 @pytest.fixture
 def recap():
-    return feeds.parse(RECAP.read_text())
+    return feeds.parse(RECAP.read_text(encoding="utf-8"))
 
 
 def test_the_week_feed_parses(week):
@@ -118,7 +118,7 @@ def test_the_interval_is_a_user_setting(monkeypatch):
 def test_sources_come_from_config_when_there_is_one(tmp_path):
     cfg = tmp_path / "sources.json"
     cfg.write_text(json.dumps({"sources": [
-        {"name": "mine", "url": "https://example.invalid/f.rss"}]}))
+        {"name": "mine", "url": "https://example.invalid/f.rss"}]}), encoding="utf-8")
     got = feeds.load_sources(cfg)
     assert [s.name for s in got] == ["mine"]
 
@@ -126,7 +126,7 @@ def test_sources_come_from_config_when_there_is_one(tmp_path):
 def test_a_missing_or_broken_config_falls_back_to_the_defaults(tmp_path):
     assert feeds.load_sources(tmp_path / "nope.json") == feeds.DEFAULT_SOURCES
     bad = tmp_path / "bad.json"
-    bad.write_text("{not json")
+    bad.write_text("{not json", encoding="utf-8")
     assert feeds.load_sources(bad) == feeds.DEFAULT_SOURCES
 
 
@@ -203,7 +203,7 @@ def test_read_caches_and_never_caches_a_block_page(tmp_path):
 
     def fetcher(url):
         hits.append(url)
-        return WEEK.read_text()
+        return WEEK.read_text(encoding="utf-8")
 
     a = feeds.read(src, cache_dir=tmp_path, fetcher=fetcher)
     b = feeds.read(src, cache_dir=tmp_path, fetcher=fetcher)
@@ -334,7 +334,7 @@ def test_behind_is_false_when_either_version_is_unreadable():
 def test_a_pinned_service_version_is_found_in_versions_sh(tmp_path):
     pins = tmp_path / "versions.sh"
     pins.write_text('MLX_AUDIO_PIN="mlx-audio==0.5.1"\n'
-                    'MISAKI_PIN="misaki[en]==0.9.4"\n')
+                    'MISAKI_PIN="misaki[en]==0.9.4"\n', encoding="utf-8")
     assert feeds.installed_version("misaki", pins) == "0.9.4"
 
 

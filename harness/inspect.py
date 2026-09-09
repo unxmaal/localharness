@@ -30,6 +30,27 @@ GIB = 1024 ** 3
 #: roughly 70-75% of it by default, so the honest ceiling is well under 32.
 #: Overridable: the M5 Ultra arriving with 96 GB moves this, nothing else.
 MEMORY_CEILING = 22 * GIB
+
+
+def ceiling_bytes(acc=None) -> int:
+    """The largest weight this machine could load at all, in bytes.
+
+    A CONSTANT CANNOT ANSWER THIS ANY MORE. MEMORY_CEILING describes one 32 GB
+    mini; a 12 GB card and a 24 GB card give the same candidate opposite
+    verdicts, and both are Windows. So a discrete card is asked directly and
+    its VRAM is the wall.
+
+    Unified memory deliberately keeps the measured constant. Deriving it too
+    (32 * GPU_FRACTION is 24 GiB) would move the mini's ceiling from 22 to 24
+    and change which candidates it accepts -- a decision about the Mac, which a
+    Windows port has no business making on its way past.
+    """
+    from harness import memory
+
+    acc = memory.detect() if acc is None else acc
+    if acc.kind == "discrete":
+        return int(acc.total_gb * GIB)
+    return MEMORY_CEILING
 #: A "source" repo past this is carrying weights or datasets in git, and
 #: cloning it is the download this tier exists to avoid.
 CLONE_KB_CAP = 250_000
@@ -197,7 +218,7 @@ def scan(tree: Path) -> dict:
     entries: list[str] = []
     for p in files(tree):
         try:
-            text = p.read_text(errors="ignore")
+            text = p.read_text(errors="ignore", encoding="utf-8")
         except OSError:
             continue
         if p.name in DEPENDENCY_FILES:
@@ -245,7 +266,7 @@ def _sizes_path() -> Path:
 
 def _size_cache() -> dict:
     try:
-        return json.loads(_sizes_path().read_text())
+        return json.loads(_sizes_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 
@@ -318,7 +339,7 @@ def hf_size(model_id: str, fetch=None, cache: dict | None = None) -> int:
     return hf_facts(model_id, fetch=fetch, cache=cache)["size"]
 
 
-def decide(fit: Fit, ceiling: int = MEMORY_CEILING, dead_days: int = DEAD_DAYS,
+def decide(fit: Fit, ceiling: int | None = None, dead_days: int = DEAD_DAYS,
            now: float | None = None) -> Fit:
     """Turn what was read into one verdict and the reason for it.
 
@@ -327,6 +348,12 @@ def decide(fit: Fit, ceiling: int = MEMORY_CEILING, dead_days: int = DEAD_DAYS,
     """
     import time
     from datetime import datetime, timezone
+
+    # Resolved here rather than as a default argument: a default is bound at
+    # import time, which would pin the ceiling to whatever machine imported
+    # the module first.
+    if ceiling is None:
+        ceiling = ceiling_bytes()
     # Only a DECLARED dependency disqualifies. apple/coreai-models mentions
     # torch.cuda in one export recipe and is an Apple on-device repo; calling
     # that "needs CUDA" threw away the most relevant candidate in the sweep.
@@ -395,7 +422,7 @@ def _takes_cache(fn) -> bool:
 
 def inspect(repo: str, workdir: Path, *, meta: dict | None = None,
             sizer=None, facts=hf_facts, run=_run,
-            ceiling: int = MEMORY_CEILING,
+            ceiling: int | None = None,
             kb_cap: int = CLONE_KB_CAP) -> Fit:
     """Clone a candidate's source, read it, and say whether it can run here."""
     if sizer is not None:      # older callers and tests pass a size-only stub
@@ -443,7 +470,7 @@ def inspect(repo: str, workdir: Path, *, meta: dict | None = None,
     fit.unsized += [i for i in found["hf_ids"] if i not in picked]
     if len(cache) > before:
         try:
-            _sizes_path().write_text(json.dumps(cache, indent=1, sort_keys=True))
+            _sizes_path().write_text(json.dumps(cache, indent=1, sort_keys=True), encoding="utf-8")
         except OSError:
             pass
     fit.largest = max(fit.weights.values(), default=0)

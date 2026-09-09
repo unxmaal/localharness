@@ -87,7 +87,7 @@ def gateway_aliases(config: Path | None = None) -> list[Capability]:
     config = config or (REPO / "gateway" / "config.yaml")
     try:
         import yaml
-        data = yaml.safe_load(Path(config).read_text()) or {}
+        data = yaml.safe_load(Path(config).read_text(encoding="utf-8")) or {}
     except (OSError, ValueError):
         return []
     out = []
@@ -248,7 +248,7 @@ def measured() -> set[str]:
         if not f.is_file():
             continue
         try:
-            data = json.loads(f.read_text())
+            data = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             # A corrupt or half-written run must not stop discovery.
             continue

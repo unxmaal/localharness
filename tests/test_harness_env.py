@@ -10,6 +10,7 @@ The rule mirrors env.sh deliberately: free space, not "is this external", so it
 refuses this mini's 91%-full internal disk for the reason that actually matters
 and will not refuse the Studio's.
 """
+import sys
 import os
 
 import pytest
@@ -50,6 +51,10 @@ def test_a_candidate_without_room_is_skipped(tmp_path):
     assert got is None
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="models macOS TCC: chmod 000 does not remove read access on "
+           "Windows, where the equivalent is an ACL")
 def test_an_unreadable_candidate_is_skipped(tmp_path):
     """macOS TCC: a volume can stat fine, report free space and appear in
     /Volumes while listing it raises. mlx_lm then hangs forever inside
@@ -88,7 +93,7 @@ def test_an_explicit_offline_setting_is_not_overridden(tmp_path):
 def test_the_shipped_candidates_match_the_ones_env_sh_searches():
     """Two lists that disagree would put the CLI's weights somewhere the
     services do not look, and the download would be silent."""
-    text = open("scripts/env.sh").read()
+    text = open("scripts/env.sh", encoding="utf-8").read()
     for cand in env.HF_CANDIDATES[:-1]:
         assert cand in text, f"{cand} is not in env.sh's search order"
     assert str(env.HF_MIN_FREE_GB) in text

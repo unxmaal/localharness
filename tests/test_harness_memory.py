@@ -10,9 +10,26 @@ Nothing in this repo checked a model's size against available memory, on a
 machine whose whole design constraint is 32 GB of unified memory. The eval
 suite measured peak memory AFTER the fact and reported it in a column.
 """
+import os
+import sys
+
 import pytest
 
 from harness import memory
+
+
+def _link(target, link):
+    """Symlink where the OS allows one, hardlink where it does not.
+
+    The HuggingFace cache symlinks blobs into snapshots on macOS. An
+    unprivileged Windows process cannot create a symlink at all (WinError
+    1314) and huggingface_hub falls back to copies or hardlinks there, so
+    the dedup that matters on Windows is by file index. Either way the blob
+    must be counted once, which is what this exercises."""
+    try:
+        link.symlink_to(target)
+    except OSError:
+        os.link(target, link)
 
 
 def test_a_model_that_fits_is_allowed():
@@ -42,10 +59,21 @@ def test_headroom_is_reserved_for_the_rest_of_the_system():
 
 
 def test_the_ceiling_is_read_from_the_machine_not_hardcoded():
-    """This runs on a 32 GB mini today and a 96 GB Studio later."""
+    """This runs on a 32 GB mini today, a 96 GB Studio later, and a 12 GB
+    discrete card in the next room.
+
+    The universal invariant is that the budget never exceeds what the
+    accelerator can hold. Only UNIFIED memory takes a fraction of it: there
+    the GPU is handed a working set out of the same pool as everything else,
+    so the ceiling is strictly below the RAM figure. On a discrete card the
+    VRAM total IS the wall and the ceiling equals it -- what the desktop is
+    already holding comes off via available_gb instead."""
     total = memory.total_gb()
     assert total > 1
-    assert memory.ceiling_gb() < total, "the GPU working set is not all of RAM"
+    ceiling = memory.ceiling_gb()
+    assert ceiling <= total, "the budget cannot exceed what the machine holds"
+    if memory.detect().kind == "unified":
+        assert ceiling < total, "the GPU working set is not all of RAM"
 
 
 def test_available_memory_is_measured():
@@ -85,7 +113,7 @@ def test_hardlinked_and_symlinked_blobs_are_counted_once(tmp_path):
     snap.mkdir(parents=True)
     real = blobs / "deadbeef"
     real.write_bytes(b"x" * (4 * 1024 ** 2))
-    (snap / "model.safetensors").symlink_to(real)
+    _link(real, snap / "model.safetensors")
     assert memory.size_gb(str(d)) == pytest.approx(4 / 1024, rel=0.05)
 
 
@@ -131,3 +159,41 @@ def test_no_quantisation_still_costs_the_full_size(tmp_path, monkeypatch):
     monkeypatch.setattr(memory, "size_gb", lambda path: 32.0)
     _, why = memory.check_model("x/model", reserve_gb=0.0)
     assert "32.0" in why
+
+
+# ---- discrete GPUs --------------------------------------------------------
+# Added for the CUDA machine. The Mac budgets a FRACTION of system RAM because
+# memory is unified. A discrete card is a hard wall, and the system RAM behind
+# it is irrelevant to what the GPU can hold: 61.6 GB of RAM behind a 12 GB 4070
+# must not read as 46 GB of budget.
+
+
+def test_a_discrete_gpu_budgets_vram_not_system_ram():
+    acc = memory.Accelerator(kind="discrete", total_gb=12.0, available_gb=10.5)
+    assert memory.ceiling_for(acc) == pytest.approx(12.0)
+
+
+def test_a_unified_machine_still_budgets_a_fraction_of_ram():
+    """Unchanged Mac behaviour: Metal hands out well under the RAM figure."""
+    acc = memory.Accelerator(kind="unified", total_gb=32.0, available_gb=25.0)
+    assert memory.ceiling_for(acc) == pytest.approx(32.0 * memory.GPU_FRACTION)
+    assert memory.ceiling_for(acc) < 32.0
+
+
+def test_the_system_reserve_is_smaller_on_a_discrete_card():
+    """DEFAULT_RESERVE_GB is 6 GB for a Mac where WindowServer, Docker and a
+    browser sit in the SAME pool as the weights. VRAM hosts none of that --
+    measured 1.2 GiB in use on this idle 4070 desktop. Reserving 6 of 12 GB
+    would refuse models that fit comfortably."""
+    discrete = memory.reserve_for(memory.Accelerator("discrete", 12.0, 10.5))
+    unified = memory.reserve_for(memory.Accelerator("unified", 32.0, 25.0))
+    assert discrete < unified
+    assert unified == memory.DEFAULT_RESERVE_GB
+
+
+def test_the_accelerator_is_detected_on_this_machine():
+    """Runs on the mini today and the CUDA box in the next room."""
+    acc = memory.detect()
+    assert acc.kind in ("unified", "discrete")
+    assert acc.total_gb > 1, "no accelerator memory was detected"
+    assert 0 < acc.available_gb <= acc.total_gb

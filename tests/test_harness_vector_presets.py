@@ -6,11 +6,12 @@ from pathlib import Path
 import pytest
 
 from evals.run import TRACE_PREFIXES, kind_of, modality_of
+from harness.checks import render
 from harness import vector
 
 # The ink check shells out to rsvg-convert. Without the guard these fail on a
 # machine that simply does not have it, which reads as a code defect.
-needs_rsvg = pytest.mark.skipif(shutil.which("rsvg-convert") is None,
+needs_rsvg = pytest.mark.skipif(render.rasterizer_path() is None,
                                 reason="needs rsvg-convert (brew install librsvg)")
 from harness.vector import TRACE_PRESETS, VectorError, trace
 

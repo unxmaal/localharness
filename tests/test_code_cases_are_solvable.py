@@ -36,7 +36,7 @@ def test_a_reference_solution_exists(case):
 
 @pytest.mark.parametrize("case", code_cases, ids=lambda c: c.id)
 def test_the_reference_solution_passes_every_check(case):
-    source = (REFERENCE / f"{case.id}.py").read_text()
+    source = (REFERENCE / f"{case.id}.py").read_text(encoding="utf-8")
     r = code.check(source, case.assertions["checks"])
     assert r.ok, f"{case.id}: {r.reason}"
 

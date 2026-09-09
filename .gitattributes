@@ -1,0 +1,15 @@
+# LF in the working tree on every platform, not just where git happens to
+# check out that way.
+#
+# With core.autocrlf=true a Windows checkout gets CRLF, and shellcheck then
+# reports SC1017 "Literal carriage return" on every line of every script, so
+# `make lint` fails before it has checked anything. The commits were already
+# LF; this makes the checkout match them.
+* text=auto eol=lf
+
+# Not text. Never touch the bytes.
+*.png binary
+*.jpg binary
+*.mp4 binary
+*.wav binary
+*.safetensors binary

@@ -73,7 +73,7 @@ def test_the_artifact_is_kept_on_the_serving_machine_too(spy, tmp_path):
     the file is what makes a bad result inspectable afterwards."""
     mcp_server.svg("a gear")
     written = list(tmp_path.glob("svg-*.svg"))
-    assert written and written[0].read_text().startswith("<svg")
+    assert written and written[0].read_text(encoding="utf-8").startswith("<svg")
 
 
 def test_web_and_code_are_the_same_shape(spy):

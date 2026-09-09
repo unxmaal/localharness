@@ -676,7 +676,7 @@ def _run_dir(tmp_path, name, receipt, summary):
     d = tmp_path / name
     d.mkdir(parents=True)
     (d / "results.json").write_text(json.dumps(
-        {"receipt": receipt, "summary": summary}))
+        {"receipt": receipt, "summary": summary}), encoding="utf-8")
     return d / "results.json"
 
 
@@ -721,7 +721,7 @@ def test_a_run_with_no_receipt_cannot_be_compared(tmp_path, capsys):
     from evals.run import compare_runs
     d = tmp_path / "old"
     d.mkdir()
-    (d / "results.json").write_text(json.dumps({"summary": {}}))
+    (d / "results.json").write_text(json.dumps({"summary": {}}), encoding="utf-8")
     b = _run_dir(tmp_path, "new", RECEIPT, {})
     assert compare_runs([str(d / "results.json"), str(b)]) == 1
     assert "receipt" in (capsys.readouterr().out).lower()

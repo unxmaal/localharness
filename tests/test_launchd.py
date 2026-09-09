@@ -8,6 +8,7 @@ about which port they used.
 """
 import plistlib
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,13 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 GEN = REPO / "scripts" / "launchd.sh"
 SERVICES = ("gateway", "mlx", "tts", "mcp")
+
+#: launchd IS macOS. There is no Windows equivalent to generate plists for, and
+#: Windows service supervision (Task Scheduler) is not implemented -- so these
+#: skip rather than fail, which keeps "not built yet" distinct from "broken".
+pytestmark = pytest.mark.skipif(
+    sys.platform != "darwin",
+    reason="launchd is macOS-only; Windows service supervision is unimplemented")
 
 
 @pytest.fixture(scope="module")
@@ -92,7 +100,7 @@ def test_generate_is_idempotent(tmp_path):
 def test_install_is_a_separate_step_from_generate():
     """Writing into ~/Library/LaunchAgents and loading jobs is not something
     `generate` should do as a side effect."""
-    text = GEN.read_text()
+    text = GEN.read_text(encoding="utf-8")
     assert "install)" in text and "generate)" in text
     assert "uninstall)" in text, "anything that loads jobs must unload them"
 
@@ -101,7 +109,7 @@ def test_install_checks_the_weights_volume_is_readable_first():
     """macOS TCC blocks a launchd agent from reading /Volumes even though the
     volume stats fine, and mlx_lm turns that into a silent hang. Installing
     units that will wedge on first use is worse than refusing."""
-    text = GEN.read_text()
+    text = GEN.read_text(encoding="utf-8")
     assert "Full Disk Access" in text
     assert "preflight" in text.lower() or "readable" in text.lower()
 
@@ -110,7 +118,7 @@ def test_the_preflight_runs_in_the_launchd_domain_not_the_shell():
     """Checking readability from the installing terminal proves nothing: that
     terminal already has the access the agent lacks. It has to be tested from
     inside launchd."""
-    text = GEN.read_text()
+    text = GEN.read_text(encoding="utf-8")
     assert "launchctl" in text and ("probe" in text.lower() or "preflight" in text.lower())
 
 

@@ -16,12 +16,22 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
 
 # 160GB because MiniMax-H3's checkpoint alone is 134 GiB.
 HF_MIN_FREE_GB = 160
-HF_CANDIDATES = ("/Volumes/Models/hf", "/Volumes/T7/hf",
-                 str(Path.home() / ".cache" / "huggingface"))
+
+# /Volumes is macOS. A Windows machine names its drives and there is no
+# portable guess for which one holds the weights, so the default there is the
+# one location that always exists -- point HF_ROOT at a fast drive instead.
+# env.sh carries the same two lists; test_the_shipped_candidates_match_the_ones
+# _env_sh_searches fails if they drift apart.
+if sys.platform == "win32":
+    HF_CANDIDATES = (str(Path.home() / ".cache" / "huggingface"),)
+else:
+    HF_CANDIDATES = ("/Volumes/Models/hf", "/Volumes/T7/hf",
+                     str(Path.home() / ".cache" / "huggingface"))
 
 
 def _anchor(path: str) -> Path | None:
@@ -45,9 +55,37 @@ def free_gb(path: str) -> int:
         return 0
 
 
+def _writable(anchor: Path) -> bool:
+    """Whether a directory can actually be written to.
+
+    `os.access(W_OK)` reflects only the read-only ATTRIBUTE on Windows: it
+    answered True for the drive root, which a standard user cannot write to,
+    while an actual write raised PermissionError. That matters here because an
+    unmounted candidate walks up to the root -- `/Volumes/Models/hf` with
+    nothing mounted anchors at `/`, and on macOS the check holds only because
+    `/` genuinely is not user-writable. Windows had no such backstop, so every
+    bogus candidate resolved to the drive root and was accepted.
+
+    The probe is created and removed. That is not the "litter empty
+    directories" this module refuses to do: nothing survives the call.
+    """
+    if os.name != "nt":
+        return os.access(anchor, os.W_OK)
+    probe = anchor / f".localharness-write-probe-{os.getpid()}"
+    try:
+        probe.touch()
+    except OSError:
+        return False
+    try:
+        probe.unlink()
+    except OSError:
+        pass
+    return True
+
+
 def usable(path: str, min_free_gb: int = HF_MIN_FREE_GB) -> bool:
     anchor = _anchor(path)
-    if anchor is None or not os.access(anchor, os.W_OK):
+    if anchor is None or not _writable(anchor):
         return False
     if free_gb(path) < min_free_gb:
         return False

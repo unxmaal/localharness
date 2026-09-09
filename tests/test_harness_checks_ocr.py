@@ -8,6 +8,8 @@ legible can still be ordered.
 
 Apple's Vision framework, which ships with macOS. No model download, no server.
 """
+import sys
+
 import pytest
 
 from harness.checks import ocr
@@ -18,9 +20,18 @@ def render(path, text, size=(480, 200)):
     from PIL import Image, ImageDraw, ImageFont
     im = Image.new("RGB", size, (255, 255, 255))
     d = ImageDraw.Draw(im)
-    try:
-        font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", 96)
-    except OSError:  # pragma: no cover - fallback for a stripped system
+    # A real typeface on whichever machine this is. load_default() is a small
+    # bitmap font that OCR reads badly, so falling straight to it would measure
+    # the fixture rather than the check.
+    font = None
+    for candidate in ("/System/Library/Fonts/Supplemental/Arial.ttf",
+                      "C:/Windows/Fonts/arial.ttf"):
+        try:
+            font = ImageFont.truetype(candidate, 96)
+            break
+        except OSError:
+            continue
+    if font is None:  # pragma: no cover - fallback for a stripped system
         font = ImageFont.load_default()
     d.text((20, 40), text, fill=(0, 0, 0), font=font)
     im.save(path)
@@ -128,3 +139,41 @@ def test_internal_punctuation_still_counts(tmp_path):
 def test_a_genuinely_wrong_word_is_still_wrong(tmp_path):
     r = ocr.check(render(tmp_path / "a.png", "OPEM"), expect="OPEN", max_cer=0.0)
     assert not r.ok
+
+
+# ---- per-OS alternates ----------------------------------------------------
+
+
+def test_the_backend_is_chosen_by_what_the_machine_has():
+    """One lane, two implementations. Apple's Vision on macOS and
+    Windows.Media.Ocr on Windows -- both ship with the OS, neither needs a
+    download or a server, and which one runs is not a decision any caller
+    should be making."""
+    name = ocr.available_backend()
+    assert name in ocr.BACKENDS
+    if sys.platform == "darwin":
+        assert name == "vision"
+    if sys.platform == "win32":
+        assert name == "windows"
+
+
+def test_an_unmeasurable_lane_warns_rather_than_failing(tmp_path, monkeypatch):
+    """A check that cannot RUN is not a render that failed.
+
+    Reporting it as a failure blames the generator for a missing dependency,
+    and the score sheet then carries a defeat that never happened. This is the
+    distinction `adherence` already draws, and the one the repo draws when it
+    refuses to fetch a weight nothing can measure.
+    """
+    monkeypatch.setattr(ocr, "available_backend", lambda: None)
+    r = ocr.check(render(tmp_path / "a.png", "OPEN"), expect="OPEN")
+    assert r.ok, r.reason
+    assert any("not measured" in w for w in r.warnings), r.warnings
+
+
+def test_an_unmeasured_lane_publishes_no_metric(tmp_path, monkeypatch):
+    """A cer of 0 would rank as a perfect render and a cer of 1 as a total
+    failure. Neither happened, so neither number belongs in the table."""
+    monkeypatch.setattr(ocr, "available_backend", lambda: None)
+    r = ocr.check(render(tmp_path / "a.png", "OPEN"), expect="OPEN")
+    assert "cer" not in r.metrics

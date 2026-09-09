@@ -50,7 +50,7 @@ def test_the_chosen_root_is_remembered(tmp_path, state):
     a = tmp_path / "a"
     a.mkdir()
     run_env_raw(candidates=str(a), state=state)
-    assert Path(state).read_text().strip() == str(a)
+    assert Path(state).read_text(encoding="utf-8").strip() == str(a)
 
 
 def test_an_explicit_hf_root_is_never_blocked(tmp_path, state):
@@ -59,7 +59,7 @@ def test_an_explicit_hf_root_is_never_blocked(tmp_path, state):
     on every deliberate override."""
     a = tmp_path / "elsewhere"
     a.mkdir()
-    Path(state).write_text(str(tmp_path / "recorded") + "\n")
+    Path(state).write_text(str(tmp_path / "recorded") + "\n", encoding="utf-8")
     proc = run_env_raw(hf_root=str(a), state=state)
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
@@ -74,7 +74,7 @@ def test_falling_back_to_a_different_root_is_fatal(tmp_path, state):
     the directory being missing, and a deleted tmp dir reproduces neither."""
     b = tmp_path / "fallback"
     b.mkdir()
-    Path(state).write_text(str(tmp_path / "primary") + "\n")
+    Path(state).write_text(str(tmp_path / "primary") + "\n", encoding="utf-8")
     proc = run_env_raw(candidates=str(b), state=state)
     assert proc.returncode != 0, proc.stdout + proc.stderr
     msg = proc.stdout + proc.stderr
@@ -84,7 +84,7 @@ def test_falling_back_to_a_different_root_is_fatal(tmp_path, state):
 def test_the_fallback_refusal_says_how_to_override(tmp_path, state):
     b = tmp_path / "b"
     b.mkdir()
-    Path(state).write_text(str(tmp_path / "a") + "\n")
+    Path(state).write_text(str(tmp_path / "a") + "\n", encoding="utf-8")
     proc = run_env_raw(candidates=str(b), state=state)
     assert "HF_ALLOW_MOVE" in (proc.stdout + proc.stderr)
 
@@ -94,7 +94,7 @@ def test_the_refusal_says_the_old_root_is_missing_and_what_to_check(tmp_path, st
     so beats reporting a cache path that means nothing on its own."""
     b = tmp_path / "b"
     b.mkdir()
-    Path(state).write_text(str(tmp_path / "gone") + "\n")
+    Path(state).write_text(str(tmp_path / "gone") + "\n", encoding="utf-8")
 
     proc = run_env_raw(candidates=str(b), state=state)
     out = proc.stdout + proc.stderr
@@ -105,7 +105,7 @@ def test_the_refusal_says_the_old_root_is_missing_and_what_to_check(tmp_path, st
 def test_an_explicit_move_is_allowed(tmp_path, state):
     b = tmp_path / "b"
     b.mkdir()
-    Path(state).write_text(str(tmp_path / "a") + "\n")
+    Path(state).write_text(str(tmp_path / "a") + "\n", encoding="utf-8")
     proc = run_env_raw(candidates=str(b), allow_move="1", state=state)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert str(b) in proc.stdout + proc.stderr

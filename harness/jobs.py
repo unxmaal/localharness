@@ -31,6 +31,10 @@ class Job:
     #: What kind of work this is ("image", "video", "svg"...). Carried so a
     #: caller stuck behind something can be told what it is stuck behind.
     kind: str
+    # perf_counter throughout, not monotonic: `monotonic` is GetTickCount64 on
+    # Windows and quantises to 15.6ms, so a 0.1s job reported 0.09s. These are
+    # durations shown to a caller, and one clock is used for all of them so the
+    # deadline arithmetic in wait() stays on the same epoch.
     state: str = "queued"          # queued | running | done | failed
     result: object = None
     error: str = ""
@@ -52,7 +56,7 @@ class Job:
         that includes someone else's job."""
         if self.started is None:
             return 0.0
-        return (self.finished or time.monotonic()) - self.started
+        return (self.finished or time.perf_counter()) - self.started
 
 
 class Queue:
@@ -104,13 +108,13 @@ class Queue:
     def wait(self, job_id: str, timeout: float = 300.0) -> Job | None:
         """Block until the job settles. None on timeout, so a caller that is
         willing to wait ten seconds is not committed to forty minutes."""
-        deadline = time.monotonic() + timeout
+        deadline = time.perf_counter() + timeout
         with self._done:
             while True:
                 job = self._jobs.get(job_id)
                 if job is not None and job.state in ("done", "failed"):
                     return job
-                remaining = deadline - time.monotonic()
+                remaining = deadline - time.perf_counter()
                 if remaining <= 0:
                     return None
                 self._done.wait(remaining)
@@ -138,7 +142,7 @@ class Queue:
                     return
                 job = self._jobs[job_id]
                 job.state = "running"
-                job.started = time.monotonic()
+                job.started = time.perf_counter()
                 job.ahead = 0
                 if job_id in self._order:
                     self._order.remove(job_id)
@@ -155,7 +159,7 @@ class Queue:
                 job.state = outcome
                 job.result = value
                 job.error = error
-                job.finished = time.monotonic()
+                job.finished = time.perf_counter()
                 self._running = None
                 self._done.notify_all()
 

@@ -146,7 +146,7 @@ def load_sources(path: Path | None = None) -> list[Source]:
     """Sources from config, falling back to the seeded defaults."""
     path = path or config_path()
     try:
-        raw = json.loads(Path(path).read_text())
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return list(DEFAULT_SOURCES)
     out = []
@@ -162,13 +162,13 @@ def save_sources(sources: list[Source], path: Path | None = None) -> Path:
     path = Path(path or config_path())
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"sources": [asdict(s) for s in sources]},
-                               indent=2))
+                               indent=2), encoding="utf-8")
     return path
 
 
 def _state(path: Path | None = None) -> dict:
     try:
-        return json.loads(Path(path or state_path()).read_text())
+        return json.loads(Path(path or state_path()).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 
@@ -179,7 +179,7 @@ def record_fetch(name: str, when: float | None = None,
     s = _state(p)
     s.setdefault("fetched", {})[name] = when if when is not None else time.time()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(s, indent=2))
+    p.write_text(json.dumps(s, indent=2), encoding="utf-8")
 
 
 def last_fetched(name: str, path: Path | None = None) -> float | None:
@@ -431,10 +431,10 @@ def read(source: Source, cache_dir: Path | None = None,
     cache_dir.mkdir(parents=True, exist_ok=True)
     cached = cache_dir / f"{re.sub(r'[^A-Za-z0-9_-]', '_', source.name)}.xml"
     if cached.exists() and (time.time() - cached.stat().st_mtime) < ttl_hours * 3600:
-        return parse(cached.read_text())
+        return parse(cached.read_text(encoding="utf-8"))
     text = fetcher(source.url)
     entries = parse(text)          # parse before caching, never cache a block page
-    cached.write_text(text)
+    cached.write_text(text, encoding="utf-8")
     record_fetch(source.name)
     return entries
 
@@ -479,7 +479,7 @@ def installed_version(package: str, pins: Path | None = None) -> str:
     path = pins or (Path(__file__).resolve().parent.parent
                     / "scripts" / "versions.sh")
     try:
-        text = Path(path).read_text()
+        text = Path(path).read_text(encoding="utf-8")
     except OSError:
         return ""
     m = re.search(rf'^[A-Z_]+_PIN="{re.escape(package)}(?:\[[^\]]*\])?=='

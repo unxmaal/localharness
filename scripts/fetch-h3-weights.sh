@@ -17,7 +17,7 @@ DEST="${H3_MODEL_DIR:-/Volumes/Models/MiniMax-H3}"
 mkdir -p "$DEST"
 
 # ~134 GiB needs headroom; refuse rather than fill the volume.
-AVAIL_GB=$(df -g "$DEST" | awk 'NR==2 {print $4}')
+AVAIL_GB=$(df -Pk "$DEST" | awk 'NR==2 {print int($4 / 1048576)}')
 if [ "$AVAIL_GB" -lt 160 ]; then
   echo "FATAL: only ${AVAIL_GB}GB free at $DEST, need ~160GB headroom for 134GiB." >&2
   exit 1

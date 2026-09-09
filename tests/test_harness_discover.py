@@ -28,7 +28,7 @@ def test_gateway_aliases_are_read_from_the_config(tmp_path):
         "  - model_name: local-mid\n"
         "    litellm_params: {model: openai/x}\n"
         "  - model_name: q3-4b\n"
-        "    litellm_params: {model: openai/y}\n")
+        "    litellm_params: {model: openai/y}\n", encoding="utf-8")
     names = {c.name for c in discover.gateway_aliases(tmp_path / "config.yaml")}
     assert names == {"local-mid", "q3-4b"}
 
@@ -68,7 +68,7 @@ def test_measured_names_come_from_the_run_receipts(tmp_path, monkeypatch):
     run.mkdir(parents=True)
     (run / "results.json").write_text(json.dumps({
         "receipt": {"modality": "svg"},
-        "summary": {"local-large": {"total": 3}, "trace/mflux/x": {"total": 3}}}))
+        "summary": {"local-large": {"total": 3}, "trace/mflux/x": {"total": 3}}}), encoding="utf-8")
     monkeypatch.setattr(discover.paths, "runs", lambda: tmp_path / "runs")
     assert discover.measured() == {"local-large", "trace/mflux/x"}
 
@@ -76,7 +76,7 @@ def test_measured_names_come_from_the_run_receipts(tmp_path, monkeypatch):
 def test_a_corrupt_results_file_does_not_stop_discovery(tmp_path, monkeypatch):
     run = tmp_path / "runs" / "bad"
     run.mkdir(parents=True)
-    (run / "results.json").write_text("{not json")
+    (run / "results.json").write_text("{not json", encoding="utf-8")
     monkeypatch.setattr(discover.paths, "runs", lambda: tmp_path / "runs")
     assert discover.measured() == set()
 
@@ -105,11 +105,11 @@ def test_receipts_are_found_at_any_depth(tmp_path, monkeypatch):
     deep = tmp_path / "runs" / "legacy" / "batch" / "ev-extract"
     deep.mkdir(parents=True)
     (deep / "results.json").write_text(json.dumps(
-        {"summary": {"parakeet-tdt-0.6b-v2": {"total": 40}}}))
+        {"summary": {"parakeet-tdt-0.6b-v2": {"total": 40}}}), encoding="utf-8")
     shallow = tmp_path / "runs" / "recent"
     shallow.mkdir(parents=True)
     (shallow / "results.json").write_text(json.dumps(
-        {"summary": {"local-large": {"total": 3}}}))
+        {"summary": {"local-large": {"total": 3}}}), encoding="utf-8")
     monkeypatch.setattr(discover.paths, "runs", lambda: tmp_path / "runs")
     assert discover.measured() == {"parakeet-tdt-0.6b-v2", "local-large"}
 
@@ -308,7 +308,7 @@ def test_an_implemented_primitive_is_a_candidate_not_a_gap(tmp_path):
     'no runner yet' or it reports the repo as it was months ago."""
     for n in ("mflux-generate-controlnet", "mflux-upscale-controlnet",
               "mflux-generate-depth"):
-        (tmp_path / n).write_text("")
+        (tmp_path / n).write_text("", encoding="utf-8")
     got = {c.name: c for c in discover.image_engines(tmp_path)}
     assert "--candidates controlnet:" in got["mflux-generate-controlnet"].how
     assert "no runner yet" not in got["mflux-upscale-controlnet"].how

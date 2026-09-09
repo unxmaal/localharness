@@ -123,7 +123,7 @@ class Client:
         payload = None
         if cached.exists():
             try:
-                payload = json.loads(cached.read_text())
+                payload = json.loads(cached.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 payload = None
         if payload is not None:
@@ -148,7 +148,8 @@ class Client:
                 raise
             raise GitHubError(f"{api_path}: {exc}") from exc
         cached.write_text(json.dumps({"fetched": time.time(),
-                                      "path": api_path, "data": data}))
+                                      "path": api_path, "data": data}),
+                          encoding="utf-8")
         return data
 
     # ---- the endpoints this project uses -----------------------------------

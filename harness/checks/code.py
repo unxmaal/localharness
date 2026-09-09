@@ -94,7 +94,7 @@ def check(source: str, checks: list[str],
     program = body + "\n" + _HARNESS.format(checks=checks)
     with tempfile.TemporaryDirectory() as scratch:
         script = Path(scratch) / "candidate.py"
-        script.write_text(program)
+        script.write_text(program, encoding="utf-8")
         try:
             proc = subprocess.run(
                 [sys.executable, str(script)], capture_output=True, text=True,

@@ -31,7 +31,7 @@ def test_there_is_one_place_that_records_the_versions():
 @pytest.mark.parametrize("script", PINNED)
 def test_no_service_installs_an_unpinned_package(script):
     """`--with litellm[proxy]` takes whatever released this morning."""
-    text = (REPO / script).read_text()
+    text = (REPO / script).read_text(encoding="utf-8")
     for spec in re.findall(r"--with\s+'?([^'\s\\]+)'?", text):
         if spec.startswith("$") or spec.startswith("\"$"):
             continue  # a variable, resolved from versions.sh
@@ -41,7 +41,7 @@ def test_no_service_installs_an_unpinned_package(script):
 
 @pytest.mark.parametrize("script", PINNED)
 def test_every_pinned_service_sources_the_shared_versions(script):
-    assert "versions.sh" in (REPO / script).read_text(), (
+    assert "versions.sh" in (REPO / script).read_text(encoding="utf-8"), (
         f"{script} should read its pins from scripts/versions.sh")
 
 
@@ -50,7 +50,7 @@ def test_pins_are_exact_unless_the_range_is_argued_for():
     apart used the same software. One range is deliberate -- setuptools, where
     any 70-80 works and nothing above 81 does -- so the rule is that a range
     must carry a comment saying it is on purpose, immediately above it."""
-    lines = VERSIONS.read_text().splitlines()
+    lines = VERSIONS.read_text(encoding="utf-8").splitlines()
     pins = [(i, m.group(1)) for i, line in enumerate(lines)
             if (m := re.match(r'^[A-Z_]+_PIN="([^"]+)"', line))]
     assert pins, "versions.sh defines no pins"
@@ -65,7 +65,7 @@ def test_pins_are_exact_unless_the_range_is_argued_for():
 
 def test_the_versions_file_says_how_to_bump_a_pin():
     """A pin nobody knows how to move becomes a pin nobody moves."""
-    text = VERSIONS.read_text().lower()
+    text = VERSIONS.read_text(encoding="utf-8").lower()
     assert "smoke" in text, "bumping a pin should point at the smoke test"
 
 
@@ -73,4 +73,4 @@ def test_setuptools_stays_below_81():
     """webrtcvad still imports pkg_resources, uv does not install setuptools
     into venvs on 3.12+, and setuptools >= 81 removed pkg_resources outright.
     Unpinned resolves to 84.x and mlx_audio dies on import."""
-    assert re.search(r"setuptools[^\"']*<81", VERSIONS.read_text())
+    assert re.search(r"setuptools[^\"']*<81", VERSIONS.read_text(encoding="utf-8"))

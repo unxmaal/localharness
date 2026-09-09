@@ -46,7 +46,7 @@ uv pip install --quiet --python "$DEST/.venv/bin/python" -r "$DEST/requirements-
 
 # Both halves are needed: OmniSVG ships the decoder weights only, on top of a
 # stock Qwen2.5-VL it does not redistribute.
-AVAIL_GB=$(df -g "${HF_HOME:-$HOME/.cache/huggingface}" | awk 'NR==2 {print $4}')
+AVAIL_GB=$(df -Pk "${HF_HOME:-$HOME/.cache/huggingface}" | awk 'NR==2 {print int($4 / 1048576)}')
 if [ "$AVAIL_GB" -lt 40 ]; then
   echo "FATAL: only ${AVAIL_GB}GB free at ${HF_HOME:-$HOME/.cache/huggingface}, need ~40GB." >&2
   exit 1

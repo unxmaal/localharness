@@ -26,7 +26,9 @@ staying put, and reserves headroom for everything that is not us.
 from __future__ import annotations
 
 import os
+import platform
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 #: Fraction of physical RAM Metal will hand out as a working set. Apple does
@@ -40,8 +42,47 @@ GPU_FRACTION = 0.75
 #: Docker alone held 7.2 GB.
 DEFAULT_RESERVE_GB = 6.0
 
+#: The same reserve, for a DISCRETE card. Nothing else lives in VRAM: no
+#: WindowServer, no Docker VM, no browser heap -- those sit in system RAM,
+#: which the model never touches. Measured 1.2 GiB in use on this idle 4070
+#: desktop, so 2 GB covers the compositor plus a browser's own GPU surfaces.
+#: Carrying the 6 GB unified figure across would reserve half of a 12 GB card
+#: and refuse models that fit with room to spare.
+DISCRETE_RESERVE_GB = 2.0
 
-def total_gb() -> float:
+
+@dataclass(frozen=True)
+class Accelerator:
+    """What the weights actually load into.
+
+    The distinction is not cosmetic. On unified memory the budget is a
+    FRACTION of system RAM, because the GPU is handed a working set out of the
+    same pool as everything else. A discrete card is a hard wall: the 61.6 GB
+    of system RAM behind a 12 GB 4070 is irrelevant to what the GPU can hold,
+    and computing a budget from it produces 46 GB of imaginary headroom.
+    """
+    kind: str                #: "unified" (Apple Silicon) or "discrete" (NVIDIA)
+    total_gb: float
+    available_gb: float
+    name: str = ""
+
+
+def ceiling_for(acc: Accelerator) -> float:
+    """The working set to budget against, given what we are loading into."""
+    if acc.kind == "discrete":
+        # The card is the wall; there is no fraction to take. What the desktop
+        # is already holding comes off via available_gb, not off the ceiling.
+        return acc.total_gb
+    return acc.total_gb * GPU_FRACTION
+
+
+def reserve_for(acc: Accelerator) -> float:
+    """Headroom for everything that is not the model. See the constants."""
+    return DISCRETE_RESERVE_GB if acc.kind == "discrete" else DEFAULT_RESERVE_GB
+
+
+def _unified_total_gb() -> float:
+    """Physical RAM, on a machine where that is what the GPU draws from."""
     try:
         out = subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True,
                              text=True, timeout=5).stdout.strip()
@@ -50,9 +91,62 @@ def total_gb() -> float:
         return 0.0
 
 
+def _discrete() -> Accelerator | None:
+    """The first NVIDIA card, or None if there is not one.
+
+    `nvidia-smi` ships with the driver itself, so this needs no CUDA toolkit
+    and no Python binding -- which matters because the guard has to work
+    before any of that is installed.
+    """
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,memory.total,memory.free",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if not out:
+        return None
+    # First card only. Multi-GPU would need the eval suite to say which one it
+    # ran on, and nothing here does yet; claiming the sum would be a lie.
+    parts = [p.strip() for p in out.splitlines()[0].split(",")]
+    if len(parts) < 3:
+        return None
+    try:
+        total_mib, free_mib = float(parts[1]), float(parts[2])
+    except ValueError:
+        return None
+    if total_mib <= 0:
+        return None
+    return Accelerator("discrete", total_mib / 1024, free_mib / 1024, parts[0])
+
+
+def detect() -> Accelerator:
+    """What this machine loads weights into. Unified is checked first, so a
+    Mac answers without ever shelling out to a tool it does not have."""
+    total = _unified_total_gb()
+    if total > 0:
+        return Accelerator("unified", total, available_gb() or total,
+                           platform.machine())
+    found = _discrete()
+    return found if found else Accelerator("unified", 0.0, 0.0)
+
+
+def total_gb() -> float:
+    total = _unified_total_gb()
+    if total > 0:
+        return total
+    found = _discrete()
+    return found.total_gb if found else 0.0
+
+
 def ceiling_gb() -> float:
     """The working set to budget against, not the RAM figure on the box."""
-    return total_gb() * GPU_FRACTION
+    total = _unified_total_gb()
+    if total > 0:
+        return total * GPU_FRACTION
+    found = _discrete()
+    return found.total_gb if found else 0.0
 
 
 def available_gb() -> float:
@@ -61,7 +155,10 @@ def available_gb() -> float:
         out = subprocess.run(["vm_stat"], capture_output=True, text=True,
                              timeout=5).stdout
     except (OSError, subprocess.SubprocessError):
-        return total_gb()
+        # No vm_stat means this is not a Mac. A discrete card reports its own
+        # free memory directly, which is a better answer than total_gb().
+        found = _discrete()
+        return found.available_gb if found else total_gb()
     page = 16384
     counts = {}
     for line in out.splitlines():

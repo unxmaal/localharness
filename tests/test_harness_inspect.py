@@ -8,7 +8,7 @@ def tree(tmp_path, files: dict):
     for rel, text in files.items():
         p = tmp_path / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(text)
+        p.write_text(text, encoding="utf-8")
     return tmp_path
 
 
@@ -157,7 +157,7 @@ def test_only_a_bounded_number_of_weights_is_sized(tmp_path):
         d = tmp_path / "a__b"
         d.mkdir(exist_ok=True)
         (d / "m.py").write_text("\n".join(
-            f'load("org/model-{i:03d}")' for i in range(60)))
+            f'load("org/model-{i:03d}")' for i in range(60)), encoding="utf-8")
         return "2026-01-01T00:00:00+00:00"
 
     def sizer(model_id, cache=None):
@@ -295,9 +295,9 @@ def test_both_the_smallest_and_the_headline_get_sized(tmp_path):
     def run(argv, cwd=None, timeout=180.0):
         d = tmp_path / "a__thing"
         d.mkdir(exist_ok=True)
-        (d / "README.md").write_text('see "org/the-headline-model-with-long-name"')
+        (d / "README.md").write_text('see "org/the-headline-model-with-long-name"', encoding="utf-8")
         (d / "m.py").write_text("\n".join(
-            f'load("org/helper-{i:02d}")' for i in range(30)))
+            f'load("org/helper-{i:02d}")' for i in range(30)), encoding="utf-8")
         return "2026-01-01T00:00:00+00:00"
 
     def sizer(model_id, cache=None):
@@ -347,7 +347,7 @@ def test_the_lane_travels_with_the_weight(tmp_path):
     def run(argv, cwd=None, timeout=180.0):
         d = tmp_path / "a__b"
         d.mkdir(exist_ok=True)
-        (d / "m.py").write_text('load("org/ears")')
+        (d / "m.py").write_text('load("org/ears")', encoding="utf-8")
         return "2026-01-01T00:00:00+00:00"
 
     got = ins.inspect("a/b", tmp_path, meta={"size": 10}, run=run,
@@ -390,3 +390,33 @@ def test_poetry_dev_groups_are_optional_too(tmp_path):
 def test_a_dev_requirements_file_is_not_a_runtime_requirement():
     """It is read to decide whether a thing can RUN here."""
     assert "requirements-dev.txt" not in ins.DEPENDENCY_FILES
+
+
+# ---- capacity gating ------------------------------------------------------
+# The ceiling was a constant describing ONE machine. Two Windows boxes differ
+# from each other as much as either differs from the mini, so what a candidate
+# is measured against has to be read off the machine running the sweep.
+
+
+def test_the_ceiling_is_read_off_the_accelerator_not_a_constant():
+    from harness import memory
+    discrete = memory.Accelerator("discrete", 12.0, 10.5)
+    big_card = memory.Accelerator("discrete", 24.0, 22.0)
+    assert ins.ceiling_bytes(discrete) < ins.ceiling_bytes(big_card)
+    assert ins.ceiling_bytes(discrete) <= 12 * ins.GIB
+
+
+def test_a_weight_over_the_cards_vram_is_too_big_for_that_card():
+    """Qwen3-30B-A3B at 4-bit is ~17 GB: it fits a 24 GB card and does not fit
+    a 12 GB one. The same candidate, two verdicts, two machines."""
+    from harness import memory
+    small = ins.decide(ins.Fit(repo="x/y", weights=["w"], smallest=17 * ins.GIB,
+                                 entry_points=["run.py"]),
+                        ceiling=ins.ceiling_bytes(
+                            memory.Accelerator("discrete", 12.0, 10.5)))
+    roomy = ins.decide(ins.Fit(repo="x/y", weights=["w"], smallest=17 * ins.GIB,
+                                 entry_points=["run.py"]),
+                        ceiling=ins.ceiling_bytes(
+                            memory.Accelerator("discrete", 24.0, 22.0)))
+    assert small.verdict == "too-big"
+    assert roomy.verdict != "too-big"

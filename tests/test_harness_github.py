@@ -82,7 +82,7 @@ def test_a_corrupt_cache_file_is_refetched_not_fatal(tmp_path):
     r = runner({"repos/a/b": {"stargazers_count": 3}})
     c = github.Client(cache=tmp_path, runner=r)
     c.repo("a/b")
-    next(tmp_path.glob("*.json")).write_text("{not json")
+    next(tmp_path.glob("*.json")).write_text("{not json", encoding="utf-8")
     assert github.Client(cache=tmp_path, runner=r).repo("a/b") == \
         {"stargazers_count": 3}
 
@@ -119,7 +119,7 @@ def test_the_cache_records_when_it_was_fetched(tmp_path):
     """The store is a record of facts, so each one carries its date."""
     c = github.Client(cache=tmp_path, runner=runner({}))
     c.get("one")
-    payload = json.loads(next(tmp_path.glob("*.json")).read_text())
+    payload = json.loads(next(tmp_path.glob("*.json")).read_text(encoding="utf-8"))
     assert abs(payload["fetched"] - time.time()) < 60
     assert payload["path"] == "one"
 
@@ -160,10 +160,10 @@ def test_a_star_list_older_than_its_ttl_is_refetched(tmp_path):
     c = github.Client(cache=tmp_path, runner=r)
     c.starred("u")
     stale = next(tmp_path.glob("*.json"))
-    payload = _json.loads(stale.read_text())
+    payload = _json.loads(stale.read_text(encoding="utf-8"))
     payload["fetched"] = time.time() - (
         github.TTL_BY_ENDPOINT_HOURS["/starred"] + 1) * 3600
-    stale.write_text(_json.dumps(payload))
+    stale.write_text(_json.dumps(payload), encoding="utf-8")
     fresh = github.Client(cache=tmp_path, runner=r)
     fresh.starred("u")
     assert fresh.spent == 1
@@ -177,9 +177,9 @@ def test_contributors_that_old_are_still_served_from_cache(tmp_path):
     c = github.Client(cache=tmp_path, runner=r)
     c.contributors("a/b")
     p = next(tmp_path.glob("*.json"))
-    payload = _json.loads(p.read_text())
+    payload = _json.loads(p.read_text(encoding="utf-8"))
     payload["fetched"] = time.time() - 8 * 24 * 3600     # a week old
-    p.write_text(_json.dumps(payload))
+    p.write_text(_json.dumps(payload), encoding="utf-8")
     again = github.Client(cache=tmp_path, runner=r)
     again.contributors("a/b")
     assert again.spent == 0

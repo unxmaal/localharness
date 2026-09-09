@@ -44,7 +44,7 @@ class Rubric:
 def load(name: str = DEFAULT_RUBRIC, directory: Path | None = None) -> Rubric:
     path = Path(directory or RUBRIC_DIR) / f"{name}.yaml"
     try:
-        raw = yaml.safe_load(path.read_text()) or {}
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except OSError as exc:
         known = sorted(p.stem for p in Path(directory or RUBRIC_DIR).glob("*.yaml"))
         raise JudgeError(f"no rubric {name!r} at {path} "

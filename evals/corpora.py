@@ -52,7 +52,7 @@ def librispeech(root: str | Path = DEFAULT_ROOT, limit: int | None = None,
 
     found: list[Utterance] = []
     for trans in sorted(root.rglob("*.trans.txt")):
-        for line in trans.read_text().splitlines():
+        for line in trans.read_text(encoding="utf-8").splitlines():
             uid, _, text = line.partition(" ")
             if not uid or not text:
                 continue
@@ -97,7 +97,7 @@ def write_cases(utterances: list[Utterance], out: str | Path = DEFAULT_OUT,
         if max_wer is not None:
             body["assert"] = {"max_wer": max_wer}
         path = out / f"{u.uid}.yaml"
-        path.write_text(yaml.safe_dump(body, sort_keys=False, width=200))
+        path.write_text(yaml.safe_dump(body, sort_keys=False, width=200), encoding="utf-8")
         written.append(path)
     return written
 

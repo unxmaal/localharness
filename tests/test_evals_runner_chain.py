@@ -136,9 +136,12 @@ def test_a_stage_that_does_not_declare_a_scale_must_preserve_the_size(tmp_path,
 def test_a_stage_can_receive_the_prompt():
     """generate-controlnet conditions on an image AND a prompt, so a stage
     that only sees the previous file cannot express it."""
-    argv = STAGES["controlnet"](Path("/in.png"), Path("/out.png"),
+    src = Path("/in.png")
+    argv = STAGES["controlnet"](src, Path("/out.png"),
                                 {"width": 512, "height": 512}, "a red fox")
-    assert "--controlnet-image-path" in argv and "/in.png" in argv
+    # str(src), not the literal: a Path renders with backslashes on Windows,
+    # and what is asserted is that the INPUT was passed, not the separator.
+    assert "--controlnet-image-path" in argv and str(src) in argv
     assert "--prompt" in argv and "a red fox" in argv
 
 

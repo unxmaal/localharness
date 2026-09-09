@@ -202,7 +202,7 @@ def _text(a, modality: str, suffix: str, checker) -> int:
     body = completion.artifact(raw, modality)
     out = Path(a.output or default_output(modality, suffix))
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(body)
+    out.write_text(body, encoding="utf-8")
 
     checked = checker(raw)
     for w in checked.warnings:
@@ -252,7 +252,7 @@ def _svg_by_tracing(a, preset: str = "illustration") -> int:
         return err(f"{png} was generated but could not be vectorized: {exc}")
 
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(svg)
+    out.write_text(svg, encoding="utf-8")
     checked = svg_check.check(svg)
     for w in checked.warnings:
         print(f"warning: {w}", file=sys.stderr)
@@ -283,7 +283,7 @@ def _answer(a, modality: str, context: str = "") -> int:
     if getattr(a, "output", None):
         out = Path(a.output)
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(body if body.endswith("\n") else body + "\n")
+        out.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
         return say(path=out, body=body, human=str(out))
     return say(body=body, human=body)
 
@@ -297,7 +297,7 @@ def cmd_extract(a) -> int:
         source = Path(a.file)
         if not source.exists():
             return err(f"no such file: {source}")
-        context = source.read_text()
+        context = source.read_text(encoding="utf-8")
     else:
         # A terminal with nobody piping into it reads as an empty string, which
         # is the case below rather than a hang.
