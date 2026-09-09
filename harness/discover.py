@@ -483,7 +483,9 @@ def how_to_measure(lane: str, machine=None) -> str:
         override = _HOW_BY_RUNTIME.get(runtime, {}).get(lane)
         if override:
             return override
-    return _HOW.get(lane, f"--modality {lane} --candidates <no engine known>")
+    # An unrecognised lane still carries the id: a proposal exists to name
+    # a candidate, and a placeholder where the id goes is not a lead.
+    return _HOW.get(lane, "--candidates {id}")
 
 
 def _hf_models(query: str, limit: int) -> list[dict]:

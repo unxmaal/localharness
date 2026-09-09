@@ -184,3 +184,15 @@ def test_every_lane_says_something_about_how_to_measure_it():
     for lane in LANES + ("svg",):
         for m in (APPLE, CARD, CPU_ONLY):
             assert discover.how_to_measure(lane, m), f"{lane} on {m.describe()}"
+
+
+def test_a_lane_with_no_table_entry_still_carries_the_id():
+    """Found in a live sweep. Every proposal from the recap feed, whose lane is
+    "all", came back as `--candidates <no engine known>`: the id it exists to
+    offer had been replaced by a placeholder. A command that names no candidate
+    is not a lead, and this is the fallback, so it is what an unrecognised lane
+    gets."""
+    for m in (APPLE, CARD, CPU_ONLY):
+        how = discover.how_to_measure("all", m).format(id="owner/model")
+        assert "owner/model" in how, how
+        assert "<" not in how, how
