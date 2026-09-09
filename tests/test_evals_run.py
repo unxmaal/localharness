@@ -800,3 +800,22 @@ def test_screen_does_not_mutate_the_case_it_was_given():
     c = Case(id="a", modality="image", prompt="p", params={"width": 1024})
     screen_cases([c])
     assert c.params["width"] == 1024
+
+
+def test_omnisvg_is_not_an_llm_for_the_purpose_of_case_methods():
+    # It emits move/line/curve/arc/close and nothing else, so a case that needs
+    # a <text> element is measuring the method, not the candidate. Caught live:
+    # chart-bars failed omnisvg for "missing required content: <text".
+    from evals.run import method_of
+    assert method_of("omnisvg:4B") == "omnisvg"
+    assert method_of("local-large") == "llm"
+    assert method_of("trace:mflux:flux2-klein-4b") == "trace"
+
+
+def test_a_text_only_case_is_withheld_from_omnisvg():
+    from evals.run import cases_for
+    cases = [Case(id="chart", modality="svg", prompt="a bar chart",
+                  methods=("llm",)),
+             Case(id="gear", modality="svg", prompt="a gear")]
+    assert [c.id for c in cases_for("omnisvg:4B", cases)] == ["gear"]
+    assert [c.id for c in cases_for("local-large", cases)] == ["chart", "gear"]

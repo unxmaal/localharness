@@ -289,6 +289,26 @@ def build_runner(candidate: str, gateway: str, outdir: Path | None,
     return ProcessRunner(engine, outdir, adherence=adherence)
 
 
+def method_of(candidate: str) -> str:
+    """Which METHOD this candidate is, for cases that declare what they can
+    fairly test.
+
+    Not a taxonomy of models. The only distinction any case has needed is
+    whether a method can put a <text> element in the document at all, and two
+    of the three here cannot: `trace` turns glyphs into outlines, and OmniSVG's
+    tokenizer emits move/line/curve/arc/close and nothing else. Calling
+    everything that is not `trace` an LLM handed chart-bars to OmniSVG, which
+    then failed it for missing <text> -- measuring the method, which is the
+    exact thing Case.methods exists to prevent.
+    """
+    kind = kind_of(candidate)
+    if kind in TRACE_PREFIXES:
+        return TRACE_PREFIX
+    if kind == OMNISVG_PREFIX:
+        return OMNISVG_PREFIX
+    return "llm"
+
+
 def cases_for(candidate: str, cases: list[Case]) -> list[Case]:
     """The cases this candidate can actually run."""
     modality = modality_of(candidate)
@@ -296,8 +316,8 @@ def cases_for(candidate: str, cases: list[Case]) -> list[Case]:
         return [c for c in cases if c.modality in TEXT_MODALITIES]
     picked = [c for c in cases if c.modality == modality]
     # A case may declare which methods it can fairly test. See Case.methods.
-    method = TRACE_PREFIX if kind_of(candidate) in TRACE_PREFIXES else "llm"
-    picked = [c for c in picked if not c.methods or method in c.methods]
+    picked = [c for c in picked
+              if not c.methods or method_of(candidate) in c.methods]
     language = language_of(candidate)
     if language is not None:
         picked = [c for c in picked if c.language == language]
