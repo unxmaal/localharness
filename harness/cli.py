@@ -920,6 +920,46 @@ def cmd_voices(a) -> int:
     return 0
 
 
+def cmd_sensitivity(a) -> int:
+    """Vary a constant and say whether anything downstream moved."""
+    from harness import probes, sensitivity
+
+    if getattr(a, "list", False):
+        if a.json:
+            print(json.dumps({"probes": sorted(probes.PROBES),
+                              "uncovered": probes.UNCOVERED}, indent=2))
+            return 0
+        print("\nprobes:")
+        for name in sorted(probes.PROBES):
+            print(f"  {name}")
+        print("\nnot covered, and why:")
+        for name, why in sorted(probes.UNCOVERED.items()):
+            print(f"  {name}\n      {why}")
+        return 0
+
+    unknown = [n for n in a.names if n not in probes.PROBES]
+    if unknown:
+        return err(f"unknown probe(s) {', '.join(unknown)}; "
+                   f"known: {', '.join(sorted(probes.PROBES))}")
+    try:
+        found = probes.run(a.names or None)
+    except Exception as exc:  # noqa: BLE001
+        return err(f"{exc}")
+    if a.json:
+        print(json.dumps({"coverage": probes.coverage(),
+                          "findings": [
+                              {"name": f.name, "default": f.default,
+                               "verdict": f.verdict, "band": list(f.band),
+                               "readings": [vars(r) for r in f.readings]}
+                              for f in found]}, indent=2, default=str))
+        return 0
+    cover = probes.coverage()
+    print(f"\nagainst cached data only: a crowd of {cover['crowd']} and "
+          f"{cover['clones']} clones on disk\n")
+    print(sensitivity.report(found))
+    return 0
+
+
 def cmd_hear(a) -> int:
     clip = Path(a.file) if a.file else Path(a.output or
                                             default_output("clip", ".wav"))
@@ -1079,6 +1119,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="how many to fetch. One at a time by default: this "
                         "machine holds one working set")
     f.set_defaults(func=cmd_fetch)
+
+    sens = sub.add_parser(
+        "sensitivity",
+        help="does a constant change anything? Issue #98")
+    sens.add_argument("names", nargs="*",
+                      help="probes to run (default: all). "
+                           "`--list` names them")
+    sens.add_argument("--list", action="store_true",
+                      help="name the probes and the constants nothing covers")
+    sens.set_defaults(func=cmd_sensitivity)
 
     h = sub.add_parser("hear", help="transcribe a clip, or record and transcribe")
     h.add_argument("file", nargs="?", help="an existing audio file")

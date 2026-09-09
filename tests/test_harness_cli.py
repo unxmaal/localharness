@@ -712,3 +712,15 @@ def test_a_judge_failure_on_one_candidate_does_not_stop_the_rest(monkeypatch,
     monkeypatch.setattr(judge, "score", fake_score)
     cli._judge_fits(fits, store_path=tmp_path / "d.db")
     assert len(seen) == 1
+
+
+def test_sensitivity_lists_its_probes_and_what_it_cannot_cover(capsys):
+    assert cli.main(["sensitivity", "--list"]) == 0
+    out = capsys.readouterr().out
+    assert "min_shared" in out
+    assert "not covered" in out
+
+
+def test_an_unknown_probe_is_named_rather_than_swept(capsys):
+    assert cli.main(["sensitivity", "no_such_knob"]) != 0
+    assert "no_such_knob" in capsys.readouterr().err
