@@ -269,7 +269,17 @@ def record_argv(out: str | Path, seconds: float) -> list[str]:
     children PATH=/usr/bin:/bin:/usr/sbin:/sbin, so a bare `rec` is not found
     when Claude Code was not started from a login shell.
     """
-    rec = shutil.which("rec") or "/opt/homebrew/bin/rec"
+    rec = shutil.which("rec")
+    if rec is None and sys.platform == "darwin":
+        # The GUI-spawned PATH case above: sox is there, the PATH is not.
+        rec = "/opt/homebrew/bin/rec"
+    if rec is None:
+        # No sox, and no reason to assume a Homebrew prefix on a machine that
+        # has no Homebrew. Saying so beats a FileNotFoundError naming a path
+        # from another operating system.
+        raise AudioError(
+            "recording needs sox's `rec` on PATH and this machine has none. "
+            "`lh hear --file CLIP` transcribes audio that already exists.")
     return [rec, "-q", "-r", "16000", "-c", "1", "-b", "16",
             str(out), "trim", "0", str(seconds)]
 
