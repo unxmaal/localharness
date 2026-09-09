@@ -103,26 +103,50 @@ DEFAULT_SOURCES = [
            note="image lane engine; moved from filipstrand, the old URL 301s"),
 ]
 
-# Terms that make a result relevant to THIS machine. An Apple-Silicon-only
-# project reading general feeds gets mostly CUDA noise, so relevance is scored
-# rather than left for a human to spot. Issue #45.
-APPLE_TERMS = re.compile(
-    r"\b(mlx|apple[ -]silicon|metal|macos|mac|coreml|core ?ml|unified memory|"
-    r"m[1-9](?:\s*(?:pro|max|ultra))?|neural engine|ane)\b", re.I)
-# Terms that mean it will not run here at all.
-FOREIGN_TERMS = re.compile(
-    r"\b(cuda|nvidia|rtx|tensorrt|rocm|vram|3090|4090|5090|a100|h100|xformers)\b",
-    re.I)
+# The vocabulary each runtime is talked about in, and which one is foreign
+# depends on the machine asking. A post about a technique names the hardware it
+# was measured on, which is what makes this readable at all. Issue #45.
+#
+# This was one Apple list and one list of "terms that mean it will not run here"
+# that included vram -- a word the machine with the card uses about itself. A
+# CUDA technique therefore scored negative on the machine it was written for,
+# sorted last, and was cut by the limit before anyone saw it.
+RUNTIME_TERMS = {
+    "mlx": re.compile(
+        r"\b(mlx|apple[ -]silicon|metal|macos|mac|coreml|core ?ml|"
+        r"unified memory|m[1-9](?:\s*(?:pro|max|ultra))?|neural engine|ane)\b",
+        re.I),
+    "cuda": re.compile(
+        r"\b(cuda|nvidia|rtx|tensorrt|vram|geforce|"
+        r"[1-5]0[789]0|a100|h100|xformers)\b", re.I),
+    "rocm": re.compile(r"\b(rocm|radeon|hip|instinct|mi[0-9]{3}x?)\b", re.I),
+}
+
+#: The Apple vocabulary under its old name, for callers that predate the rest.
+APPLE_TERMS = RUNTIME_TERMS["mlx"]
 
 
-def relevance(text: str) -> int:
-    """How much this looks like it runs on Apple Silicon.
+def _mentions(pattern: re.Pattern, text: str) -> int:
+    """Distinct terms, so one word repeated six times is one mention."""
+    return len(set(m.group(0).lower() for m in pattern.finditer(text)))
+
+
+def relevance(text: str, machine=None) -> int:
+    """How much this looks like it runs on THIS machine.
 
     Positive is a reason to look; negative means it names hardware this machine
-    does not have. Zero is the honest default for text that says neither.
+    does not have. Zero is the honest default for text that says neither, and a
+    technique that names no hardware is not thereby a worse technique.
     """
-    return (2 * len(set(m.group(0).lower() for m in APPLE_TERMS.finditer(text)))
-            - len(set(m.group(0).lower() for m in FOREIGN_TERMS.finditer(text))))
+    if machine is None:
+        from harness import machine as _machine
+        machine = _machine.detect()
+    mine = sum(_mentions(RUNTIME_TERMS[r], text)
+               for r in machine.runtimes if r in RUNTIME_TERMS)
+    foreign = sum(_mentions(pattern, text)
+                  for runtime, pattern in RUNTIME_TERMS.items()
+                  if runtime not in machine.runtimes)
+    return 2 * mine - foreign
 
 
 def config_path() -> Path:

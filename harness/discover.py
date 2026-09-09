@@ -77,7 +77,7 @@ class Capability:
     present: bool = True
     #: Installed but unusable, and why. Distinct from `present` and `measured`.
     blocked: str = ""
-    #: How much this looks like it runs on Apple Silicon. See feeds.relevance().
+    #: How much this looks like it runs on THIS machine. See feeds.relevance().
     relevance: int = 0
     note: str = ""
 
@@ -702,14 +702,19 @@ def from_feeds(sources=None, reader=None, verify=True,
                 suppressed += 1
                 drop("settled", repo)
                 continue
-            tag = f" [apple silicon +{p.relevance}]" if p.relevance > 0 else ""
+            # The label says which machine the score is for. It read
+            # "apple silicon" everywhere, so a box with a card was told
+            # its own best proposals suited hardware it does not have.
+            tag = f" [runs here +{p.relevance}]" if p.relevance > 0 else ""
             out.append(Capability(
                 "proposal", repo, src.lane, p.url or src.url,
                 how_to_measure(src.lane).format(id=repo),
                 measured=False,
                 note=f"{p.why[:120]}{tag} [{src.name} {p.when}]"))
             out[-1].relevance = p.relevance
-    # Most relevant to this machine first. A CUDA-only proposal is noise here
+    # Most relevant to THIS machine first. A proposal naming hardware this
+    # machine does not have is noise, and which hardware that is depends on
+    # the machine asking: see feeds.relevance().
     # and was previously ranked identically to a native-MLX one.
     out.sort(key=lambda c: -getattr(c, "relevance", 0))
     out = out[:limit]
