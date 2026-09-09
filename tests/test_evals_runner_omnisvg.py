@@ -55,8 +55,17 @@ def checkout(tmp_path, body):
         interpreter.symlink_to(sys.executable)
     except OSError:
         # An unprivileged Windows process cannot create a symlink (WinError
-        # 1314). A hardlink is the same inode and answers the same question.
+        # 1314). A hardlink is the same file and answers the same question.
         os.link(sys.executable, interpreter)
+    # A symlinked interpreter resolves back to the venv it came from and reads
+    # that venv's pyvenv.cfg. A hardlink has no path back, so python looks
+    # beside itself, finds nothing and exits 106 "No pyvenv.cfg file". Writing
+    # one makes the fake checkout a real venv under either kind of link.
+    (root / ".venv" / "pyvenv.cfg").write_text(
+        f"""home = {sys.base_prefix}
+include-system-site-packages = false
+""",
+        encoding="utf-8")
     return root
 
 
