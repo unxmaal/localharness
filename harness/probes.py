@@ -233,15 +233,9 @@ def probe_size_limit() -> Finding:
 
 
 def probe_dead_days() -> Finding:
-    def run(v):
-        # inspect() calls decide(fit, ceiling=...) and never plumbs dead_days
-        # through, so the only way in is the default argument decide() captured
-        # at definition time.
-        with bound(insp, "decide", dead_days=v):
-            return verdicts()
-
     return measure("DEAD_DAYS", insp.DEAD_DAYS, [180, 365, 730, 1095, 3650],
-                   run, note="when a repo counts as abandoned")
+                   lambda v: verdicts(dead_days=v),
+                   note="when a repo counts as abandoned")
 
 
 def probe_clone_kb_cap() -> Finding:
