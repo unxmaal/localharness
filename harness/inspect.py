@@ -98,9 +98,20 @@ HF_ID = re.compile(r"""['"]([A-Za-z0-9][\w.-]{1,38}/[\w.-]{1,80})['"]""")
 SKIP_DIRS = {"node_modules", "venv", "__pycache__", "dist", "build",
              "target", "Pods", "test", "tests", "examples", "docs"}
 #: Where a HARD dependency is declared, as opposed to merely mentioned.
+#: requirements-dev.txt is deliberately absent: a dev requirement is not a
+#: runtime one, and this list is read to decide whether a thing can RUN here.
 DEPENDENCY_FILES = {"requirements.txt", "pyproject.toml", "setup.py",
                     "setup.cfg", "environment.yml", "Pipfile", "poetry.lock",
-                    "requirements-dev.txt", "Package.resolved"}
+                    "Package.resolved"}
+#: Sections of a dependency file that are NOT runtime requirements. Reading a
+#: pyproject wholesale called starvector CUDA-dependent partly on `deepspeed`,
+#: which sits in `[project.optional-dependencies] train` -- a TRAINING extra.
+#: The verdict happened to be right for another reason, which is worse than
+#: being wrong: it hid the defect. Third time this rule has needed narrowing,
+#: after largest-vs-smallest weight and mention-vs-dependency.
+OPTIONAL_SECTIONS = re.compile(
+    r"^\s*\[(project\.optional-dependencies|tool\.poetry\.(group|dev-dependencies)"
+    r"[^\]]*|options\.extras_require)\]", re.M)
 READ_SUFFIXES = {".py", ".toml", ".cfg", ".txt", ".json", ".yaml", ".yml",
                  ".swift", ".md", ".sh", ".rs", ".c", ".m", ".mm", ".h"}
 #: Owners that are infrastructure, not weights, so an id under them is noise.
@@ -189,11 +200,18 @@ def scan(tree: Path) -> dict:
             text = p.read_text(errors="ignore")
         except OSError:
             continue
-        hits = {m.group(0).lower() for m in CUDA_MARKERS.finditer(text)}
         if p.name in DEPENDENCY_FILES:
-            required |= hits
+            # Everything from the first optional/extras section onward is not
+            # a runtime requirement.
+            cut = OPTIONAL_SECTIONS.search(text)
+            runtime, extra = ((text[:cut.start()], text[cut.start():])
+                              if cut else (text, ""))
+            required |= {m.group(0).lower()
+                         for m in CUDA_MARKERS.finditer(runtime)}
+            mentioned |= {m.group(0).lower()
+                          for m in CUDA_MARKERS.finditer(extra)}
         else:
-            mentioned |= hits
+            mentioned |= {m.group(0).lower() for m in CUDA_MARKERS.finditer(text)}
         mlx = mlx or bool(MLX_MARKERS.search(text))
         mps = mps or bool(MPS_MARKERS.search(text))
         rel = p.relative_to(tree).as_posix()

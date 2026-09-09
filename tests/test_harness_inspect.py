@@ -354,3 +354,39 @@ def test_the_lane_travels_with_the_weight(tmp_path):
                       facts=lambda m, cache=None: {"size": 2 * ins.GIB,
                                                    "lane": "stt"})
     assert got.lanes["org/ears"] == "stt"
+
+
+# ---- a training extra is not a runtime requirement -------------------------
+
+def test_an_optional_extra_is_not_a_runtime_dependency(tmp_path):
+    """Reading a pyproject wholesale called starvector CUDA-dependent partly on
+    `deepspeed`, which sits in `[project.optional-dependencies] train`. The
+    verdict was right for another reason, which is worse than being wrong: it
+    hid the defect."""
+    t = tree(tmp_path, {"pyproject.toml": (
+        '[project]\ndependencies = ["torch", "numpy"]\n\n'
+        '[project.optional-dependencies]\ntrain = ["deepspeed", "ninja"]\n')})
+    found = ins.scan(t)
+    assert found["cuda"] == []
+    assert "deepspeed" in found["cuda_mentioned"]
+
+
+def test_a_runtime_dependency_before_the_extras_still_disqualifies(tmp_path):
+    """starvector really does pin flash_attn==2.7.3 inside `dependencies`, so
+    the verdict stands -- for the right reason this time."""
+    t = tree(tmp_path, {"pyproject.toml": (
+        '[project]\ndependencies = ["torch", "flash_attn==2.7.3"]\n\n'
+        '[project.optional-dependencies]\ntrain = ["deepspeed"]\n')})
+    assert "flash_attn" in ins.scan(t)["cuda"]
+
+
+def test_poetry_dev_groups_are_optional_too(tmp_path):
+    t = tree(tmp_path, {"pyproject.toml": (
+        '[project]\ndependencies = ["torch"]\n\n'
+        '[tool.poetry.group.dev.dependencies]\ntriton = "*"\n')})
+    assert ins.scan(t)["cuda"] == []
+
+
+def test_a_dev_requirements_file_is_not_a_runtime_requirement():
+    """It is read to decide whether a thing can RUN here."""
+    assert "requirements-dev.txt" not in ins.DEPENDENCY_FILES
