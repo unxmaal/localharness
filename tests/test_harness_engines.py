@@ -176,6 +176,66 @@ def test_diffusers_needs_a_model():
         resolve("diffusers")
 
 
+# ---- diffusers-video (the video lane on a machine with an NVIDIA card) ----
+#
+# h3 is Metal shaders over a 134 GiB checkpoint and has no build that runs
+# here, so this lane is a different model as well as a different tool. WHICH
+# model is left to the eval: the engine takes any diffusers video repo id, the
+# same way the image one takes any text-to-image id.
+
+
+def test_diffusers_video_is_a_video_engine_producing_mp4():
+    eng = resolve("diffusers-video:Lightricks/LTX-Video")
+    assert eng.modality == "video"
+    assert eng.output_suffix == ".mp4"
+    assert "LTX-Video" in eng.name
+
+
+def test_diffusers_video_passes_the_model_prompt_and_output():
+    _, a = argv("diffusers-video:Lightricks/LTX-Video")
+    assert a[a.index("--model") + 1] == "Lightricks/LTX-Video"
+    assert a[a.index("--prompt") + 1] == "a red fox"
+    assert a[a.index("--output") + 1] == str(OUT)
+
+
+def test_diffusers_video_forwards_the_generation_params():
+    _, a = argv("diffusers-video:Lightricks/LTX-Video",
+                frames=25, steps=30, width=512, height=512, seed=7)
+    for flag, value in (("--frames", "25"), ("--steps", "30"),
+                        ("--width", "512"), ("--height", "512"),
+                        ("--seed", "7")):
+        assert a[a.index(flag) + 1] == value
+
+
+def test_diffusers_video_offloads_to_host_memory_by_default():
+    """A video model does not fit 12 GB resident. Offloading is what makes the
+    lane run at all here, so it is the default rather than a flag to remember."""
+    _, a = argv("diffusers-video:Lightricks/LTX-Video")
+    assert "--no-offload" not in a
+
+
+def test_diffusers_video_offload_can_be_turned_off_on_a_larger_card():
+    _, a = argv("diffusers-video:Lightricks/LTX-Video", offload=False)
+    assert "--no-offload" in a
+
+
+def test_the_video_generator_is_a_path_not_a_name(monkeypatch, tmp_path):
+    fake = tmp_path / "video-cuda.sh"
+    monkeypatch.setenv("VIDEO_CUDA_BIN", str(fake))
+    _, a = argv("diffusers-video:Lightricks/LTX-Video")
+    assert a[0] == str(fake)
+
+
+def test_diffusers_video_gets_the_long_timeout_a_video_needs():
+    """The image engine's 15 minutes is not enough; h3 allows six hours."""
+    assert resolve("diffusers-video:Lightricks/LTX-Video").timeout >= 3600
+
+
+def test_diffusers_video_needs_a_model():
+    with pytest.raises(ValueError):
+        resolve("diffusers-video")
+
+
 # ---- spec parsing ---------------------------------------------------------
 
 def test_unknown_engine_names_the_known_ones():
