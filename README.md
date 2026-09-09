@@ -167,12 +167,28 @@ exist. Qwen3-30B-A3B at 4-bit is too big for that card and fits a 24 GB one, the
 same candidate and two answers. Without a card the harness still runs and
 reports system RAM as its budget.
 
-Two things are still missing there, and both are gaps rather than decisions.
-Voice cloning: the Mac's default voice is cloned from a reference clip by
-Chatterbox, Kokoro has a fixed table of 54, and a request carrying a reference
-is refused rather than answered in a substitute voice. Service supervision:
-launchd is macOS and nothing replaces it, so the machine does not come back
-serving after a reboot.
+**The Windows box does not come back serving after a reboot, on purpose.** Its
+main job is games. `scripts/launchd.sh` installs units with RunAtLoad and
+KeepAlive because the mini exists to serve; `scripts/services.sh` registers
+nothing at all, so there is no scheduled task, no Run key and no startup
+shortcut to find later.
+
+```bash
+./scripts/services.sh start      # gateway, text, audio
+./scripts/services.sh stop       # and the card is free
+./scripts/services.sh status     # what is up, and what the card holds
+```
+
+The text server also gives the card back on its own after
+`$LLAMACPP_SLEEP_IDLE` seconds, which matters more than the stop verb: a
+session left running overnight is otherwise noticed as a frame rate rather than
+as a log line. Measured on the 4070, a request takes VRAM from 2462 to 3296 MiB
+and fifteen idle seconds return it to 2473.
+
+Voice cloning is the one lane still missing there. The Mac's default voice is
+cloned from a reference clip by Chatterbox, Kokoro has a fixed table of 54, and
+a request carrying a reference is refused rather than answered in a substitute
+voice.
 
 ---
 
