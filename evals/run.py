@@ -639,7 +639,8 @@ def report(summary: dict) -> None:
 
     arrows = {n: {"lower": "v", "higher": "^"}.get(direction_of(n), "-")
               for n in metric_names}
-    header = f"{'candidate':30} {'pass':>7} {'rate':>6} {'median':>8} {'peak':>9}"
+    header = (f"{'candidate':30} {'pass':>7} {'rate':>6} {'median':>8} "
+              f"{'first':>8} {'peak':>9}")
     for name in metric_names:
         header += f" {name + ' ' + arrows[name]:>9} {name + '.worst':>13}"
     print("\n" + "=" * len(header))
@@ -654,13 +655,20 @@ def report(summary: dict) -> None:
         peak = f"{peak_kb / 1024 / 1024:.1f}GiB" if peak_kb else "-"
         line = (f"{name:30} {s.get('passed', 0):>3}/{s.get('total', 0):<3} "
                 f"{s.get('pass_rate', 0):>6.0%} "
-                f"{s.get('median_s', 0):>7.2f}s {peak:>9}")
+                f"{s.get('median_s', 0):>7.2f}s "
+                f"{s.get('first_s', 0):>7.2f}s {peak:>9}")
         for metric in metric_names:
             value = (s.get("metrics") or {}).get(metric)
             worst = s.get("metrics_worst", {}).get(metric)
             line += (f" {value:>9.3f}" if value is not None else f" {'-':>9}")
             line += (f" {worst:>13.3f}" if worst is not None else f" {'-':>13}")
         print(line)
+
+    cold = [n for n, s2 in summary.items() if s2.get("first_is_cold")]
+    if cold:
+        print(f"\n`first` is the FIRST case, not a warm number. For {cold[0]} it "
+              f"is a cold start;\nfor the others the runtime was already up. A "
+              f"one-shot caller meets `first`.")
 
     if metric_names:
         low = [n for n in metric_names if direction_of(n) == "lower"]

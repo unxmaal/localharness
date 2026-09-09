@@ -96,3 +96,16 @@ def test_a_neutral_metric_is_not_a_verdict():
     the blank document. A difference in one is not better or worse."""
     row = {"difference": 0.2, "low": 0.1, "high": 0.3, "separable": True}
     assert compare.verdict(row, "svg_bytes") == "not ranked on"
+
+
+def test_the_absolute_rate_is_reported_with_its_sample(capsys, tmp_path):
+    """The same comparison over a different 300 clips moved the baseline 17%
+    while every ranking held. An absolute quoted without its sample travels
+    into prose as a property of the model. Issue #88."""
+    p = tmp_path / "results.json"
+    p.write_text(json.dumps({"rows": rows({"a": [(1, 10)] * 5,
+                                           "b": [(2, 10)] * 5})}))
+    compare.main([str(p), "--baseline", "a", "--resamples", "50"])
+    out = capsys.readouterr().out
+    assert "ON THIS SAMPLE" in out and "corpus " in out
+    assert "quote the difference" in out

@@ -19,6 +19,7 @@ averaging ratios weights a two-word clip like a forty-word one (RULE #186).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import random
 from pathlib import Path
@@ -127,9 +128,17 @@ def main(argv=None) -> int:
         print(json.dumps({"baseline": baseline, "metric": a.metric,
                           "cases": len(cases), "rows": rows}, indent=2))
         return 0
+    # THE ABSOLUTE RATE IS A SAMPLE STATISTIC, and it has been quoted as a
+    # property of the model. The same comparison over a different 300 clips
+    # moved the baseline 0.0162 -> 0.0190, a 17% shift, while every ranking
+    # held. Differences are paired over identical cases and survive; absolutes
+    # belong with the sample that produced them. Issue #88.
+    fingerprint = hashlib.sha1("".join(cases).encode()).hexdigest()[:8]
     print(f"\n{len(cases)} paired cases, {a.resamples} resamples, "
           f"metric {a.metric}")
-    print(f"baseline {baseline}: {rate(by, baseline, cases):.4f}\n")
+    print(f"baseline {baseline}: {rate(by, baseline, cases):.4f} "
+          f"ON THIS SAMPLE (corpus {fingerprint}, n={len(cases)})")
+    print("  quote the difference, not this number: it moves with the sample\n")
     for r in rows:
         print(f"  {r['candidate']:30.30s} {rate(by, r['candidate'], cases):.4f}"
               f"  {r['difference']:+.4f}  95% CI "

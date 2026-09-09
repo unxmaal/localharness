@@ -216,6 +216,30 @@ CONTROL = [
 ]
 
 
+def control_repeated(rubric: Rubric | None = None, *, runs: int = 3,
+                     gateway: str = "", complete=None) -> dict:
+    """Run the control several times and report the SPREAD, not one gap.
+
+    The judge samples and nothing pins a seed, so a single control run is one
+    draw from a distribution nobody characterised. Measured on the same rubric
+    and the same model: gap +4 in one run and +2 in the next, on identical
+    inputs. Near the separates/does-not boundary that verdict is a coin flip,
+    and it is the sentence that authorises every score this judge produces.
+    Issue #85.
+
+    Separates only if EVERY run separates. One pass out of three is not a pass.
+    """
+    got = [control(rubric, gateway=gateway, complete=complete)
+           for _ in range(max(1, runs))]
+    gaps = [g["gap"] for g in got]
+    return {"runs": len(got), "gaps": gaps, "gap_min": min(gaps),
+            "gap_max": max(gaps), "spread": max(gaps) - min(gaps),
+            "separates": all(g["separates"] for g in got),
+            "separated_in": sum(1 for g in got if g["separates"]),
+            "rubric": got[0]["rubric"], "model": got[0]["model"],
+            "rows": got[0]["rows"]}
+
+
 def control(rubric: Rubric | None = None, *, gateway: str = "",
             complete=None) -> dict:
     """Score known-good against known-bad and report whether they separate.

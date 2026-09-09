@@ -8,3 +8,6 @@ __pycache__/
 voice/__pycache__/
 tools/h3probe
 evals/cases/stt/
+
+# Working artifact, not a deliverable: the assumptions sweep
+assumptions.md

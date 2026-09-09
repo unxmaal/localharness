@@ -1,4 +1,4 @@
-version: 3
+version: 4
 name: novelty
 model: q3-4b
 scale: [1, 10]
@@ -10,9 +10,13 @@ question: >-
   worth spending measurement time on this one.
 
 what_scores_high:
-  - A COMPOSITION of parts that already exist, or a way of chaining two steps.
-    The two largest wins this project ever measured were both compositions of
-    existing tools rather than new models.
+  - >-
+      A COMPOSITION OF THINGS ALREADY INSTALLED HERE, or a way of chaining
+      steps that are already running. The two largest wins this project ever
+      measured were both of that kind, adding no dependency and downloading
+      nothing. Adding a NEW model or package as a second stage is NOT this. It
+      is a new dependency wearing the word composition, and it scores on its
+      own merits like anything else that has to be downloaded first.
   - Native Apple Silicon or MLX. This machine has no CUDA and never will, so
     something that runs natively here beats a better result on hardware we do
     not have.
