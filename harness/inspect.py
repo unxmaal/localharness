@@ -423,6 +423,7 @@ def _takes_cache(fn) -> bool:
 def inspect(repo: str, workdir: Path, *, meta: dict | None = None,
             sizer=None, facts=hf_facts, run=_run,
             ceiling: int | None = None,
+            dead_days: int = DEAD_DAYS,
             kb_cap: int = CLONE_KB_CAP) -> Fit:
     """Clone a candidate's source, read it, and say whether it can run here."""
     if sizer is not None:      # older callers and tests pass a size-only stub
@@ -475,4 +476,4 @@ def inspect(repo: str, workdir: Path, *, meta: dict | None = None,
             pass
     fit.largest = max(fit.weights.values(), default=0)
     fit.smallest = min(fit.weights.values(), default=0)
-    return decide(fit, ceiling=ceiling)
+    return decide(fit, ceiling=ceiling, dead_days=dead_days)

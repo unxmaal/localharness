@@ -392,6 +392,36 @@ def test_a_dev_requirements_file_is_not_a_runtime_requirement():
     assert "requirements-dev.txt" not in ins.DEPENDENCY_FILES
 
 
+def _clone_pushed(tmp_path, when: str):
+    """A fake checkout with one entry point, last touched at `when`."""
+    def run(argv, cwd=None, timeout=180.0):
+        tree = tmp_path / "a__b"
+        tree.mkdir(exist_ok=True)
+        (tree / "main.py").write_text("if __name__ == '__main__':\n    pass\n", encoding="utf-8")
+        return when
+    return run
+
+
+def test_inspect_passes_dead_days_through_to_decide(tmp_path):
+    """It accepted a ceiling override and not this one, so the abandonment
+    threshold was reachable only as decide()'s captured default and no caller
+    could vary it. Issue #103."""
+    run = _clone_pushed(tmp_path, "2024-01-01T00:00:00+00:00")
+    lenient = ins.inspect("a/b", tmp_path, meta={"size": 10}, run=run,
+                          sizer=lambda m: -1, dead_days=100_000)
+    assert lenient.verdict != "dead"
+
+    strict = ins.inspect("a/b", tmp_path, meta={"size": 10}, run=run,
+                         sizer=lambda m: -1, dead_days=1)
+    assert strict.verdict == "dead"
+
+
+def test_inspect_still_defaults_to_the_module_threshold(tmp_path):
+    run = _clone_pushed(tmp_path, "2019-01-01T00:00:00+00:00")
+    got = ins.inspect("a/b", tmp_path, meta={"size": 10}, run=run,
+                      sizer=lambda m: -1)
+    assert got.verdict == "dead"
+
 # ---- capacity gating ------------------------------------------------------
 # The ceiling was a constant describing ONE machine. Two Windows boxes differ
 # from each other as much as either differs from the mini, so what a candidate
