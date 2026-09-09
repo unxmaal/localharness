@@ -95,12 +95,11 @@ in place of `serve-mlx.sh`.
 
 Before you invest an afternoon:
 
-- **The generators are Apple Silicon.** mflux for images, h3 for video,
-  mlx_lm.server for text and mlx-audio for speech are all MLX and Metal, and
-  none of them runs anywhere else. There is no Linux path.
-- **The harness itself also runs on Windows.** The suite, the checks and the
-  eval runner work there; nothing that makes a picture, a video or a token
-  does. See "A second machine" below for what that is for.
+- **Half the lanes have no tool on Windows yet.** The harness, the checks and
+  the eval runner all run there. The generators do not: every one that ships is
+  MLX or Metal. Those gaps are being filled. See "A second
+  machine" below for which lane is where.
+- **There is no Linux path.**
 - **It needs disk.** The models this uses run 4 GB to 31 GB each.
 - **Video takes about 40 minutes a generation** on an M2 Pro with 32 GB. It
   works; it is not something you will use casually.
@@ -109,20 +108,38 @@ Before you invest an afternoon:
 
 ## A second machine
 
-A Windows box runs everything except the generators, card or no card. The
-gateway is LiteLLM, so any OpenAI-compatible server on that machine answers the
-text lanes, and the same cases then score against the same metrics on different
-hardware. `./scripts/serve-mlx.sh` is Apple Silicon and does not start there.
+**Every lane is meant to run on either machine, with a different tool on each.**
+What draws an image on Apple Silicon is not what will draw one on an NVIDIA
+card, and it is not meant to be. What has to match is that the lane has an
+implementation on both, that the implementation is tested there, and that the
+result says which one produced it. A lane that exists on one machine and not the
+other is unfinished.
 
-An NVIDIA card is what makes the numbers below mean anything. Without one the
-harness still runs, and reports system RAM as its budget.
+The checks work that way now. Text in a generated image is read by Apple's
+Vision on macOS and by Windows.Media.Ocr on Windows. HTML is rasterised by
+Chrome, or by Edge, which is Chromium and is already on every Windows install.
+Neither is named by the caller: each is found by asking the platform and the
+import, and a machine with neither warns and withholds the metric instead of
+failing the candidate.
 
-**Two of the checks needed a second implementation rather than a port.** Text in
-a generated image is read by Apple's Vision on macOS and by Windows.Media.Ocr on
-Windows. HTML is rasterised by Chrome, or by Edge, which is Chromium and is
-already on every Windows install. Neither is named by the caller: each is found
-by asking the platform and the import, and a machine with neither warns and
-withholds the metric instead of failing the candidate.
+The generators do not yet. This is where each lane stands:
+
+| lane | Apple Silicon | Windows and NVIDIA |
+|---|---|---|
+| web, code, extract | mlx_lm.server behind the gateway | any OpenAI-compatible server, no script yet |
+| image | mflux | not built |
+| video | h3 | not built |
+| tts | mlx-audio | not built |
+| stt | mlx-audio, mlx-whisper | not built |
+| svg | traced from an image, or a text model | follows image and text |
+| ocr check | Apple Vision | Windows.Media.Ocr |
+| html render | Chrome | Chrome or Edge |
+| svg rasterise | rsvg-convert | rsvg-convert |
+
+The gateway is LiteLLM, so an OpenAI-compatible server on the Windows box
+answers the text lanes today by editing `gateway/config.yaml`. There is no
+`serve-*.sh` for it yet, and `./scripts/serve-mlx.sh` is Apple Silicon and does
+not start there.
 
 **A result records what produced it.** `hw_model` identifies the GPU on Apple
 Silicon because it is the same part. On a PC it says nothing about it, so
@@ -134,11 +151,11 @@ to a score sheet, which is the one thing this suite exists to tell apart.
 fraction of system RAM. A discrete card is a wall, and the 61.6 GB of RAM behind
 a 12 GB 4070 is not budget: computing it that way produced 46 GB that does not
 exist. Qwen3-30B-A3B at 4-bit is too big for that card and fits a 24 GB one, the
-same candidate and two answers.
+same candidate and two answers. Without a card the harness still runs and
+reports system RAM as its budget.
 
-Not built there: service supervision, since launchd has no Windows counterpart,
-and any image or video generator. Those lanes report as unavailable, which is a
-different thing from a lane that ran and lost.
+Service supervision is the one thing that is not a lane and has no Windows
+counterpart: launchd is macOS, and nothing replaces it there yet.
 
 ---
 
