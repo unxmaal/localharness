@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+import shells
+
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "h3-weights-status.sh"
 
@@ -20,7 +22,7 @@ def run_status(dest, extra_env=None):
     env.pop("H3_DOWNLOAD_PIDFILE", None)
     if extra_env:
         env.update(extra_env)
-    p = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True,
+    p = subprocess.run([shells.BASH, str(SCRIPT)], capture_output=True, text=True,
                        env=env)
     return p.returncode, p.stdout
 
@@ -64,7 +66,7 @@ def test_live_downloader_reports_running(tmp_path):
     # pid, and the `kill -0` in the status script runs under MSYS bash, which
     # numbers processes differently -- so a live download read as stopped.
     proc = subprocess.Popen(
-        ["bash", "-c", f'echo $$ > "{pidfile.as_posix()}"; exec sleep 20'])
+        [shells.BASH, "-c", f'echo $$ > "{pidfile.as_posix()}"; exec sleep 20'])
     for _ in range(100):
         if pidfile.exists() and pidfile.read_text(encoding="utf-8").strip():
             break

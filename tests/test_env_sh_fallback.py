@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+import shells
+
 REPO = Path(__file__).resolve().parents[1]
 
 # ---- the drive that went away ---------------------------------------------
@@ -37,7 +39,8 @@ def run_env_raw(hf_root=None, candidates=None, allow_move=None,
     if state is not None:
         env["HF_STATE_FILE"] = state
     return subprocess.run(
-        ["bash", "-c", f'source "{REPO}/scripts/env.sh" && echo "HF_HOME=$HF_HOME"'],
+        [shells.BASH, "-c",
+         f'source "{REPO}/scripts/env.sh" && echo "HF_HOME=$HF_HOME"'],
         capture_output=True, text=True, env=env)
 
 

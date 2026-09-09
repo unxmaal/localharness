@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+import shells
+
 REPO = Path(__file__).resolve().parents[1]
 GEN = REPO / "scripts" / "launchd.sh"
 SERVICES = ("gateway", "mlx", "tts", "mcp")
@@ -29,7 +31,7 @@ pytestmark = pytest.mark.skipif(
 def plists(tmp_path_factory):
     """Generate the units into a scratch directory and parse them."""
     out = tmp_path_factory.mktemp("launchagents")
-    proc = subprocess.run(["bash", str(GEN), "generate", str(out)],
+    proc = subprocess.run([shells.BASH, str(GEN), "generate", str(out)],
                           capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
     return {p.stem: plistlib.loads(p.read_bytes()) for p in out.glob("*.plist")}
@@ -82,7 +84,7 @@ def test_labels_are_reverse_dns_and_distinct(plists):
 
 
 def test_the_script_refuses_an_unknown_subcommand():
-    proc = subprocess.run(["bash", str(GEN), "frobnicate"],
+    proc = subprocess.run([shells.BASH, str(GEN), "frobnicate"],
                           capture_output=True, text=True)
     assert proc.returncode != 0
     assert "generate" in proc.stdout + proc.stderr
@@ -91,7 +93,7 @@ def test_the_script_refuses_an_unknown_subcommand():
 def test_generate_is_idempotent(tmp_path):
     """Re-running must overwrite rather than accumulate or fail."""
     for _ in range(2):
-        proc = subprocess.run(["bash", str(GEN), "generate", str(tmp_path)],
+        proc = subprocess.run([shells.BASH, str(GEN), "generate", str(tmp_path)],
                               capture_output=True, text=True)
         assert proc.returncode == 0, proc.stderr
     assert len(list(tmp_path.glob("*.plist"))) == len(SERVICES)
@@ -134,7 +136,7 @@ def test_the_mcp_unit_can_find_lh(plists):
 def test_probe_is_available_without_installing_anything():
     """The TCC verdict is the whole question, and finding it out should not
     require committing to an install first."""
-    proc = subprocess.run(["bash", str(GEN), "probe"],
+    proc = subprocess.run([shells.BASH, str(GEN), "probe"],
                           capture_output=True, text=True)
     # Either verdict is fine here; what matters is that it ran and said so.
     assert "ok" in proc.stdout.lower() or "denied" in (proc.stdout + proc.stderr).lower()

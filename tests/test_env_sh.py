@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+import shells
+
 REPO = Path(__file__).resolve().parents[1]
 MOUNTED = Path("/Volumes/Models")
 
@@ -23,6 +25,9 @@ pytestmark = pytest.mark.skipif(
 
 def run_env(hf_root=None, candidates=None, shell="bash", min_free_gb=None):
     """Source env.sh in a clean shell; return (exit_code, HF_HOME, stderr)."""
+    exe = shells.resolve(shell)
+    if exe is None:
+        pytest.skip(f"no {shell} on this machine")
     env = {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"]}
     # Isolate the "where did we land last time" record. Without this, every
     # auto-pick test inherits the real one from $HOME and trips the guard
@@ -36,7 +41,7 @@ def run_env(hf_root=None, candidates=None, shell="bash", min_free_gb=None):
     if min_free_gb is not None:
         env["HF_MIN_FREE_GB"] = min_free_gb
     p = subprocess.run(
-        [shell, "-c", f'source "{REPO}/scripts/env.sh" && echo "HF_HOME=$HF_HOME"'],
+        [exe, "-c", f'source "{REPO}/scripts/env.sh" && echo "HF_HOME=$HF_HOME"'],
         capture_output=True, text=True, env=env)
     home = ""
     for line in p.stdout.splitlines():
@@ -135,7 +140,7 @@ def test_hf_home_is_exported_to_children(scratch):
     env = {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"],
            "HF_ROOT": str(scratch / "hf")}
     p = subprocess.run(
-        ["bash", "-c",
+        [shells.BASH, "-c",
          f'source "{REPO}/scripts/env.sh" && python3 -c '
          f'"import os; print(os.environ[\'HF_HOME\'])"'],
         capture_output=True, text=True, env=env)
