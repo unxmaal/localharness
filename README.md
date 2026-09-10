@@ -2,7 +2,7 @@
 
 [![check](https://github.com/unxmaal/localharness/actions/workflows/ci.yml/badge.svg)](https://github.com/unxmaal/localharness/actions/workflows/ci.yml)
 
-**Make pictures, video, speech and code on your own Mac. Nothing leaves the machine.**
+**Make pictures, video, speech and code on your own machine. Nothing leaves it.**
 
 One command, `lh`, generates an image, a short video, an SVG icon, a web page,
 some code, or speech in a voice you chose. It also transcribes what you say.
@@ -79,17 +79,29 @@ practitioners talk, on a schedule, and tells you what is new. See below.
 
 ```bash
 uv tool install --python 3.12 --editable .
+```
+
+Then start the engine your machine has. On Apple Silicon:
+
+```bash
 ./scripts/serve-mlx.sh &        # inference engine
 ./scripts/serve-gateway.sh &    # the address clients use
+```
+
+On a machine with an NVIDIA card, one command starts all three:
+
+```bash
+./scripts/services.sh start     # gateway, text, audio
+```
+
+Either way:
+
+```bash
 lh svg "a settings gear icon"
 ```
 
-That prints a path. Open it. For speech, also start `./scripts/serve-tts.sh` and
-run `lh say "hello"`.
-
-Those two servers are MLX. On Windows the install and the suite work, and the
-text lanes need an OpenAI-compatible server of your own in `gateway/config.yaml`
-in place of `serve-mlx.sh`.
+That prints a path. Open it. For speech on Apple Silicon, also start
+`./scripts/serve-tts.sh`; on the card it is already up. Then `lh say "hello"`.
 
 ## What it is not
 
@@ -185,10 +197,10 @@ session left running overnight is otherwise noticed as a frame rate rather than
 as a log line. Measured on the 4070, a request takes VRAM from 2462 to 3296 MiB
 and fifteen idle seconds return it to 2473.
 
-Voice cloning is the one lane still missing there. The Mac's default voice is
-cloned from a reference clip by Chatterbox, Kokoro has a fixed table of 54, and
-a request carrying a reference is refused rather than answered in a substitute
-voice.
+Voice cloning is the one lane still missing there. On Apple Silicon a voice is
+cloned from a reference clip by Chatterbox; Kokoro, which serves the card, has
+a fixed table of 54 and no cloning, so a request carrying a reference is
+refused rather than answered in a substitute voice.
 
 ---
 
@@ -323,20 +335,25 @@ lh fetch --run                    # download it, one at a time
 
 **Inspect** is the one that saves the most. It clones a candidate's source,
 which is single-digit megabytes, and reads what the description could not say:
-which weights it names and how big they are, whether CUDA is a *declared
-dependency* rather than merely mentioned somewhere, whether it is MLX-native or
-torch with an MPS fallback, whether there is anything to call, and when it was
-really last touched. Nothing is executed and nothing is downloaded.
+which weights it names and how big they are, which RUNTIME they need as a
+*declared dependency* rather than merely mentioned somewhere, whether there is
+anything to call, and when it was really last touched. Nothing is executed and
+nothing is downloaded.
 
-That last distinction is load-bearing. An Apple on-device repo mentions
-`torch.cuda` in one export recipe; treating that as a CUDA requirement threw
-away the best candidate in the sweep. So only a declared dependency
-disqualifies.
+The verdict names the runtime, not the operating system. `needs-cuda` on the
+mini and `needs-mlx` on the card are one rule read from two directions, which
+is why the mini refuses a candidate the card queues and neither is wrong. A
+repo offering both paths runs wherever one of them lands.
+
+The declared-versus-mentioned distinction is load-bearing. An Apple on-device
+repo mentions `torch.cuda` in one export recipe; treating that as a CUDA
+requirement threw away the best candidate in a sweep. So only a declared
+dependency disqualifies.
 
 Anything that cannot run here is recorded as answered, permanently, and never
-proposed again. Anything that can is queued for download, and `lh fetch --run`
-takes them one at a time with a disk floor, because this machine holds one
-working set.
+proposed again -- here meaning this machine, so the two keep different books.
+Anything that can is queued for download, and `lh fetch --run` takes them one
+at a time with a disk floor, because either machine holds one working set.
 
 **A weight is only queued if something here can measure it.** A model needs a
 lane -- a case, a runner and a metric -- and this project has eight. A voice
@@ -398,7 +415,8 @@ live in `~/localharness/discovery-sources.json`; edit that file freely.
 ## Letting another computer use this one
 
 If you use an AI coding assistant on a laptop, it can hand work to this machine
-instead of doing it itself. The laptop asks for an image, this Mac makes it.
+instead of doing it itself. The laptop asks for an image, whichever machine is
+serving makes it.
 That is done over MCP, a small standard for letting an assistant call outside
 tools.
 
@@ -468,11 +486,20 @@ enough for MiniMax-H3. `fetch-h3-weights.sh` demands its own 160GB and
 cannot know what is about to be fetched, and set to 160 it refused every
 ordinary machine.
 
-The install carries no torch. `mlx-whisper` needs it unconditionally, so the
-multilingual ear lives in the `whisper` dependency group: 370MB installed
-rather than 1.1GB.
+The install carries no torch on Apple Silicon. `mlx-whisper` needs it
+unconditionally, so the multilingual ear lives in the `whisper` dependency
+group: 370MB installed rather than 1.1GB. Dependencies are marked by platform
+in `pyproject.toml`, so a Windows install pulls neither mlx nor pyobjc and a
+Mac pulls no winsdk.
 
 ## Keeping the services up
+
+Two machines, two answers, because they have different jobs. The mini exists to
+serve, so its services come back after a reboot. The Windows box exists to play
+games and run this sometimes, so nothing there is registered with Windows at
+all -- see "A second machine" above for `scripts/services.sh`.
+
+### On Apple Silicon
 
 Installed as launchd agents, so the machine comes back serving after a reboot:
 
@@ -508,6 +535,20 @@ Or run them by hand, from a terminal that already has the access:
 ./scripts/serve-tts.sh       # Kokoro TTS + Parakeet STT on :8890
 ./scripts/smoke.sh           # check the whole chain still works end to end
 ```
+
+### On a machine with an NVIDIA card
+
+```bash
+./scripts/services.sh start      # gateway on :4000, llama.cpp, audio
+./scripts/services.sh status     # what is up, and what the card holds
+./scripts/services.sh stop       # and the card is free
+./scripts/smoke.sh               # the same end-to-end check
+```
+
+Nothing is registered to start on its own. There is no `probe` step because
+there is no TCC: the equivalent trap on Windows is a path, not a permission --
+Git Bash reports `/d/a/...` where native Python needs `D:\a\...`, and
+`env.sh` converts before exporting `HF_HOME` for exactly that reason.
 
 ## Where things land
 
@@ -621,9 +662,13 @@ make test      # unit tests only
 make smoke     # end-to-end, REQUIRES the services running
 ```
 
-CI runs `make check` on an Apple Silicon runner for every push and pull request,
-and reports which tests it skipped and why. A skipped test otherwise reports
-green for something it never checked.
+CI runs `make check` on an Apple Silicon runner AND a Windows one for every
+push and pull request, and each reports which tests it skipped and why. A
+skipped test otherwise reports green for something it never checked -- and
+that is not hypothetical here: 29 tests skipped on both runners for a week
+because they needed a volume only one machine has, while ten of them were
+failing on that machine. The first run that could execute them found a bug in
+the product, not the tests.
 
 Every safety check here has been broken on purpose to confirm its test then
 fails. A test that passes against known-broken code is testing nothing, and the
