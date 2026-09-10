@@ -198,5 +198,15 @@ mkdir -p "$HF_ROOT" || _hf_fatal "cannot create $HF_ROOT" \
 # to huggingface.co on every model switch even for local files, so a wifi blip
 # turns into a model "failure" mid-run. Set HF_HUB_OFFLINE=0 to fetch new ones.
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+
+# NATIVE PATH, NOT AN MSYS ONE. Git Bash reports directories as /d/a/... and
+# huggingface_hub is native Python, which cannot resolve that: it would take
+# the string literally and build a cache under a directory called "d". The
+# default is computed with `pwd`, so on Windows it arrives in the MSYS
+# spelling; cygpath is what Git Bash ships to convert it. Nothing to do
+# anywhere else, where the two spellings are the same.
+if command -v cygpath >/dev/null 2>&1; then
+  HF_ROOT="$(cygpath -w "$HF_ROOT")"
+fi
 export HF_HOME="$HF_ROOT"
 echo "hf    HF_HOME=$HF_HOME" >&2

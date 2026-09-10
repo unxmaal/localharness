@@ -13,6 +13,7 @@ is passed in rather than depending on what any particular disk has today.
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -22,17 +23,30 @@ import shells
 REPO = Path(__file__).resolve().parents[1]
 
 
-def run_env(hf_root=None, shell="bash", min_free_gb="0", state=None,
-            cwd=None):
+def same_dir(a: str, b) -> bool:
+    """Whether two spellings name the same directory.
+
+    Git Bash reports /d/a/... where Python reports D:\\a\\..., so a string
+    compare fails on Windows for two paths that are the same place. env.sh
+    converts with cygpath before exporting, precisely because huggingface_hub
+    is native Python and cannot read the MSYS form -- but a test that compared
+    strings would still be asserting the spelling rather than the location.
+    """
+    if not a:
+        return False
+    try:
+        return Path(a).resolve() == Path(b).resolve()
+    except OSError:
+        return False
+
+
+def run_env(hf_root=None, shell="bash", min_free_gb="0", cwd=None):
     """Source env.sh in a clean shell; return (exit_code, HF_HOME, stderr)."""
     exe = shells.resolve(shell)
     if exe is None:
         pytest.skip(f"no {shell} on this machine")
     env = {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"],
            "HF_MIN_FREE_GB": str(min_free_gb)}
-    # Isolate the "where did we land last time" record, or every test inherits
-    # the real one from $HOME and trips the guard against relocating.
-    env["HF_STATE_FILE"] = state or str(Path(os.environ["TMPDIR"]) / "no-state")
     if hf_root is not None:
         env["HF_ROOT"] = hf_root
     p = subprocess.run(
@@ -50,17 +64,17 @@ def run_env(hf_root=None, shell="bash", min_free_gb="0", state=None,
 def test_the_default_is_in_the_checkout(tmp_path):
     """No candidate list, no mount, no drive letter. The same answer on the
     mini, the Windows box and a CI runner."""
-    code, home, err = run_env(state=str(tmp_path / "state"))
+    code, home, err = run_env()
     assert code == 0, err
-    assert home == str(REPO / "hf_root")
+    assert same_dir(home, REPO / "hf_root")
 
 
 def test_the_default_does_not_follow_the_working_directory(tmp_path):
     """A relative default would scatter caches into whatever directory `lh`
     happened to be run from, which is the bug harness/paths.py remembers."""
-    code, home, err = run_env(state=str(tmp_path / "state"), cwd=str(tmp_path))
+    code, home, err = run_env(cwd=str(tmp_path))
     assert code == 0, err
-    assert home == str(REPO / "hf_root")
+    assert same_dir(home, REPO / "hf_root")
 
 
 @pytest.mark.parametrize("shell", ["bash", "zsh", "sh"])
@@ -69,21 +83,23 @@ def test_the_default_is_the_same_in_every_shell(tmp_path, shell):
     the shell's own name under dash and gives no path at all, BASH_SOURCE is
     bash-only and %x is zsh-only, so finding this file needs all three routes
     and a fallback."""
-    code, home, err = run_env(state=str(tmp_path / f"state-{shell}"),
-                              shell=shell)
+    code, home, err = run_env(shell=shell)
     assert code == 0, err
-    assert home == str(REPO / "hf_root")
+    assert same_dir(home, REPO / "hf_root")
 
 
 # ---- an explicit location --------------------------------------------------
 
 def test_an_explicit_root_is_accepted(tmp_path):
-    code, home, err = run_env(hf_root=str(tmp_path / "hf"),
-                              state=str(tmp_path / "state"))
+    code, home, err = run_env(hf_root=str(tmp_path / "hf"))
     assert code == 0, err
-    assert home == str(tmp_path / "hf")
+    assert same_dir(home, tmp_path / "hf")
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="chmod 500 does not remove write access on Windows, where the "
+           "equivalent is an ACL")
 def test_an_explicit_root_is_still_checked(tmp_path):
     """"The caller says where" must not become "and stop looking". Skipping the
     checks for an explicit HF_ROOT was a real bug: an unwritable and a
@@ -92,8 +108,7 @@ def test_an_explicit_root_is_still_checked(tmp_path):
     unwritable.mkdir()
     subprocess.run(["chmod", "500", str(unwritable)], check=True)
     try:
-        code, _, err = run_env(hf_root=str(unwritable / "hf"),
-                               state=str(tmp_path / "state"))
+        code, _, err = run_env(hf_root=str(unwritable / "hf"))
         assert code == 1
         assert "FATAL" in err
     finally:
@@ -101,8 +116,7 @@ def test_an_explicit_root_is_still_checked(tmp_path):
 
 
 def test_a_root_without_room_is_refused_and_the_message_says_how_much(tmp_path):
-    code, _, err = run_env(hf_root=str(tmp_path / "hf"), min_free_gb="999999",
-                           state=str(tmp_path / "state"))
+    code, _, err = run_env(hf_root=str(tmp_path / "hf"), min_free_gb="999999")
     assert code == 1
     assert "999999" in err
     assert "free" in err.lower()
@@ -111,16 +125,14 @@ def test_a_root_without_room_is_refused_and_the_message_says_how_much(tmp_path):
 def test_the_message_names_the_knob_and_this_machine(tmp_path):
     """Whoever hits this needs to be told what to set, not just that it
     failed."""
-    _, _, err = run_env(hf_root=str(tmp_path / "hf"), min_free_gb="999999",
-                        state=str(tmp_path / "state"))
+    _, _, err = run_env(hf_root=str(tmp_path / "hf"), min_free_gb="999999")
     assert "HF_ROOT" in err
     assert "hf_root" in err
 
 
 def test_nothing_is_created_until_a_location_is_chosen(tmp_path):
     rejected = tmp_path / "rejected"
-    run_env(hf_root=str(rejected / "hf"), min_free_gb="999999",
-            state=str(tmp_path / "state"))
+    run_env(hf_root=str(rejected / "hf"), min_free_gb="999999")
     assert not rejected.exists(), "a refused location was created anyway"
 
 
@@ -131,12 +143,20 @@ def test_hf_home_is_exported_to_children(tmp_path):
     env = {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"],
            "HF_MIN_FREE_GB": "0", "HF_ROOT": str(tmp_path / "hf"),
            "HF_STATE_FILE": str(tmp_path / "state")}
+    # `env` rather than a nested shell: interpolating the interpreter's path
+    # into a command string ran "C:Program" on Windows, where bash lives under
+    # Program Files. What is being tested is that the variable crosses a
+    # process boundary at all, and any child will do.
     p = subprocess.run(
         [exe, "-c",
          f'source "{REPO}/scripts/env.sh" >/dev/null 2>&1 && '
-         f'{exe} -c \'echo "CHILD=$HF_HOME"\''],
+         f'env | grep "^HF_HOME="'],
         capture_output=True, text=True, env=env)
-    assert f"CHILD={tmp_path}/hf" in p.stdout
+    exported = ""
+    for line in p.stdout.splitlines():
+        if line.startswith("HF_HOME="):
+            exported = line.split("=", 1)[1]
+    assert same_dir(exported, tmp_path / "hf"), p.stdout
 
 
 # ---- the threshold ---------------------------------------------------------
@@ -163,9 +183,9 @@ def test_the_python_and_shell_defaults_agree():
     """Two answers that disagree would put the CLI's weights somewhere the
     services do not look, and the download would be silent."""
     from harness import env as pyenv
-    code, home, err = run_env(state=str(Path(os.environ["TMPDIR"]) / "agree"))
+    code, home, err = run_env()
     assert code == 0, err
-    assert home == pyenv.default_root()
+    assert same_dir(home, pyenv.default_root())
 
 
 # ---- readability, not just existence ---------------------------------------
@@ -220,8 +240,7 @@ def test_helper_functions_print_nothing_but_their_answer(tmp_path):
 # to fall back TO. These are the tests for that property.
 
 def test_an_unreachable_root_is_fatal_rather_than_falling_back(tmp_path):
-    code, home, err = run_env(hf_root="/Volumes/NoSuchVolume/hf",
-                              state=str(tmp_path / "state"))
+    code, home, err = run_env(hf_root="/Volumes/NoSuchVolume/hf")
     assert code == 1
     assert home == ""
     assert "FATAL" in err
@@ -229,6 +248,5 @@ def test_an_unreachable_root_is_fatal_rather_than_falling_back(tmp_path):
 
 def test_it_does_not_quietly_use_the_default_when_hf_root_is_bad(tmp_path):
     """The whole failure was starting somewhere else without saying so."""
-    _, home, _ = run_env(hf_root="/Volumes/NoSuchVolume/hf",
-                         state=str(tmp_path / "state"))
-    assert str(REPO / "hf_root") not in home
+    _, home, _ = run_env(hf_root="/Volumes/NoSuchVolume/hf")
+    assert not same_dir(home, REPO / "hf_root")
