@@ -1158,7 +1158,7 @@ def main(argv: list[str] | None = None) -> int:
     # volume. Silently, and onto the disk this machine has least of.
     if env.apply() is None:
         print(f"warning: no weights location with {env.HF_MIN_FREE_GB}GB free "
-              f"(tried {', '.join(env.HF_CANDIDATES)}); set HF_HOME",
+              f"(tried {env.configured()}); set HF_ROOT or HF_HOME",
               file=sys.stderr)
     if not getattr(a, "func", None):
         ap.print_help(sys.stderr)

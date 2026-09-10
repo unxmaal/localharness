@@ -412,12 +412,18 @@ class Receipt:
     #: measurement answers "is it better". Ranking one against the other
     #: compares two different exams.
     tier: str = "measure"
+    #: What the weights loaded into, as "<kind>:<name>" -- "unified:arm64",
+    #: "discrete:NVIDIA GeForce RTX 4070". Every lane now has an implementation
+    #: on both machines and a different tool behind each, so two results.json
+    #: files from one lane may have been produced by different programs on
+    #: different silicon. Empty for runs written before this existed.
+    accelerator: str = ""
 
     def as_dict(self) -> dict:
         return {"modality": self.modality, "case_ids": list(self.case_ids),
                 "repeat": self.repeat, "sampling": dict(self.sampling),
                 "gateway": self.gateway, "adherence": self.adherence,
-                "tier": self.tier}
+                "tier": self.tier, "accelerator": self.accelerator}
 
 
 def comparable(a: Receipt, b: Receipt) -> tuple[bool, str]:
@@ -460,6 +466,19 @@ def comparable(a: Receipt, b: Receipt) -> tuple[bool, str]:
     if a.adherence != b.adherence:
         return False, (f"different adherence backend: {a.adherence!r} vs "
                        f"{b.adherence!r}")
+    # LAST, and only when both runs say. A different accelerator means
+    # different arithmetic, a different memory ceiling and -- since every lane
+    # now has an implementation per machine -- frequently a different program
+    # producing the artifact. That is a larger difference than the adherence
+    # grader, which is already disqualifying.
+    #
+    # An EMPTY field is not a mismatch. Runs written before this existed carry
+    # none, and refusing those would invalidate every measurement this project
+    # has, including the STT corpus and the svg three-way, which are good.
+    if a.accelerator and b.accelerator and a.accelerator != b.accelerator:
+        return False, (f"different accelerator: {a.accelerator} vs "
+                       f"{b.accelerator}. Two machines, and each lane has its "
+                       f"own tool on each")
     return True, "same exam"
 
 

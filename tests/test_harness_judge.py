@@ -24,8 +24,51 @@ _APPLE = _mach.Machine(frozenset({"mlx", "cpu"}),
 def test_the_shipped_rubric_loads_and_is_versioned():
     r = load()
     assert r.version >= 1
-    assert r.identity == f"{r.name}@{r.version}"
+    assert r.identity.startswith(f"{r.name}@{r.version}")
     assert (r.low, r.high) == (1, 10)
+
+
+def test_the_identity_names_the_machine_fragments_it_merged():
+    """A rubric is loaded with the fragments for whatever runtimes this machine
+    has, so `novelty@5` on a Mac and `novelty@5` on a card are two different
+    prompts under one name. A candidate scored 8 on the card and 4 on the mini
+    is the system working; the same two scores under one identity is a
+    contradiction someone will try to reconcile."""
+    mac = load(machine=_APPLE)
+    card = load(machine=_mach.Machine(frozenset({"cuda", "cpu"}),
+                                      _Acc("discrete", 12.0, 10.0, "RTX 4070")))
+    assert mac.identity.endswith("+mlx")
+    assert card.identity.endswith("+cuda")
+    assert mac.identity != card.identity
+    assert mac.prompt != card.prompt
+
+
+def test_a_runtime_with_no_fragment_does_not_change_the_identity():
+    """cpu is on every machine and has no fragment. An identity built from the
+    runtime SET would differ between two machines whose rubrics are the same."""
+    bare = load(machine=_mach.Machine(frozenset({"cpu"}),
+                                      _Acc("unified", 16.0, 8.0, "x86_64")))
+    assert bare.identity == f"{bare.name}@{bare.version}"
+    assert bare.fragments == ()
+
+
+def test_no_claim_scores_high_and_counts_for_nothing_at_once():
+    """The fragments are merged into the same prompt as the base rubric, so a
+    claim can land on both sides of it. `Running natively on Apple Silicon, on
+    Metal, or on a Mac at all` did exactly that -- and it is the line that
+    exists because scoring bare runnability as merit once put six unrelated
+    candidates at 10/10. See RULE #211."""
+    for machine in (_APPLE,
+                    _mach.Machine(frozenset({"cuda", "cpu"}),
+                                  _Acc("discrete", 12.0, 10.0, "RTX 4070")),
+                    _mach.Machine(frozenset({"rocm", "cpu"}),
+                                  _Acc("discrete", 16.0, 14.0, "Radeon"))):
+        prompt = load(machine=machine).prompt
+        high = prompt.split("SCORES LOW:")[0].lower()
+        assert "at all" not in high, (
+            f"a bare runs-here claim is under SCORES HIGH for "
+            f"{sorted(machine.runtimes)}; it belongs in the section that says "
+            f"it counts for nothing")
 
 
 def test_the_rubric_prompt_carries_both_directions():

@@ -45,9 +45,12 @@ def ceiling_bytes(acc=None) -> int:
     and change which candidates it accepts -- a decision about the Mac, which a
     Windows port has no business making on its way past.
     """
-    from harness import memory
+    from harness import machine
 
-    acc = memory.detect() if acc is None else acc
+    # Through machine.detect(), which is cached: memory.detect() shells out to
+    # sysctl or nvidia-smi, and decide() calls this once per candidate. A
+    # sensitivity sweep spawned about five hundred of them.
+    acc = machine.detect().accelerator if acc is None else acc
     if acc.kind == "discrete":
         return int(acc.total_gb * GIB)
     return MEMORY_CEILING
@@ -67,7 +70,14 @@ SIZE_LIMIT = 12
 SIZE_RETRIES = 1
 SIZE_DELAY = 2.0
 
-VERDICTS = ("fits", "too-big", "needs-cuda", "no-entry-point", "dead", "unknown")
+#: Every verdict decide() can return. The needs-* half is DERIVED, because a
+#: hand-written list said "needs-cuda" long after decide() had learned to say
+#: needs-mlx and needs-rocm, and a stale list of this kind reads as
+#: authoritative.
+def verdicts() -> tuple[str, ...]:
+    from harness import machine
+    return (("fits", "too-big", "no-entry-point", "dead", "unknown")
+            + tuple(f"needs-{r}" for r in sorted(machine._RUNTIME_PROBES)))
 
 #: HuggingFace's own task label -> the lane that can actually measure it.
 #: `pipeline_tag` is frequently absent (3 of 6 real models checked), so the
@@ -381,9 +391,17 @@ def decide(fit: Fit, ceiling: int | None = None, dead_days: int = DEAD_DAYS,
     # has one of them; refusing it on either was the old rule's mistake in the
     # one case it got right for the wrong reason.
     if offered and all(machine.refuses(r) for r in offered):
+        # A repo offering SEVERAL runtimes, on a machine with none of them, has
+        # no single missing runtime to name. Reporting the first one in the
+        # list read as "needs-mlx" beside a reason listing CUDA packages, which
+        # is a verdict recorded as terminal in the store and never revisited.
         fit.verdict = machine.refuses(offered[0])
-        detail = ", ".join(fit.cuda[:3]) if "cuda" in offered else "mlx"
-        fit.why = f"depends on {detail}, and this machine has no {offered[0]}"
+        named = ", ".join(fit.cuda[:3]) if "cuda" in offered else "mlx"
+        if len(offered) > 1:
+            fit.why = (f"depends on {named}, and this machine has none of "
+                       f"{', '.join(offered)}")
+        else:
+            fit.why = f"depends on {named}, and this machine has no {offered[0]}"
         return fit
 
     # Kept as a mention rather than a requirement once the machine can satisfy

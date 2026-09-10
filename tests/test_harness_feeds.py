@@ -488,3 +488,25 @@ def test_a_dead_thread_does_not_empty_the_sweep():
     got = discover.from_feeds([src], reader=lambda s: entries, verify=False,
                               comments=2, comment_reader=boom)
     assert got != []
+
+
+def test_a_machine_with_no_accelerator_has_a_vocabulary_of_its_own():
+    """runtimes == {"cpu"} scored EVERY hardware-naming post negative, because
+    cpu had no terms -- the same shape as the vram bug, one machine further
+    out. The work such a box should be shown is exactly GGUF and llama.cpp."""
+    from harness import machine as mach
+    from harness.memory import Accelerator
+    bare = mach.Machine(frozenset({"cpu"}),
+                        Accelerator("unified", 16.0, 8.0, "x86_64"))
+    assert feeds.relevance("A new GGUF for llama.cpp, 3x faster on CPU", bare) > 0
+    assert feeds.relevance("CUDA kernel, 40GB VRAM on an H100", bare) < 0
+
+
+def test_quantisation_is_not_a_runtime():
+    """It would score for cpu AND mlx and outrank a technique that names no
+    hardware at all."""
+    from harness import machine as mach
+    from harness.memory import Accelerator
+    bare = mach.Machine(frozenset({"cpu"}),
+                        Accelerator("unified", 16.0, 8.0, "x86_64"))
+    assert feeds.relevance("MLX 4-bit quantisation for Apple Silicon", bare) < 0

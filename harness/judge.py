@@ -34,14 +34,25 @@ class Rubric:
     low: int
     high: int
     prompt: str
+    #: Machine fragments merged into this rubric, sorted. See _machine_sections.
+    fragments: tuple[str, ...] = ()
 
     @property
     def identity(self) -> str:
-        """What makes two judged runs comparable. See evals.core.comparable."""
-        return f"{self.name}@{self.version}"
+        """What makes two judged runs comparable. See evals.core.comparable.
+
+        THE MACHINE IS PART OF THE INSTRUMENT. Fragments are merged at load
+        time, so `novelty@5` on a Mac and `novelty@5` on a card are two
+        different prompts -- different what_scores_high, different
+        what_scores_low -- under one name. A candidate scored 8 on the card and
+        4 on the mini is the system working; the same two scores under one
+        identity is a contradiction someone will try to reconcile.
+        """
+        suffix = f"+{'+'.join(self.fragments)}" if self.fragments else ""
+        return f"{self.name}@{self.version}{suffix}"
 
 
-def _machine_sections(machine, directory: Path) -> dict:
+def _machine_sections(machine, directory: Path) -> tuple[dict, tuple[str, ...]]:
     """The rubric fragments for the runtimes this machine has.
 
     A rubric describes what to reward, and half of that depends on what the
@@ -55,6 +66,7 @@ def _machine_sections(machine, directory: Path) -> dict:
         from harness import machine as _machine
         machine = _machine.detect()
     merged: dict = {}
+    used: list[str] = []
     for runtime in sorted(machine.runtimes):
         fragment = Path(directory) / "machine" / f"{runtime}.yaml"
         if not fragment.exists():
@@ -62,7 +74,11 @@ def _machine_sections(machine, directory: Path) -> dict:
         raw = yaml.safe_load(fragment.read_text(encoding="utf-8")) or {}
         for key, items in raw.items():
             merged.setdefault(key, []).extend(items)
-    return merged
+        # Named only when it actually contributed. `cpu` is on every machine
+        # and has no fragment, so an identity that listed the runtime SET
+        # would differ between two machines whose rubrics are identical.
+        used.append(runtime)
+    return merged, tuple(used)
 
 
 def load(name: str = DEFAULT_RUBRIC, directory: Path | None = None,
@@ -74,8 +90,9 @@ def load(name: str = DEFAULT_RUBRIC, directory: Path | None = None,
         known = sorted(p.stem for p in Path(directory or RUBRIC_DIR).glob("*.yaml"))
         raise JudgeError(f"no rubric {name!r} at {path} "
                          f"(known: {', '.join(known) or 'none'})") from exc
-    for key, items in _machine_sections(
-            machine, Path(directory or RUBRIC_DIR)).items():
+    sections, fragments = _machine_sections(
+        machine, Path(directory or RUBRIC_DIR))
+    for key, items in sections.items():
         raw[key] = list(raw.get(key) or []) + list(items)
     scale = raw.get("scale") or [1, 10]
     body = [raw.get("question", "").strip(), ""]
@@ -95,7 +112,8 @@ def load(name: str = DEFAULT_RUBRIC, directory: Path | None = None,
     body.append(raw.get("instructions", "").strip())
     return Rubric(name=raw.get("name", name), version=int(raw.get("version", 0)),
                   model=raw.get("model", "q3-4b"), low=int(scale[0]),
-                  high=int(scale[1]), prompt="\n".join(body).strip())
+                  high=int(scale[1]), prompt="\n".join(body).strip(),
+                  fragments=fragments)
 
 
 _SCORE = re.compile(r"\b(10|[1-9])\b")

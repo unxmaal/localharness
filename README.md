@@ -443,9 +443,30 @@ system Python.
 silently, and mflux once installed against 3.9 where every entry point died on
 `int | None`. `--editable` keeps the checkout as the source of truth.
 
-`lh` finds the weights on its own, by the same free-space rule the service
-scripts use. It has to: on PATH it runs with nothing sourced, and an unset
-`HF_HOME` sends huggingface_hub off to re-download what is already on the volume.
+### Where the weights go
+
+`./hf_root` in the checkout, unless you say otherwise:
+
+```sh
+export HF_ROOT=/Volumes/Models/hf     # this mini
+export HF_ROOT=D:/hf                  # a Windows box with a fast drive
+```
+
+One location, checked for room and writability, and fatal if it is not usable.
+There is no candidate list and no search: a search is how the wrong disk gets
+chosen quietly, and the old list -- `/Volumes/Models/hf`, `/Volumes/T7/hf`,
+`~/.cache/huggingface` -- was one machine written into the repo, forked once for
+Windows and again in shell.
+
+Both `lh` and the service scripts resolve it the same way. `lh` has to do it
+itself: on PATH it runs with nothing sourced, and an unset `HF_HOME` sends
+huggingface_hub off to re-download what is already on the drive.
+
+`HF_MIN_FREE_GB` is 20, which is enough for a normal model and deliberately not
+enough for MiniMax-H3. `fetch-h3-weights.sh` demands its own 160GB and
+`setup-omnisvg.sh` its own 40, where the size is actually known. A global floor
+cannot know what is about to be fetched, and set to 160 it refused every
+ordinary machine.
 
 The install carries no torch. `mlx-whisper` needs it unconditionally, so the
 multilingual ear lives in the `whisper` dependency group: 370MB installed
