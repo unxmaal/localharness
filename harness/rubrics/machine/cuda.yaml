@@ -1,5 +1,9 @@
 # What the judge should know when scoring for a machine with an NVIDIA card.
 #
+# NOTHING HERE MAY SAY "it runs on this machine", only that running on THIS
+# machine beats running on one we do not have. Bare runnability is the price of
+# entry and lives in the base rubric's scores_nothing_by_itself.
+#
 # The mirror of mlx.yaml, and the reason these are fragments: the same rubric
 # scored CUDA candidates down on a machine bought to run them, because the
 # claims were written on a Mac. Nothing here names an operating system. A Linux
@@ -7,8 +11,6 @@
 what_scores_high:
   - Native CUDA. This machine has an NVIDIA card, so something that runs on it
     beats a better result on hardware it does not have.
-  - A GGUF, a diffusers pipeline or anything else that loads on an NVIDIA card
-    without a rewrite.
 
 what_scores_low:
   - Anything that requires MLX, Metal or Apple Silicon, which this machine does

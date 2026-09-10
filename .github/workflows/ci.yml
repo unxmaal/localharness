@@ -82,7 +82,27 @@ jobs:
 
       - name: Tools make check needs
         # make and shellcheck for `make lint`; ffmpeg for the video checks.
-        run: choco install -y make shellcheck ffmpeg
+        #
+        # CHOCO EXITS 0 WHEN IT INSTALLS NOTHING. The community feed returned
+        # 503 and 504 for every package in one run, choco reported "installed
+        # 0/0 packages", the step went green, and the job failed three minutes
+        # later at `shellcheck: command not found` -- which reads as a broken
+        # Makefile rather than an outage. Retry the transient half, then check
+        # the tools are actually there and say so if they are not.
+        run: |
+          for attempt in 1 2 3; do
+            choco install -y make shellcheck ffmpeg && break
+            echo "choco attempt $attempt failed; retrying" >&2
+            sleep 20
+          done
+          missing=""
+          for tool in make shellcheck ffmpeg; do
+            command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::not installed:$missing (chocolatey outage?)" >&2
+            exit 1
+          fi
 
       - name: librsvg
         # Not in winget and not in chocolatey. MSYS2 carries it and the runner

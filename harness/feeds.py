@@ -120,6 +120,16 @@ RUNTIME_TERMS = {
         r"\b(cuda|nvidia|rtx|tensorrt|vram|geforce|"
         r"[1-5]0[789]0|a100|h100|xformers)\b", re.I),
     "rocm": re.compile(r"\b(rocm|radeon|hip|instinct|mi[0-9]{3}x?)\b", re.I),
+    # A machine with no accelerator has runtimes == {"cpu"}, and without a
+    # vocabulary of its own it scored EVERY hardware-naming post negative --
+    # the same shape as the vram bug above, one machine further out. The work
+    # such a box should actually be shown is exactly this.
+    # Deliberately narrow. "quantisation" is not a runtime -- an MLX 4-bit
+    # post would score for cpu AND mlx and outrank a technique that names no
+    # hardware at all. Only words that mean it runs WITHOUT an accelerator.
+    "cpu": re.compile(
+        r"\b(gguf|llama[._ -]?cpp|ggml|cpu[- ]only|cpu inference|avx-?[0-9]*)\b",
+        re.I),
 }
 
 #: The Apple vocabulary under its old name, for callers that predate the rest.

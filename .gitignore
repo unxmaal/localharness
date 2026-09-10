@@ -11,3 +11,6 @@ evals/cases/stt/
 
 # Working artifact, not a deliverable: the assumptions sweep
 assumptions.md
+
+# The default weights location. This machine sets HF_ROOT elsewhere.
+hf_root/

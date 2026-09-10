@@ -31,28 +31,46 @@
 # this guard pass and the download fail instead.
 #
 # Overrides, all validated the same way rather than trusted:
-#   HF_ROOT         pin one location
-#   HF_CANDIDATES   colon-separated search order (defaults below)
+#   HF_ROOT         where the weights live (default: ./hf_root in the checkout)
 #   HF_MIN_FREE_GB  how much room a location must have
 
-HF_MIN_FREE_GB="${HF_MIN_FREE_GB:-160}"
+# Enough for a normal model, not enough for MiniMax-H3. This was 160 for that
+# one checkpoint, which made every ordinary machine unusable to guard a
+# download that guards itself: fetch-h3-weights.sh demands its own 160GB and
+# setup-omnisvg.sh its own 40, where the size is actually known.
+HF_MIN_FREE_GB="${HF_MIN_FREE_GB:-20}"
 
-# THE LIST SEPARATOR IS NOT ALWAYS A COLON. A Windows path carries a colon
-# after its drive letter, so a colon-separated list splits "C:/models" into "C"
-# and "/models" and HF_HOME silently becomes "C". PATH itself is
-# semicolon-separated on Windows for exactly this reason.
-case "$(uname -s 2>/dev/null)" in
-  MINGW*|MSYS*|CYGWIN*) HF_SEP="${HF_SEP:-;}" ;;
-  *)                    HF_SEP="${HF_SEP:-:}" ;;
-esac
-# Ordered by measured throughput, ending somewhere that exists on any Mac so a
-# machine with no external volume still works without hand configuration.
-if [ "$HF_SEP" = ";" ]; then
-  # No /Volumes to search. See the note in harness/env.py.
-  HF_CANDIDATES="${HF_CANDIDATES:-$HOME/.cache/huggingface}"
-else
-  HF_CANDIDATES="${HF_CANDIDATES:-/Volumes/Models/hf:/Volumes/T7/hf:$HOME/.cache/huggingface}"
-fi
+# ONE LOCATION, NOT A SEARCH. This used to walk a colon-separated list of
+# /Volumes paths -- one person's Mac written into the repo, which the Windows
+# port had to fork here and again in harness/env.py, with a test whose only job
+# was to catch the two forks drifting. The default is in the checkout, so it
+# exists on any machine with no drive letter and no mount; a machine with a
+# fast volume says so by setting HF_ROOT.
+#
+# FINDING THIS FILE IS SHELL-SPECIFIC. It is sourced, so $0 is the SHELL's name
+# under dash and gives no path at all; bash has BASH_SOURCE and zsh has %x, and
+# neither exists in the other. Walking up from $PWD for pyproject.toml is the
+# portable last resort and is what a plain `sh` gets.
+_hf_repo() {
+  local here=""
+  # shellcheck disable=SC2154
+  [ -n "${BASH_SOURCE:-}" ] && here="${BASH_SOURCE[0]}"
+  # Through eval because ${(%):-%x} is zsh-only SYNTAX: shellcheck parses this
+  # file as sh and rejects it outright, and so would any sh that reached it.
+  [ -z "$here" ] && [ -n "${ZSH_VERSION:-}" ] &&
+    here="$(eval 'printf %s "${(%):-%x}"' 2>/dev/null)"
+  if [ -n "$here" ] && [ -f "$here" ]; then
+    (cd "$(dirname "$here")/.." 2>/dev/null && pwd)
+    return 0
+  fi
+  local p="$PWD"
+  while [ -n "$p" ] && [ "$p" != "/" ]; do
+    if [ -f "$p/pyproject.toml" ]; then printf '%s' "$p"; return 0; fi
+    p="$(dirname "$p")"
+  done
+  printf '%s' "$PWD"
+}
+_HF_DEFAULT="$(_hf_repo)/hf_root"
 
 # The volume a path lives on, resolved via its nearest existing ancestor so an
 # as-yet-uncreated target still answers. Empty if nothing resolves.
@@ -134,9 +152,9 @@ _hf_readable() {
 _hf_fatal() {
   echo "FATAL: $1" >&2
   echo "       A location needs ${HF_MIN_FREE_GB}GB free (HF_MIN_FREE_GB)." >&2
-  echo "       Weights are large: MiniMax-H3 alone is 134GiB, and a 70B at" >&2
-  echo "       4-bit is ~40GB. Attach a volume, or lower the threshold if you" >&2
-  echo "       know what you are fetching." >&2
+  echo "       Point HF_ROOT at a drive with room, or lower the threshold if" >&2
+  echo "       you know what you are fetching. The default is ./hf_root in the" >&2
+  echo "       checkout; this machine sets HF_ROOT=/Volumes/Models/hf." >&2
   echo >&2
   echo "       If the volume IS attached and this still fails, it is probably" >&2
   echo "       macOS TCC. A launchd agent or other background process gets" >&2
@@ -147,80 +165,48 @@ _hf_fatal() {
   return 1 2>/dev/null || exit 1
 }
 
-_hf_explicit=0
-[ -n "${HF_ROOT:-}" ] && _hf_explicit=1
-if [ -n "${HF_ROOT:-}" ]; then
-  _hf_usable "$HF_ROOT" \
-    || _hf_fatal "HF_ROOT=$HF_ROOT is not writable or has under ${HF_MIN_FREE_GB}GB free." \
-    || return 1 2>/dev/null || exit 1
-else
-  # Split the colon list by parameter expansion, NOT by an IFS word-splitting
-  # loop. This file is SOURCED, so it runs in whatever shell the user has, and
-  # zsh does not word-split unquoted parameters: `for x in $VAR` yields one
-  # item there and HF_HOME ends up as the whole "a:b" string, a plausible path
-  # that does not exist. Verified against bash, zsh and sh.
-  HF_ROOT=""
-  _hf_rest="$HF_CANDIDATES"
-  while [ -n "$_hf_rest" ]; do
-    _cand="${_hf_rest%%$HF_SEP*}"
-    if [ "$_hf_rest" = "$_cand" ]; then _hf_rest=""; else _hf_rest="${_hf_rest#*$HF_SEP}"; fi
-    [ -n "$_cand" ] || continue
-    if _hf_usable "$_cand"; then HF_ROOT="$_cand"; break; fi
-  done
-  unset _hf_rest _cand
-  [ -n "$HF_ROOT" ] \
-    || _hf_fatal "no writable location with ${HF_MIN_FREE_GB}GB free (tried $HF_CANDIDATES)." \
-    || return 1 2>/dev/null || exit 1
-fi
+# WHAT IS SAID IS STILL CHECKED. An explicit HF_ROOT does not bypass the
+# writability and free-space tests -- skipping them was a real bug once, and an
+# unwritable and a nonexistent path both passed with exit 0.
+HF_ROOT="${HF_ROOT:-$_HF_DEFAULT}"
+_hf_usable "$HF_ROOT" \
+  || _hf_fatal "HF_ROOT=$HF_ROOT is not writable or has under ${HF_MIN_FREE_GB}GB free." \
+  || return 1 2>/dev/null || exit 1
 
-# WHERE WE LANDED LAST TIME.
+# THERE IS NO SILENT FALLBACK TO GUARD AGAINST ANY MORE.
 #
 # A reboot once brought this machine back WITHOUT the weights volume attached.
-# The loop above did exactly what it was designed to do: it skipped the missing
-# /Volumes/Models, found /Volumes/T7 with room to spare, and the services
-# started against an EMPTY CACHE. They listened, served nothing, and said
-# nothing about it -- the only trace was one differing line in a log nobody
-# reads until something is already wrong.
+# The candidate loop did exactly what it was designed to do: it skipped the
+# missing /Volumes/Models, found /Volumes/T7 with room to spare, and the
+# services started against an EMPTY CACHE. They listened, served nothing, and
+# said nothing about it. A state file was added to remember where we landed
+# last time and refuse to move without HF_ALLOW_MOVE=1.
 #
-# Falling back is right on a fresh machine and wrong on a machine with 93GB of
-# weights sitting on a drive that happens to be unplugged. The difference is
-# whether we have been here before, so record it and refuse to move silently.
-HF_STATE_FILE="${HF_STATE_FILE:-$HOME/.localharness-hf-root}"
-# Only police the AUTO-PICK. An explicit HF_ROOT is the caller saying where
-# the weights are, which is the same statement HF_ALLOW_MOVE makes.
-if [ "$_hf_explicit" = "0" ] && [ -f "$HF_STATE_FILE" ]; then
-  _hf_prev="$(cat "$HF_STATE_FILE" 2>/dev/null)"
-  if [ -n "$_hf_prev" ] && [ "$_hf_prev" != "$HF_ROOT" ] && [ "${HF_ALLOW_MOVE:-0}" != "1" ]; then
-    echo "FATAL: the weights cache moved." >&2
-    echo "       last time: $_hf_prev" >&2
-    echo "       this time: $HF_ROOT" >&2
-    echo >&2
-    if [ ! -d "$_hf_prev" ]; then
-      echo "       $_hf_prev is NOT PRESENT. If that is an external drive," >&2
-      echo "       it is unplugged, asleep, or failed to mount -- check the" >&2
-      echo "       cable and \`diskutil list external\` before doing anything" >&2
-      echo "       else. Starting on $HF_ROOT would serve from a cache with" >&2
-      echo "       none of your models in it." >&2
-    else
-      echo "       Both exist, so the candidate order or free space changed." >&2
-    fi
-    echo >&2
-    echo "       To move deliberately:  HF_ALLOW_MOVE=1 (once), or set HF_ROOT." >&2
-    unset _hf_prev
-    return 1 2>/dev/null || exit 1
-  fi
-  unset _hf_prev
-fi
+# That guard was aimed at the SEARCH, and the search is gone. One location is
+# configured; if it is not there, the block above is FATAL rather than helpful,
+# which is the property the state file was reconstructing after the fact.
+# Broadening the guard to fire whenever HF_ROOT differs from last time would
+# false-alarm on this machine every time the suite (./hf_root) and the services
+# (/Volumes/Models/hf) alternate, and a guard people learn to override is worse
+# than none. HF_STATE_FILE and HF_ALLOW_MOVE are gone with it.
 
 # Only now, once a location is chosen, do we create anything.
 mkdir -p "$HF_ROOT" || _hf_fatal "cannot create $HF_ROOT" \
   || return 1 2>/dev/null || exit 1
-printf '%s\n' "$HF_ROOT" > "$HF_STATE_FILE" 2>/dev/null || true
-unset _hf_explicit
 
 # Cached weights should not depend on the network. mlx_lm.server issues a HEAD
 # to huggingface.co on every model switch even for local files, so a wifi blip
 # turns into a model "failure" mid-run. Set HF_HUB_OFFLINE=0 to fetch new ones.
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+
+# NATIVE PATH, NOT AN MSYS ONE. Git Bash reports directories as /d/a/... and
+# huggingface_hub is native Python, which cannot resolve that: it would take
+# the string literally and build a cache under a directory called "d". The
+# default is computed with `pwd`, so on Windows it arrives in the MSYS
+# spelling; cygpath is what Git Bash ships to convert it. Nothing to do
+# anywhere else, where the two spellings are the same.
+if command -v cygpath >/dev/null 2>&1; then
+  HF_ROOT="$(cygpath -w "$HF_ROOT")"
+fi
 export HF_HOME="$HF_ROOT"
 echo "hf    HF_HOME=$HF_HOME" >&2

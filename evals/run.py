@@ -510,7 +510,8 @@ def main(argv: list[str] | None = None) -> int:
             sampling={m: dict(v) for m, v in sorted(completion.SAMPLING.items())},
             gateway=args.gateway,
             adherence=getattr(args, "adherence", "") or "",
-            tier="screen" if getattr(args, "screen", False) else "measure")
+            tier="screen" if getattr(args, "screen", False) else "measure",
+            accelerator=accelerator_id())
         (outdir / "results.json").write_text(json.dumps(
             {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
              "environment": capture(),
@@ -520,6 +521,18 @@ def main(argv: list[str] | None = None) -> int:
             encoding="utf-8")
         print(f"\nartifacts + results.json in {outdir}")
     return 0
+
+
+def accelerator_id() -> str:
+    """The receipt's accelerator field. `<kind>:<name>`, or empty if the
+    machine cannot be asked -- an empty field is treated as unknown by
+    comparable() rather than as a mismatch."""
+    try:
+        from harness import machine
+        acc = machine.detect().accelerator
+    except Exception:  # noqa: BLE001 - a receipt must not fail a finished run
+        return ""
+    return f"{acc.kind}:{acc.name}" if acc.kind else ""
 
 
 def compare_runs(files: list[str]) -> int:
@@ -553,7 +566,8 @@ def compare_runs(files: list[str]) -> int:
                                   sampling=raw["sampling"],
                                   gateway=raw["gateway"],
                                   adherence=raw.get("adherence", ""),
-                                  tier=raw.get("tier", "measure")),
+                                  tier=raw.get("tier", "measure"),
+                                  accelerator=raw.get("accelerator", "")),
                        data.get("summary") or {}))
 
     first_file, first, _ = loaded[0]

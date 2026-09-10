@@ -1150,3 +1150,33 @@ def test_a_receipt_defaults_to_the_measure_tier():
                 gateway="g")
     assert r.tier == "measure"
     assert r.as_dict()["tier"] == "measure"
+
+
+# ---- the machine is part of the exam ---------------------------------------
+
+def test_two_accelerators_are_not_one_table():
+    """Every lane has an implementation per machine and a different tool behind
+    each, so two results.json files from one lane may have been produced by
+    different programs on different silicon."""
+    from evals.core import Receipt, comparable
+    mini = Receipt("image", ("fox",), 3, {}, "", accelerator="unified:arm64")
+    card = Receipt("image", ("fox",), 3, {}, "", accelerator="discrete:RTX 4070")
+    ok, why = comparable(mini, card)
+    assert not ok
+    assert "accelerator" in why
+
+
+def test_a_run_from_before_this_existed_is_still_comparable():
+    """Refusing an empty field would invalidate every measurement recorded
+    before the field did -- the STT corpus and the svg three-way included."""
+    from evals.core import Receipt, comparable
+    mini = Receipt("image", ("fox",), 3, {}, "", accelerator="unified:arm64")
+    old = Receipt("image", ("fox",), 3, {}, "")
+    assert comparable(mini, old)[0]
+    assert comparable(old, old)[0]
+
+
+def test_the_same_accelerator_is_one_table():
+    from evals.core import Receipt, comparable
+    a = Receipt("image", ("fox",), 3, {}, "", accelerator="unified:arm64")
+    assert comparable(a, a)[0]

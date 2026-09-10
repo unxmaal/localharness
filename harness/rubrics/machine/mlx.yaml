@@ -7,8 +7,13 @@ what_scores_high:
   - Native Apple Silicon or MLX. This machine runs MLX, so something that runs
     natively here beats a better result on hardware it does not have.
 
-  - Running natively on Apple Silicon, on Metal, or on a Mac at all.
-
 what_scores_low:
   - Anything that requires CUDA or an NVIDIA card, which this machine does not
     have.
+
+# NOTHING HERE MAY SAY "it runs on this machine", only that running on THIS
+# machine beats running on one we do not have. Every candidate the judge sees
+# has already been read from its source and found to run here, so bare
+# runnability is the price of entry -- it lives in the base rubric's
+# scores_nothing_by_itself, and six candidates scored 10/10 the last time it
+# was treated as merit.

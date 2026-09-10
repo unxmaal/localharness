@@ -523,3 +523,37 @@ def test_linux_and_windows_with_the_same_card_reach_the_same_verdict():
         # Fresh Fits for the same reason as above.
         assert (ins.decide(_fit(**kw), machine=_CARD).verdict
                 == ins.decide(_fit(**kw), machine=_LINUX_CARD).verdict)
+
+
+def test_a_repo_offering_two_runtimes_on_a_machine_with_neither_names_both():
+    """It reported `needs-mlx` beside a reason listing CUDA packages, because
+    the verdict took whichever runtime sorted first. Verdicts are recorded as
+    terminal in the store, so a wrong reason there is durable."""
+    from harness import machine as mach
+    from harness.memory import Accelerator
+    bare = mach.Machine(frozenset({"cpu"}),
+                        Accelerator("discrete", 12.0, 10.0, "RTX"))
+    fit = ins.Fit(repo="a/b", mlx=True, cuda=["flash_attn"],
+                  entry_points=["main.py"])
+    got = ins.decide(fit, ceiling=99 << 30, machine=bare)
+    assert got.verdict.startswith("needs-")
+    assert "mlx" in got.why and "cuda" in got.why
+
+
+def test_one_missing_runtime_is_still_named_singly():
+    from harness import machine as mach
+    from harness.memory import Accelerator
+    mac = mach.Machine(frozenset({"mlx", "cpu"}),
+                       Accelerator("unified", 32.0, 25.0, "arm64"))
+    fit = ins.Fit(repo="a/b", cuda=["flash_attn"], entry_points=["main.py"])
+    got = ins.decide(fit, ceiling=99 << 30, machine=mac)
+    assert got.verdict == "needs-cuda"
+    assert "none of" not in got.why
+
+
+def test_the_verdict_list_is_derived_rather_than_written_down():
+    """A hand-written tuple said needs-cuda long after decide() had learned to
+    say needs-mlx and needs-rocm."""
+    got = ins.verdicts()
+    assert "needs-mlx" in got and "needs-cuda" in got and "needs-rocm" in got
+    assert "fits" in got
