@@ -82,15 +82,17 @@ jobs:
         # the video checks; zsh because tests/shells.py runs scripts/env.sh in
         # three shells and a missing one is a silent skip; fonts-dejavu-core
         # because the OCR fixture renders real type and PIL's bitmap fallback
-        # would measure the fixture rather than the check.
+        # would measure the fixture rather than the check; `time` because the
+        # shell builtin of that name reports no memory and harness/proc.py
+        # refuses to report a peak it could not measure.
         #
         # Chrome is already on this image, and render.py finds it by name.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            shellcheck librsvg2-bin ffmpeg zsh fonts-dejavu-core
+            shellcheck librsvg2-bin ffmpeg zsh fonts-dejavu-core time
           missing=""
-          for tool in shellcheck rsvg-convert ffmpeg zsh; do
+          for tool in shellcheck rsvg-convert ffmpeg zsh /usr/bin/time; do
             command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
           done
           if [ -n "$missing" ]; then

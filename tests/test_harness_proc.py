@@ -86,49 +86,41 @@ def test_streaming_mode_does_not_capture(capfd):
 
 
 def test_the_peak_method_is_named():
-    """A job object's peak, a phys_footprint and an ru_maxrss are three
-    different quantities. A number that does not say which one produced it
-    cannot be ranked against one from another machine."""
+    """A job object's peak, a phys_footprint and a maxrss are three different
+    quantities. A number that does not say which one produced it cannot be
+    ranked against one from another machine."""
     assert proc.PEAK_METHOD in {"phys_footprint", "job_peak_process",
-                                "ru_maxrss"}
+                                "gnu_time_maxrss"}
 
 
-@posix_only
-def test_wait4_measures_a_child_that_allocates():
-    """The POSIX path, exercised on every POSIX machine rather than only the
-    one it was written for. `/usr/bin/time -l` is macOS and GNU time spells it
-    -v, so Linux reaps the child itself and keeps its rusage."""
-    small = proc._run_posix([PY, "-c", "pass"], None, False, None,
-                            time.perf_counter())
-    big = proc._run_posix(
-        [PY, "-c", "x = bytearray(200 * 1024 * 1024); print(len(x))"],
-        None, False, None, time.perf_counter())
+def test_a_child_that_allocates_is_measured_higher_than_one_that_does_not():
+    """THE TEST THAT CAUGHT THE REAL BUG, and the reason it runs on every
+    machine rather than only the one the code was written for.
+
+    The first Linux implementation reaped the child in-process with os.wait4.
+    That reported 477124 KB for a child allocating 200 MB and 477124 KB for a
+    child doing nothing: the number was the PYTEST PARENT's footprint, because
+    Linux carries the forking process's high-water RSS into the child's maxrss.
+    Every peak in every results.json would have been the harness's own size.
+    """
+    small = run([PY, "-c", "pass"])
+    big = run([PY, "-c", "x = bytearray(200 * 1024 * 1024); print(len(x))"])
     assert small.peak_kb > 0, "a measurement of zero is the failure to avoid"
-    assert big.peak_kb > small.peak_kb, (small.peak_kb, big.peak_kb)
+    assert big.peak_kb > small.peak_kb + 100_000, (small.peak_kb, big.peak_kb)
     assert "209715200" in big.stdout
 
 
-@posix_only
-def test_wait4_keeps_the_exit_status_and_both_streams():
-    r = proc._run_posix(
-        [PY, "-c", "import sys; print('out'); sys.stderr.write('boom');"
-                   " sys.exit(3)"],
-        None, False, None, time.perf_counter())
-    assert r.returncode == 3 and not r.ok
-    assert "out" in r.stdout and "boom" in r.stderr
+@pytest.mark.skipif(sys.platform == "win32", reason="the wrapper is POSIX")
+def test_the_wrapper_flag_matches_the_time_on_this_machine():
+    """BSD time says -l and GNU time says -v. Asking either for the other's
+    flag is a usage error rather than a report, and the peak then reads 0."""
+    assert proc.TIME_FLAG == ("-l" if sys.platform == "darwin" else "-v")
 
 
-@posix_only
-def test_wait4_times_out_rather_than_waiting_forever():
-    with pytest.raises(subprocess.TimeoutExpired):
-        proc._run_posix([PY, "-c", "import time; time.sleep(30)"], 1.0, False,
-                        None, time.perf_counter())
-
-
-@posix_only
-def test_wait4_streams_without_capturing(capfd):
-    r = proc._run_posix([PY, "-c", "print('live')"], None, True, None,
-                        time.perf_counter())
-    assert r.returncode == 0
-    assert r.peak_kb > 0
-    assert "live" in capfd.readouterr().out
+def test_both_report_formats_parse_in_kilobytes():
+    """macOS reports a phys_footprint in BYTES and GNU time a maxrss in
+    KILOBYTES. Reading one as the other is a factor of 1024 either way."""
+    assert proc._peak_kb("  213909504  peak memory footprint") == 208896
+    assert proc._peak_kb(
+        "\tMaximum resident set size (kbytes): 477124\n") == 477124
+    assert proc._peak_kb("nothing here") == 0
