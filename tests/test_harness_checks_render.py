@@ -291,3 +291,22 @@ def test_the_renderer_makes_no_requests_of_its_own(tmp_path):
     argv = render.chrome_argv(tmp_path / "a.html", tmp_path / "a.png", 256)
     assert "--disable-background-networking" in argv
     assert "--disable-component-update" in argv
+
+
+def test_the_browser_can_be_named(monkeypatch, tmp_path):
+    """A machine with three chromiums installed needs a way to say which one,
+    without editing a candidate list in this repo."""
+    named = tmp_path / "my-chrome"
+    named.write_text("", encoding="utf-8")
+    monkeypatch.setenv(render.CHROME_ENV, str(named))
+    assert render.chrome_path() == str(named)
+    monkeypatch.setenv(render.CHROME_ENV, str(tmp_path / "absent"))
+    assert render.chrome_path() != str(tmp_path / "absent")
+
+
+def test_the_isolated_profile_can_be_turned_off(monkeypatch):
+    """It is not free: with one, chrome writes the screenshot and never exits,
+    and on some builds no screenshot arrives at all."""
+    assert render._isolate_profile() is True
+    monkeypatch.setenv(render.PROFILE_ENV, "0")
+    assert render._isolate_profile() is False

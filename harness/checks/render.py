@@ -109,9 +109,30 @@ def _first_available(candidates) -> str | None:
     return None
 
 
+#: Name the browser, and say whether to isolate its profile. A machine with
+#: three chromiums installed needs a way to say which, and the isolated profile
+#: is the difference between a render that works and one that hangs on some
+#: builds -- see RULE #198 and the comment in rasterize_html.
+CHROME_ENV = "LH_CHROME"
+PROFILE_ENV = "LH_CHROME_PROFILE"
+
+
 def chrome_path() -> str | None:
-    """The browser to render HTML with, or None if there is not one."""
+    """The browser to render HTML with, or None if there is not one.
+
+    $LH_CHROME wins when it names something that exists. The candidate list is
+    a guess about where a browser lives; a person who has three of them and
+    knows which one works should not have to edit this file.
+    """
+    named = os.environ.get(CHROME_ENV, "").strip()
+    if named and Path(named).exists():
+        return named
     return _first_available(CHROME_CANDIDATES)
+
+
+def _isolate_profile() -> bool:
+    """Whether to hand chrome its own --user-data-dir. See rasterize_html."""
+    return os.environ.get(PROFILE_ENV, "1").strip() not in ("0", "no", "false")
 
 
 def rasterizer_path() -> str | None:
@@ -208,7 +229,13 @@ def rasterize_html(html: str, out: str | Path, width: int = 800) -> Path:
     try:
         src = Path(d) / "page.html"
         src.write_text(html, encoding="utf-8")
-        profile = Path(d) / "chrome-profile"
+        # THE ISOLATED PROFILE IS NOT FREE. With one, chrome writes the
+        # screenshot and then never exits, which _shoot already handles by
+        # watching for the PNG. On some builds it is worse than that and no
+        # screenshot arrives at all (ERROR #17, recorded against a fresh empty
+        # profile directory). LH_CHROME_PROFILE=0 turns it off for a machine
+        # where that is the trade.
+        profile = Path(d) / "chrome-profile" if _isolate_profile() else None
         stderr = _shoot(chrome_argv(src, out, width, profile=profile), out, d)
     finally:
         _remove_tree(Path(d))

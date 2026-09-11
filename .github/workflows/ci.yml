@@ -121,7 +121,18 @@ jobs:
               echo "    $("$path" --version 2>&1 | head -1)"
             done
             echo
-            uv run python -c "from harness.checks import render; print('render.py chose:', render.chrome_path()); print('rendered:', render.rasterize_html('<p>ci</p>', '/tmp/ci-probe.png'))" 2>&1 | tail -12 || true
+            # WHICH COMBINATION ACTUALLY RENDERS. Two browsers and two profile
+            # settings, measured rather than guessed: three rounds went to
+            # three plausible theories about why chromium writes no screenshot
+            # here. The matrix answers it in one.
+            for bin in /usr/bin/chromium /usr/bin/google-chrome; do
+              for prof in 1 0; do
+                [ -x "$bin" ] || continue
+                printf '%s profile=%s: ' "$bin" "$prof"
+                LH_CHROME="$bin" LH_CHROME_PROFILE="$prof" timeout 90 \
+                  uv run python -c "from harness.checks import render; render.rasterize_html('<p>ci</p>', '/tmp/ci-probe.png'); print('OK')" 2>&1 | tail -1
+              done
+            done
             echo '```'
           # tee, not >>: a step summary is not in the job log, and reading it
           # needs a browser. A diagnostic nobody can read from the terminal is
