@@ -1180,3 +1180,63 @@ def test_the_same_accelerator_is_one_table():
     from evals.core import Receipt, comparable
     a = Receipt("image", ("fox",), 3, {}, "", accelerator="unified:arm64")
     assert comparable(a, a)[0]
+
+
+# ---- the instrument, which is not the card --------------------------------
+
+
+def test_one_card_under_two_operating_systems_is_not_one_table():
+    """The RTX 4070 gives the SAME accelerator string under Windows and under
+    Linux, while peak memory comes from a job object on one and from ru_maxrss
+    on the other. The card is one part of the instrument, not all of it."""
+    from evals.core import Receipt, comparable
+    card = "discrete:NVIDIA GeForce RTX 4070"
+    windows = Receipt("image", ("fox",), 3, {}, "", accelerator=card,
+                      instruments={"peak": "job_peak_process", "ocr": "windows"})
+    linux = Receipt("image", ("fox",), 3, {}, "", accelerator=card,
+                    instruments={"peak": "ru_maxrss", "ocr": "rapidocr"})
+    ok, why = comparable(windows, linux)
+    assert not ok
+    assert "peak" in why or "ocr" in why
+
+
+def test_two_ocr_engines_are_two_graders():
+    """Vision reads this project's own text-render images 18/18 and tesseract
+    6/18. A CER from one is not a CER from another, exactly as PickScore is not
+    HPSv2."""
+    from evals.core import Receipt, comparable
+    a = Receipt("image", ("sign",), 1, {}, "", instruments={"ocr": "vision"})
+    b = Receipt("image", ("sign",), 1, {}, "", instruments={"ocr": "rapidocr"})
+    ok, why = comparable(a, b)
+    assert not ok and "ocr" in why
+
+
+def test_an_instrument_only_one_run_names_is_not_a_mismatch():
+    """Runs predate this field, and a fourth instrument added later must not
+    retroactively invalidate every result on disk."""
+    from evals.core import Receipt, comparable
+    old = Receipt("image", ("sign",), 1, {}, "")
+    new = Receipt("image", ("sign",), 1, {}, "",
+                  instruments={"peak": "ru_maxrss", "ocr": "rapidocr"})
+    ok, why = comparable(old, new)
+    assert ok, why
+    partial = Receipt("image", ("sign",), 1, {}, "",
+                      instruments={"peak": "ru_maxrss"})
+    assert comparable(partial, new)[0]
+
+
+def test_the_same_instruments_are_one_table():
+    from evals.core import Receipt, comparable
+    a = Receipt("image", ("sign",), 1, {}, "",
+                instruments={"peak": "ru_maxrss", "ocr": "rapidocr"})
+    b = Receipt("image", ("sign",), 1, {}, "",
+                instruments={"ocr": "rapidocr", "peak": "ru_maxrss"})
+    assert comparable(a, b)[0]
+
+
+def test_the_receipt_carries_its_instruments_to_disk():
+    """compare_runs reads these back out of results.json; a field that is not
+    written is a field that cannot refuse anything later."""
+    from evals.core import Receipt
+    r = Receipt("image", ("sign",), 1, {}, "", instruments={"ocr": "vision"})
+    assert r.as_dict()["instruments"] == {"ocr": "vision"}

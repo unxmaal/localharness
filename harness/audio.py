@@ -284,9 +284,39 @@ def record_argv(out: str | Path, seconds: float) -> list[str]:
             str(out), "trim", "0", str(seconds)]
 
 
+#: The player, per machine, first match wins. afplay ships with macOS and
+#: nothing ships with the other two, so the rest are what a machine is likely
+#: to already have: paplay and aplay come with PulseAudio/PipeWire and ALSA,
+#: and ffplay comes with the ffmpeg this repo already asks for elsewhere.
+PLAYERS = ("/usr/bin/afplay", "paplay", "aplay", "ffplay")
+
+
 def play_argv(path: str | Path) -> list[str]:
-    """afplay ships with macOS, so this one needs no PATH hedging."""
-    return ["/usr/bin/afplay", str(path)]
+    """How to play a file here.
+
+    The old version returned /usr/bin/afplay unconditionally, with a comment
+    saying afplay ships with macOS. True, and it still broke `lh say --play` on
+    Windows with a FileNotFoundError naming a path from another operating
+    system. `record_argv` above already resolves its binary and says what to
+    install when there is none; this does the same.
+    """
+    for candidate in PLAYERS:
+        if os.path.isabs(candidate):
+            if Path(candidate).exists():
+                return [candidate, str(path)]
+        else:
+            found = shutil.which(candidate)
+            if found:
+                # -nodisp -autoexit: ffplay otherwise opens a window and waits
+                # for a keypress, which is a hang in anything scripted.
+                if Path(found).stem == "ffplay":
+                    return [found, "-nodisp", "-autoexit", "-loglevel",
+                            "error", str(path)]
+                return [found, str(path)]
+    raise AudioError(
+        "nothing on this machine can play audio: tried "
+        f"{', '.join(PLAYERS)}. The file is written either way, so drop "
+        f"--play, or install ffmpeg for ffplay.")
 
 
 # ---------------------------------------------------------------------------

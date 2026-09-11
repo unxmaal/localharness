@@ -6,6 +6,7 @@ incident had to be recorded: by hand, in prose, after the fact.
 """
 import sys
 
+from evals import environment
 from evals.environment import capture
 
 
@@ -57,3 +58,14 @@ def test_records_the_accelerator_that_produced_the_result():
     assert a["kind"] in ("unified", "discrete")
     assert a["name"], "the accelerator is named"
     assert a["total_gb"] > 0
+
+
+def test_the_linux_machine_is_named_rather_than_called_x86_64(tmp_path):
+    """hw_model came from `sysctl -n hw.model`, which is empty on Linux, and
+    fell through to platform.processor() -- "x86_64". This module exists to
+    keep two machines' results apart, and two boxes with the same card would
+    have carried the same anonymous name."""
+    f = tmp_path / "product_name"
+    f.write_text("MS-7D25\n", encoding="utf-8")
+    assert environment._dmi_model(str(f)) == "MS-7D25"
+    assert environment._dmi_model(str(tmp_path / "absent")) == ""

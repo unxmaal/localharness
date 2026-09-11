@@ -51,6 +51,14 @@ RASTERIZER_CANDIDATES = (
 CHROME_CANDIDATES = (
     "chromium",
     "chrome",
+    # Linux puts the deliberate install on PATH under its package name. The
+    # bare "chromium" above already covers the apt and snap builds, but
+    # Google's own package installs as google-chrome-stable and matches
+    # nothing else here, so a machine that HAS Chrome answered "not installed"
+    # and the whole html lane went quiet.
+    "google-chrome-stable",
+    "google-chrome",
+    "chromium-browser",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",

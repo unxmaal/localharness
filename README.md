@@ -127,15 +127,24 @@ result says which one produced it. A lane that exists on one machine and not the
 other is unfinished.
 
 The checks work that way now. Text in a generated image is read by Apple's
-Vision on macOS and by Windows.Media.Ocr on Windows. HTML is rasterised by
-Chrome, or by Edge, which is Chromium and is already on every Windows install.
-Neither is named by the caller: each is found by asking the platform and the
-import, and a machine with neither warns and withholds the metric instead of
-failing the candidate.
+Vision on macOS, by Windows.Media.Ocr on Windows, and by RapidOCR on Linux,
+which ships no OCR engine of its own. HTML is rasterised by Chrome, or by Edge,
+which is Chromium and is already on every Windows install. None of them is
+named by the caller: each is found by asking the platform and the install, and
+a machine with none warns and withholds the metric instead of failing the
+candidate.
+
+Which one ran is part of the result. The three engines do not agree -- on this
+project's own generated images Vision and RapidOCR read the sign 18 times out
+of 18 and tesseract 6 -- so the engine goes into the run's receipt and two runs
+graded by different ones are refused a shared table. The same holds for peak
+memory, which is a job object on Windows, a phys_footprint on macOS and an
+`ru_maxrss` on Linux. The card alone does not identify the instrument: the same
+RTX 4070 under Windows and under Linux is one accelerator and two rigs.
 
 The generators do too, each through whatever tool suits the machine:
 
-| lane | Apple Silicon | Windows and NVIDIA |
+| lane | Apple Silicon | NVIDIA, on Windows or Linux |
 |---|---|---|
 | web, code, extract | mlx_lm.server | llama.cpp's router |
 | image | mflux | diffusers |
@@ -143,8 +152,8 @@ The generators do too, each through whatever tool suits the machine:
 | tts | mlx-audio | Kokoro through onnxruntime |
 | stt | mlx-audio, mlx-whisper | faster-whisper |
 | svg | traced from an image, or a text model | follows image and text |
-| ocr check | Apple Vision | Windows.Media.Ocr |
-| html render | Chrome | Chrome or Edge |
+| ocr check | Apple Vision | Windows.Media.Ocr, or RapidOCR |
+| html render | Chrome | Chrome, Edge or Chromium |
 | svg rasterise | rsvg-convert | rsvg-convert |
 
 Neither generator column names a model, which is on purpose. `mflux:z-image-turbo`
@@ -179,11 +188,13 @@ exist. Qwen3-30B-A3B at 4-bit is too big for that card and fits a 24 GB one, the
 same candidate and two answers. Without a card the harness still runs and
 reports system RAM as its budget.
 
-**The Windows box does not come back serving after a reboot, on purpose.** Its
-main job is games. `scripts/launchd.sh` installs units with RunAtLoad and
-KeepAlive because the mini exists to serve; `scripts/services.sh` registers
-nothing at all, so there is no scheduled task, no Run key and no startup
-shortcut to find later.
+**The desktop does not come back serving after a reboot, on purpose.** Its main
+job is games. `scripts/launchd.sh` installs units with RunAtLoad and KeepAlive
+because the mini exists to serve; `scripts/services.sh` registers nothing at
+all, so there is no scheduled task, no Run key, no startup shortcut and no
+systemd unit to find later. That file runs both halves of a dual-booting
+desktop: the only differences between them are how a process is launched
+detached, how it is asked whether it is alive, and how its tree is ended.
 
 ```bash
 ./scripts/services.sh start      # gateway, text, audio

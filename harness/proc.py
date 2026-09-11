@@ -14,6 +14,15 @@ high-water mark across every child the process has ever waited on, so a
 before/after delta reads 0 for each child after the largest. A published "2x
 the memory" comparison rested on that error.
 
+ON LINUX `/usr/bin/time` is a different program that spells the same request
+`-v`, and it is not installed by default at all -- the `time` most shells have
+is a builtin with no memory reporting. Rather than depend on a package, the
+child is reaped with `os.wait4`, whose rusage belongs to THAT child alone and
+so carries none of the accumulation the ru_maxrss note above warns about.
+`ru_maxrss` is peak RSS and not a footprint: it cannot see pages that were
+swapped out. That makes it a THIRD instrument, and `PEAK_METHOD` says which one
+produced a number so two of them are never ranked in one table.
+
 ON WINDOWS there is no `/usr/bin/time -l`, and the obvious substitute is a
 trap: GetProcessMemoryInfo answers for an exited process, but the working set
 is torn down at exit, so it reported 5.2 MB for a child that had just
@@ -39,6 +48,14 @@ from pathlib import Path
 # message in twenty lines of counters, so the child's stderr is diverted and
 # only the report is read back from the pipe.
 _PEAK = re.compile(r"(\d+)\s+peak memory footprint")
+
+#: WHICH INSTRUMENT MEASURED peak_kb. A job object's peak, a phys_footprint and
+#: a maxrss are three different quantities, and the same card under two
+#: operating systems is otherwise indistinguishable in a receipt. Recorded, so
+#: `evals.core.comparable` can refuse rather than average them.
+PEAK_METHOD = ("phys_footprint" if sys.platform == "darwin"
+               else "job_peak_process" if sys.platform == "win32"
+               else "ru_maxrss")
 
 
 @dataclass(frozen=True)
@@ -85,6 +102,8 @@ def run(argv: list[str], timeout: float | None = None,
     started = time.perf_counter()
     if sys.platform == "win32":
         return _run_windows(argv, timeout, stream, cwd, started)
+    if sys.platform != "darwin":
+        return _run_posix(argv, timeout, stream, cwd, started)
     if stream:
         # The child's stderr joins stdout on the inherited terminal, leaving the
         # pipe carrying nothing but time's report.
@@ -116,6 +135,64 @@ def _env() -> dict:
 def _peak_kb(time_report: str) -> int:
     m = _PEAK.search(time_report or "")
     return int(m.group(1)) // 1024 if m else 0
+
+
+# ---- Linux, and any other POSIX that is not macOS -------------------------
+
+
+def _wait4(proc, argv: list[str], timeout: float | None) -> tuple[int, int]:
+    """Reap `proc` ourselves and keep its rusage. Returns (returncode, peak_kb).
+
+    `os.wait4` answers for ONE child, so this is that run's peak and not a
+    high-water mark across every child ever waited on. subprocess has no way
+    to ask for rusage, so the child is reaped here and `proc.returncode` is set
+    afterwards to stop Popen reaping a pid that is already gone.
+    """
+    deadline = None if timeout is None else time.perf_counter() + timeout
+    wait = 0.001
+    while True:
+        pid, status, usage = os.wait4(proc.pid, os.WNOHANG)
+        if pid:
+            proc.returncode = os.waitstatus_to_exitcode(status)
+            # ru_maxrss is KILOBYTES on Linux and BYTES on macOS -- measured
+            # here, 13.8 MB reported as 13893632. macOS never reaches this
+            # branch, and a platform that reports bytes and is routed here
+            # would read a thousandfold high rather than fail.
+            return proc.returncode, int(usage.ru_maxrss)
+        if deadline is not None and time.perf_counter() > deadline:
+            proc.kill()
+            os.wait4(proc.pid, 0)
+            proc.returncode = -9
+            raise subprocess.TimeoutExpired(argv, timeout)
+        time.sleep(wait)
+        wait = min(wait * 2, 0.05)
+
+
+def _run_posix(argv: list[str], timeout: float | None, stream: bool,
+               cwd: str | Path | None, started: float) -> Outcome:
+    """Run argv, reaping it with wait4 so its peak RSS survives the exit.
+
+    Output goes to FILES rather than pipes. Nothing here drains a pipe while
+    waiting, so a child that fills one would deadlock; a file has no such
+    limit, and the macOS branch already writes the child's stderr to one for
+    an unrelated reason.
+    """
+    if stream:
+        proc = subprocess.Popen(argv, cwd=cwd)
+        code, peak_kb = _wait4(proc, argv, timeout)
+        return Outcome(code, round(time.perf_counter() - started, 3),
+                       peak_kb, "", "")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out_path = Path(tmp) / "out"
+        err_path = Path(tmp) / "err"
+        with open(out_path, "w", encoding="utf-8") as out, \
+                open(err_path, "w", encoding="utf-8") as err:
+            proc = subprocess.Popen(argv, stdout=out, stderr=err, cwd=cwd)
+            code, peak_kb = _wait4(proc, argv, timeout)
+        return Outcome(code, round(time.perf_counter() - started, 3), peak_kb,
+                       out_path.read_text(encoding="utf-8", errors="replace"),
+                       err_path.read_text(encoding="utf-8", errors="replace"))
 
 
 # ---- Windows --------------------------------------------------------------

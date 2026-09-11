@@ -62,6 +62,58 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  check-linux:
+    # The third machine. `ubuntu-latest` is 24.04, which is the release the
+    # desktop's spare NVMe will run, so a failure here is a failure on a real
+    # box rather than on a runner nobody owns. That parity is the whole reason
+    # the distro question was settled the way it was.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Tools make check needs
+        # shellcheck for `make lint`; librsvg2-bin for the ink lane; ffmpeg for
+        # the video checks; zsh because tests/shells.py runs scripts/env.sh in
+        # three shells and a missing one is a silent skip; fonts-dejavu-core
+        # because the OCR fixture renders real type and PIL's bitmap fallback
+        # would measure the fixture rather than the check.
+        #
+        # Chrome is already on this image, and render.py finds it by name.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            shellcheck librsvg2-bin ffmpeg zsh fonts-dejavu-core
+          missing=""
+          for tool in shellcheck rsvg-convert ffmpeg zsh; do
+            command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::not installed:$missing" >&2
+            exit 1
+          fi
+
+      - run: uv sync --python 3.12
+
+      - name: make check
+        run: set -o pipefail && make check 2>&1 | tee /tmp/check.log
+
+      - name: What did not run
+        if: always()
+        run: |
+          {
+            echo "### Skipped on this runner"
+            echo
+            echo '```'
+            grep -E '^SKIPPED' /tmp/check.log || echo 'nothing skipped'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   check-windows:
     # The second measurement machine. Nothing here is Apple Silicon, so the MLX
     # lanes skip and the "What did not run" step below prints which ones.

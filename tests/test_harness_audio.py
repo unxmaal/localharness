@@ -588,3 +588,37 @@ def test_the_ear_says_which_runtime_produced_the_number():
     same number even at the same model version."""
     assert audio.transcriber(backend="fluidaudio", model="v2").label == \
         "fluidaudio:v2"
+
+
+# ---- playing back, on whichever machine this is ---------------------------
+
+
+def test_play_argv_resolves_a_player_rather_than_naming_one(monkeypatch):
+    """This returned /usr/bin/afplay unconditionally, which is true of macOS
+    and was already a FileNotFoundError on Windows naming a path from another
+    operating system."""
+    monkeypatch.setattr(audio.os.path, "isabs", lambda p: False)
+    monkeypatch.setattr(audio.shutil, "which",
+                        lambda name: "/usr/bin/paplay" if name == "paplay"
+                        else None)
+    assert audio.play_argv("/tmp/a.wav") == ["/usr/bin/paplay", "/tmp/a.wav"]
+
+
+def test_ffplay_is_told_not_to_open_a_window(monkeypatch):
+    """ffplay otherwise opens a window and waits for a keypress, which is a
+    hang in anything scripted."""
+    monkeypatch.setattr(audio.os.path, "isabs", lambda p: False)
+    monkeypatch.setattr(audio.shutil, "which",
+                        lambda name: "/usr/bin/ffplay" if name == "ffplay"
+                        else None)
+    argv = audio.play_argv("/tmp/a.wav")
+    assert argv[0] == "/usr/bin/ffplay"
+    assert "-autoexit" in argv and "-nodisp" in argv
+
+
+def test_no_player_says_what_to_install_rather_than_tracebacking(monkeypatch):
+    monkeypatch.setattr(audio.os.path, "isabs", lambda p: False)
+    monkeypatch.setattr(audio.shutil, "which", lambda name: None)
+    with pytest.raises(audio.AudioError) as exc:
+        audio.play_argv("/tmp/a.wav")
+    assert "ffmpeg" in str(exc.value)

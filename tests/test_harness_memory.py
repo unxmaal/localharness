@@ -197,3 +197,25 @@ def test_the_accelerator_is_detected_on_this_machine():
     assert acc.kind in ("unified", "discrete")
     assert acc.total_gb > 1, "no accelerator memory was detected"
     assert 0 < acc.available_gb <= acc.total_gb
+
+
+# ---- the machine with no vm_stat and no card ------------------------------
+
+
+def test_meminfo_is_read_rather_than_every_byte_declared_free(tmp_path):
+    """A Linux box with no discrete card fell through to total_gb(), which
+    answers "all of it". This module exists because a budget computed from a
+    number nobody checked took a machine down."""
+    f = tmp_path / "meminfo"
+    f.write_text("MemTotal:       65536000 kB\n"
+                 "MemFree:         1048576 kB\n"
+                 "MemAvailable:   33554432 kB\n"
+                 "Buffers:          123456 kB\n", encoding="utf-8")
+    assert round(memory._meminfo_available_gb(str(f)), 1) == 32.0
+
+
+def test_a_missing_meminfo_is_zero_rather_than_a_crash(tmp_path):
+    """macOS and Windows have no /proc, and available_gb falls back from here
+    rather than failing."""
+    assert memory._meminfo_available_gb(str(tmp_path / "nope")) == 0.0
+    assert memory._meminfo_available_gb(str(tmp_path)) == 0.0

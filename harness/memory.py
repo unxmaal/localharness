@@ -212,7 +212,12 @@ def available_gb() -> float:
         found = _discrete()
         if found:
             return found.available_gb
-        return total_gb()
+        # NOT total_gb(). On a Linux box with no card that answered "every byte
+        # is free", and this module exists because a budget computed from a
+        # number nobody checked took the machine down. MemAvailable is the
+        # kernel's own estimate of what can be handed out without swapping,
+        # which is the same question free+inactive answers on macOS.
+        return _meminfo_available_gb() or total_gb()
     page = 16384
     counts = {}
     for line in out.splitlines():
@@ -236,6 +241,18 @@ def available_gb() -> float:
     if not free:
         return total_gb()
     return free * page / 1024 ** 3
+
+
+def _meminfo_available_gb(path: str = "/proc/meminfo") -> float:
+    """MemAvailable, in GB. 0.0 where there is no /proc/meminfo."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) / 1024**2
+    except (OSError, ValueError, IndexError):
+        pass
+    return 0.0
 
 
 def fits(need_gb: float, available_gb: float, ceiling_gb: float,
