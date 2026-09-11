@@ -282,3 +282,12 @@ def test_a_snap_browser_is_not_a_rasterizer(monkeypatch):
                         if name == "google-chrome-stable" else None)
     assert render._first_available(
         ("chromium", "google-chrome-stable")) == "/usr/bin/google-chrome-stable"
+
+
+def test_the_renderer_makes_no_requests_of_its_own(tmp_path):
+    """This module refuses to fetch a generated page's external URLs, and then
+    chrome fetched its own: a Google Cloud Messaging registration was the last
+    thing Chromium printed before the Linux runner's render timed out."""
+    argv = render.chrome_argv(tmp_path / "a.html", tmp_path / "a.png", 256)
+    assert "--disable-background-networking" in argv
+    assert "--disable-component-update" in argv

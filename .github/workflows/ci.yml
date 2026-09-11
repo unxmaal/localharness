@@ -123,7 +123,10 @@ jobs:
             echo
             uv run python -c "from harness.checks import render; print('render.py chose:', render.chrome_path()); print('rendered:', render.rasterize_html('<p>ci</p>', '/tmp/ci-probe.png'))" 2>&1 | tail -12 || true
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          # tee, not >>: a step summary is not in the job log, and reading it
+          # needs a browser. A diagnostic nobody can read from the terminal is
+          # a diagnostic that costs another round.
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: make check
         run: set -o pipefail && make check 2>&1 | tee /tmp/check.log
@@ -137,7 +140,7 @@ jobs:
             echo '```'
             grep -E '^SKIPPED' /tmp/check.log || echo 'nothing skipped'
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
   check-windows:
     # The second measurement machine. Nothing here is Apple Silicon, so the MLX

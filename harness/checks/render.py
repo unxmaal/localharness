@@ -155,6 +155,17 @@ def chrome_argv(src: Path, out: Path, width: int,
         "--force-device-scale-factor=1",
         "--default-background-color=FFFFFFFF",
         "--virtual-time-budget=2000",
+        # NOTHING THIS CHECKER DOES SHOULD TOUCH THE NETWORK. The docstring
+        # above says the generated page's external URLs must never be fetched,
+        # and then chrome went and fetched its OWN: the last thing Chromium
+        # printed before the Linux runner's timeout was a Google Cloud
+        # Messaging registration attempt. Component updates, variations seeds
+        # and GCM are all traffic a screenshot of a local file has no use for,
+        # and --virtual-time-budget waits on network that here never settles.
+        "--disable-background-networking",
+        "--disable-component-update",
+        "--disable-sync",
+        "--disable-client-side-phishing-detection",
         f"--window-size={width},{int(width * 0.75)}",
         f"--screenshot={out}",
     ]
