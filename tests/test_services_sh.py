@@ -80,7 +80,7 @@ def test_stop_ends_it_and_status_agrees(tmp_path):
     script = tree(tmp_path, ALIVE)
     run(script, "start", "gateway")
     pidfile = tmp_path / "home" / "run" / "gateway.pid"
-    pid = int(pidfile.read_text().strip())
+    pid = int(pidfile.read_text(encoding="utf-8").strip())
     stopped = run(script, "stop", "gateway")
     assert "stopped" in stopped.stdout, stopped.stdout
     assert not pidfile.exists()

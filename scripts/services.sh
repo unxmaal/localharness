@@ -31,12 +31,20 @@ RUN="$LH_HOME/run"
 LOGS="$LH_HOME/logs"
 mkdir -p "$RUN" "$LOGS"
 
-#: name -> the launcher that serves it.
-declare -A LAUNCHER=(
-  [gateway]="scripts/serve-gateway.sh"
-  [llamacpp]="scripts/serve-llamacpp.sh"
-  [audio]="scripts/serve-audio-cuda.sh"
-)
+# name -> the launcher that serves it. A case rather than an associative
+# array: `declare -A` is bash 4, macOS ships bash 3.2 as /bin/bash, and there
+# it does not fail -- it reads [gateway]="..." as an arithmetic subscript and
+# dies with "gateway: unbound variable" under set -u. This machine's own
+# launchers are launchd's, so nobody would have run into it in anger; the
+# tests would have had to skip on a whole runner instead.
+launcher_for() {
+  case "$1" in
+    gateway)  printf '%s\n' "scripts/serve-gateway.sh" ;;
+    llamacpp) printf '%s\n' "scripts/serve-llamacpp.sh" ;;
+    audio)    printf '%s\n' "scripts/serve-audio-cuda.sh" ;;
+    *)        return 1 ;;
+  esac
+}
 ALL=(gateway llamacpp audio)
 
 usage() {
@@ -75,7 +83,8 @@ alive() {
 }
 
 start_one() {
-  local name="$1" script="${LAUNCHER[$1]:-}" pid bash_exe work out err pidpath
+  local name="$1" script pid bash_exe work out err pidpath
+  script="$(launcher_for "$1" || true)"
   [ -n "$script" ] || { echo "unknown service $name" >&2; return 1; }
   pid="$(cat "$(pidfile "$name")" 2>/dev/null || true)"
   if alive "$pid"; then
