@@ -266,3 +266,19 @@ def test_the_apparmor_switch_is_read_rather_than_guessed(tmp_path, monkeypatch):
     render._sandbox_is_unusable.cache_clear()
     assert render._sandbox_is_unusable() is False
     render._sandbox_is_unusable.cache_clear()
+
+
+def test_a_snap_browser_is_not_a_rasterizer(monkeypatch):
+    """`chromium` on Ubuntu is a snap, and this list asks for it first. A
+    confined browser cannot read the page it is handed, which is written to a
+    temporary directory: it starts, writes no screenshot, and the check times
+    out after a minute while a browser is plainly installed."""
+    monkeypatch.setattr(render.shutil, "which",
+                        lambda name: "/snap/bin/chromium"
+                        if name == "chromium" else None)
+    assert render._first_available(("chromium",)) is None
+    monkeypatch.setattr(render.shutil, "which",
+                        lambda name: "/usr/bin/google-chrome-stable"
+                        if name == "google-chrome-stable" else None)
+    assert render._first_available(
+        ("chromium", "google-chrome-stable")) == "/usr/bin/google-chrome-stable"

@@ -77,6 +77,19 @@ class RenderError(RuntimeError):
     """The document could not be drawn."""
 
 
+def _is_snap(path: str) -> bool:
+    """A snap is confined and cannot read the file it is being asked to open.
+
+    `chromium` on Ubuntu is a snap, and this list asks for `chromium` FIRST as
+    the deliberate install. The pages rendered here are written to a temporary
+    directory, which a confined browser has no access to: it starts, logs
+    unrelated dbus noise, writes no screenshot, and the check times out after a
+    minute. The html and ink lanes then go unmeasured on the machine while
+    something that looks like a browser is plainly installed.
+    """
+    return path.startswith("/snap/") or os.path.realpath(path).startswith("/snap/")
+
+
 def _first_available(candidates) -> str | None:
     """The first candidate that exists, by PATH lookup or by location.
 
@@ -91,7 +104,7 @@ def _first_available(candidates) -> str | None:
                 return candidate
         else:
             found = shutil.which(candidate)
-            if found:
+            if found and not _is_snap(found):
                 return found
     return None
 
@@ -189,7 +202,11 @@ def rasterize_html(html: str, out: str | Path, width: int = 800) -> Path:
     finally:
         _remove_tree(Path(d))
     if not out.exists():
-        raise RenderError(f"chrome produced no screenshot: {stderr[:300]}")
+        # NAME THE BINARY. "chrome produced no screenshot" is unactionable on a
+        # machine with three of them installed, and the first 300 characters of
+        # chrome's stderr are usually dbus noise rather than the reason.
+        raise RenderError(f"chrome produced no screenshot: "
+                          f"{chrome_path()} said {stderr[:300]}")
     return out
 
 
