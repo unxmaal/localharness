@@ -232,3 +232,37 @@ def test_a_chromium_family_browser_is_found_where_this_os_puts_it():
     found = render.chrome_path()
     assert found, "no Chromium-family browser found on this machine"
     assert Path(found).exists(), found
+
+
+def test_the_sandbox_is_dropped_only_where_the_kernel_refuses_it(monkeypatch,
+                                                                 tmp_path):
+    """Ubuntu 23.10 and later deny the unprivileged user namespace Chrome's
+    renderer sandbox needs, and Chrome then dies with "No usable sandbox!" and
+    writes no screenshot: the html and ink lanes go unmeasured on the whole
+    machine. A kernel that allows the namespace keeps the sandbox."""
+    src, out = tmp_path / "a.html", tmp_path / "a.png"
+    monkeypatch.setattr(render, "_sandbox_is_unusable", lambda: False)
+    assert "--no-sandbox" not in render.chrome_argv(src, out, 256)
+    monkeypatch.setattr(render, "_sandbox_is_unusable", lambda: True)
+    assert "--no-sandbox" in render.chrome_argv(src, out, 256)
+
+
+def test_the_apparmor_switch_is_read_rather_than_guessed(tmp_path, monkeypatch):
+    """kernel.apparmor_restrict_unprivileged_userns is the switch, and it is 1
+    on a stock Ubuntu 24.04 and absent everywhere else this runs."""
+    import builtins
+    real = builtins.open
+
+    def fake(path, *a, **k):
+        if str(path).endswith("apparmor_restrict_unprivileged_userns"):
+            return real(tmp_path / "switch", *a, **k)
+        return real(path, *a, **k)
+
+    (tmp_path / "switch").write_text("1\n", encoding="utf-8")
+    monkeypatch.setattr(builtins, "open", fake)
+    render._sandbox_is_unusable.cache_clear()
+    assert render._sandbox_is_unusable() is True
+    (tmp_path / "switch").write_text("0\n", encoding="utf-8")
+    render._sandbox_is_unusable.cache_clear()
+    assert render._sandbox_is_unusable() is False
+    render._sandbox_is_unusable.cache_clear()

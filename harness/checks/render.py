@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from functools import lru_cache
 from pathlib import Path
 
 from harness.checks.base import CheckResult
@@ -105,6 +106,21 @@ def rasterizer_path() -> str | None:
     return _first_available(RASTERIZER_CANDIDATES)
 
 
+@lru_cache(maxsize=1)
+def _sandbox_is_unusable() -> bool:
+    """True where the kernel refuses the user namespace Chrome's sandbox needs.
+
+    Ubuntu 23.10 introduced kernel.apparmor_restrict_unprivileged_userns, on by
+    default, and 24.04 kept it. Nothing else this project runs on sets it.
+    """
+    try:
+        with open("/proc/sys/kernel/apparmor_restrict_unprivileged_userns",
+                  encoding="utf-8") as fh:
+            return fh.read().strip() == "1"
+    except OSError:
+        return False
+
+
 def chrome_argv(src: Path, out: Path, width: int,
                 profile: Path | None = None) -> list[str]:
     """Headless Chrome, rendering a LOCAL FILE in an ISOLATED PROFILE.
@@ -129,6 +145,18 @@ def chrome_argv(src: Path, out: Path, width: int,
         f"--window-size={width},{int(width * 0.75)}",
         f"--screenshot={out}",
     ]
+    if _sandbox_is_unusable():
+        # Chrome's renderer sandbox needs an unprivileged user namespace, and
+        # Ubuntu 23.10 and later deny one by AppArmor default. Without this it
+        # dies with "No usable sandbox!" and produces no screenshot at all, so
+        # the entire html and ink lanes go unmeasured on the machine.
+        #
+        # ASKED RATHER THAN ASSUMED: a machine whose kernel allows the
+        # namespace keeps the sandbox. The pages rendered here are markup this
+        # project generated, opened as file:// with no network fetch, but that
+        # is a reason to accept the risk where it is forced, not to take it
+        # everywhere.
+        argv.append("--no-sandbox")
     if profile is not None:
         # A fresh profile otherwise spends its first run on setup work and
         # first-run prompts, which is time added to every single check.
