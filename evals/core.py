@@ -418,12 +418,20 @@ class Receipt:
     #: files from one lane may have been produced by different programs on
     #: different silicon. Empty for runs written before this existed.
     accelerator: str = ""
+    #: What MEASURED the numbers, as name -> implementation. The card is not
+    #: the instrument: the same RTX 4070 under Windows and under Linux gives
+    #: the identical `accelerator` string, while peak memory comes from a job
+    #: object on one and from ru_maxrss on the other, and CER comes from two
+    #: different OCR engines. Those are two graders by exactly the argument
+    #: that already disqualifies PickScore against HPSv2.
+    instruments: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {"modality": self.modality, "case_ids": list(self.case_ids),
                 "repeat": self.repeat, "sampling": dict(self.sampling),
                 "gateway": self.gateway, "adherence": self.adherence,
-                "tier": self.tier, "accelerator": self.accelerator}
+                "tier": self.tier, "accelerator": self.accelerator,
+                "instruments": dict(self.instruments)}
 
 
 def comparable(a: Receipt, b: Receipt) -> tuple[bool, str]:
@@ -436,6 +444,8 @@ def comparable(a: Receipt, b: Receipt) -> tuple[bool, str]:
       * `sampling` -- adding a repetition penalty changed what the svg lane
         produces, so a run from before it is a different exam from one after.
       * `adherence` -- PickScore and HPSv2 are two graders.
+      * `instruments` -- so is an OCR engine, and so is a peak-memory method.
+        Compared only where both runs name the same instrument.
 
     OUT, each for a stated reason:
       * TIMING AND MEMORY. They are outputs of the run, not properties of the
@@ -479,6 +489,16 @@ def comparable(a: Receipt, b: Receipt) -> tuple[bool, str]:
         return False, (f"different accelerator: {a.accelerator} vs "
                        f"{b.accelerator}. Two machines, and each lane has its "
                        f"own tool on each")
+    # ONLY THE INSTRUMENTS BOTH RUNS NAME. A run that recorded no OCR engine is
+    # not thereby different from one that did, and adding a fourth instrument
+    # later must not retroactively invalidate every result on disk. Same rule
+    # as the empty accelerator above, applied per key.
+    for name in sorted(set(a.instruments) & set(b.instruments)):
+        mine, theirs = a.instruments[name], b.instruments[name]
+        if mine and theirs and mine != theirs:
+            return False, (f"different {name}: {mine} vs {theirs}. The card is "
+                           f"not the instrument, and two instruments are two "
+                           f"graders")
     return True, "same exam"
 
 

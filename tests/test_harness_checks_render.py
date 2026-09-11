@@ -232,3 +232,111 @@ def test_a_chromium_family_browser_is_found_where_this_os_puts_it():
     found = render.chrome_path()
     assert found, "no Chromium-family browser found on this machine"
     assert Path(found).exists(), found
+
+
+def test_the_sandbox_is_dropped_only_where_the_kernel_refuses_it(monkeypatch,
+                                                                 tmp_path):
+    """Ubuntu 23.10 and later deny the unprivileged user namespace Chrome's
+    renderer sandbox needs, and Chrome then dies with "No usable sandbox!" and
+    writes no screenshot: the html and ink lanes go unmeasured on the whole
+    machine. A kernel that allows the namespace keeps the sandbox."""
+    src, out = tmp_path / "a.html", tmp_path / "a.png"
+    monkeypatch.setattr(render, "_sandbox_is_unusable", lambda: False)
+    assert "--no-sandbox" not in render.chrome_argv(src, out, 256)
+    monkeypatch.setattr(render, "_sandbox_is_unusable", lambda: True)
+    assert "--no-sandbox" in render.chrome_argv(src, out, 256)
+
+
+def test_the_apparmor_switch_is_read_rather_than_guessed(tmp_path, monkeypatch):
+    """kernel.apparmor_restrict_unprivileged_userns is the switch, and it is 1
+    on a stock Ubuntu 24.04 and absent everywhere else this runs."""
+    import builtins
+    real = builtins.open
+
+    def fake(path, *a, **k):
+        if str(path).endswith("apparmor_restrict_unprivileged_userns"):
+            return real(tmp_path / "switch", *a, **k)
+        return real(path, *a, **k)
+
+    (tmp_path / "switch").write_text("1\n", encoding="utf-8")
+    monkeypatch.setattr(builtins, "open", fake)
+    render._sandbox_is_unusable.cache_clear()
+    assert render._sandbox_is_unusable() is True
+    (tmp_path / "switch").write_text("0\n", encoding="utf-8")
+    render._sandbox_is_unusable.cache_clear()
+    assert render._sandbox_is_unusable() is False
+    render._sandbox_is_unusable.cache_clear()
+
+
+def test_a_snap_browser_is_not_a_rasterizer(monkeypatch):
+    """`chromium` on Ubuntu is a snap, and this list asks for it first. A
+    confined browser cannot read the page it is handed, which is written to a
+    temporary directory: it starts, writes no screenshot, and the check times
+    out after a minute while a browser is plainly installed."""
+    monkeypatch.setattr(render.shutil, "which",
+                        lambda name: "/snap/bin/chromium"
+                        if name == "chromium" else None)
+    assert render._first_available(("chromium",)) is None
+    monkeypatch.setattr(render.shutil, "which",
+                        lambda name: "/usr/bin/google-chrome-stable"
+                        if name == "google-chrome-stable" else None)
+    assert render._first_available(
+        ("chromium", "google-chrome-stable")) == "/usr/bin/google-chrome-stable"
+
+
+def test_the_renderer_makes_no_requests_of_its_own(tmp_path):
+    """This module refuses to fetch a generated page's external URLs, and then
+    chrome fetched its own: a Google Cloud Messaging registration was the last
+    thing Chromium printed before the Linux runner's render timed out."""
+    argv = render.chrome_argv(tmp_path / "a.html", tmp_path / "a.png", 256)
+    assert "--disable-background-networking" in argv
+    assert "--disable-component-update" in argv
+
+
+def test_the_browser_can_be_named(monkeypatch, tmp_path):
+    """A machine with three chromiums installed needs a way to say which one,
+    without editing a candidate list in this repo."""
+    named = tmp_path / "my-chrome"
+    named.write_text("", encoding="utf-8")
+    monkeypatch.setenv(render.CHROME_ENV, str(named))
+    assert render.chrome_path() == str(named)
+    monkeypatch.setenv(render.CHROME_ENV, str(tmp_path / "absent"))
+    assert render.chrome_path() != str(tmp_path / "absent")
+
+
+def test_the_isolated_profile_can_be_turned_off(monkeypatch):
+    """It is not free: with one, chrome writes the screenshot and never exits,
+    and on some builds no screenshot arrives at all."""
+    assert render._isolate_profile() is True
+    monkeypatch.setenv(render.PROFILE_ENV, "0")
+    assert render._isolate_profile() is False
+
+
+def test_a_browser_that_cannot_take_a_profile_is_retried_without_one(
+        monkeypatch, tmp_path):
+    """Measured on a Linux runner holding two browsers of the same version:
+    Chromium 152.0.7977.0 writes no screenshot when handed its own
+    --user-data-dir, and Chrome 152.0.7977.82 is fine either way. Dropping the
+    profile everywhere would put every render back in the user's own Chrome
+    profile, which is what issue #29 was about."""
+    render._PROFILE_HANGS.discard("/fake/chromium")
+    monkeypatch.setattr(render, "chrome_path", lambda: "/fake/chromium")
+    seen = []
+
+    def fake_shoot(argv, out, cwd, timeout=60.0):
+        had_profile = any(a.startswith("--user-data-dir") for a in argv)
+        seen.append(had_profile)
+        if not had_profile:
+            Path(out).write_bytes(b"\x89PNG\r\n\x1a\n")
+        return "chrome said nothing useful"
+
+    monkeypatch.setattr(render, "_shoot", fake_shoot)
+    render.rasterize_html("<p>x</p>", tmp_path / "a.png")
+    assert seen == [True, False], seen
+    assert "/fake/chromium" in render._PROFILE_HANGS
+
+    # And it is remembered: the next render does not pay the timeout again.
+    seen.clear()
+    render.rasterize_html("<p>x</p>", tmp_path / "b.png")
+    assert seen == [False], seen
+    render._PROFILE_HANGS.discard("/fake/chromium")

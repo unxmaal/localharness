@@ -45,6 +45,17 @@ def _last_word(s: str) -> str:
     return parts[-1] if parts else ""
 
 
+def _dmi_model(path: str = "/sys/devices/virtual/dmi/id/product_name") -> str:
+    """What Linux calls hw.model. Without it a receipt from the Linux box says
+    "x86_64", which is what platform.processor() answers there, and this module
+    exists to keep two machines' results apart."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
 def capture() -> dict:
     swap = _sh("sysctl", "-n", "vm.swapusage")
     m = re.search(r"used\s*=\s*([\d.]+)M", swap)
@@ -54,8 +65,8 @@ def capture() -> dict:
     accelerator = memory.detect()
 
     return {
-        "hw_model": _sh("sysctl", "-n", "hw.model") or platform.processor()
-                    or platform.machine(),
+        "hw_model": (_sh("sysctl", "-n", "hw.model") or _dmi_model()
+                     or platform.processor() or platform.machine()),
         "os": platform.platform(),
         # The macOS version where there is one, empty elsewhere -- rather than
         # a key named `macos` holding a Windows string.

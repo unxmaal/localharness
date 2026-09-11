@@ -25,7 +25,11 @@ def render(path, text, size=(480, 200)):
     # the fixture rather than the check.
     font = None
     for candidate in ("/System/Library/Fonts/Supplemental/Arial.ttf",
-                      "C:/Windows/Fonts/arial.ttf"):
+                      "C:/Windows/Fonts/arial.ttf",
+                      "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                      "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                      "/usr/share/fonts/truetype/liberation/"
+                      "LiberationSans-Regular.ttf"):
         try:
             font = ImageFont.truetype(candidate, 96)
             break
@@ -177,3 +181,27 @@ def test_an_unmeasured_lane_publishes_no_metric(tmp_path, monkeypatch):
     monkeypatch.setattr(ocr, "available_backend", lambda: None)
     r = ocr.check(render(tmp_path / "a.png", "OPEN"), expect="OPEN")
     assert "cer" not in r.metrics
+
+
+def test_a_machine_with_no_os_engine_still_measures_the_lane():
+    """Linux ships no OCR engine. RapidOCR is the backend there, and it is not
+    pinned to Linux -- a Mac without pyobjc measures the lane instead of
+    skipping it, and the receipt records which engine ran."""
+    platform_name, probe, reader = ocr.BACKENDS["rapidocr"]
+    assert platform_name == "", "rapidocr must not be pinned to one platform"
+    assert callable(probe) and callable(reader)
+
+
+def test_every_backend_is_gated_on_being_installed_not_just_on_the_platform():
+    """Windows OCR is an optional component and pyobjc is an optional install.
+    A platform match alone said yes to both and then failed on the import."""
+    for name, (_, probe, _) in ocr.BACKENDS.items():
+        assert callable(probe), name
+        assert probe() in (True, False), name
+
+
+def test_tesseract_is_not_a_backend():
+    """Measured on this project's own 18 text-render images: Vision 18/18,
+    RapidOCR 18/18, tesseract 6/18, tesseract with preprocessing 0/18. It would
+    have reported twelve good renders as total failures."""
+    assert "tesseract" not in ocr.BACKENDS

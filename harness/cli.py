@@ -325,7 +325,13 @@ def cmd_say(a) -> int:
     except audio.AudioError as exc:
         return err(str(exc))
     if a.play:
-        proc.run(audio.play_argv(out))
+        # THE FILE IS ALREADY WRITTEN. A machine with no player is a missing
+        # convenience, not a failed synthesis, so this warns and still reports
+        # where the audio is.
+        try:
+            proc.run(audio.play_argv(out))
+        except audio.AudioError as exc:
+            print(f"warning: {exc}", file=sys.stderr)
     return say(path=out, human=str(out))
 
 

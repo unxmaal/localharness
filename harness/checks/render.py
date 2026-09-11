@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from functools import lru_cache
 from pathlib import Path
 
 from harness.checks.base import CheckResult
@@ -51,6 +52,14 @@ RASTERIZER_CANDIDATES = (
 CHROME_CANDIDATES = (
     "chromium",
     "chrome",
+    # Linux puts the deliberate install on PATH under its package name. The
+    # bare "chromium" above already covers the apt and snap builds, but
+    # Google's own package installs as google-chrome-stable and matches
+    # nothing else here, so a machine that HAS Chrome answered "not installed"
+    # and the whole html lane went quiet.
+    "google-chrome-stable",
+    "google-chrome",
+    "chromium-browser",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
@@ -68,6 +77,19 @@ class RenderError(RuntimeError):
     """The document could not be drawn."""
 
 
+def _is_snap(path: str) -> bool:
+    """A snap is confined and cannot read the file it is being asked to open.
+
+    `chromium` on Ubuntu is a snap, and this list asks for `chromium` FIRST as
+    the deliberate install. The pages rendered here are written to a temporary
+    directory, which a confined browser has no access to: it starts, logs
+    unrelated dbus noise, writes no screenshot, and the check times out after a
+    minute. The html and ink lanes then go unmeasured on the machine while
+    something that looks like a browser is plainly installed.
+    """
+    return path.startswith("/snap/") or os.path.realpath(path).startswith("/snap/")
+
+
 def _first_available(candidates) -> str | None:
     """The first candidate that exists, by PATH lookup or by location.
 
@@ -82,19 +104,55 @@ def _first_available(candidates) -> str | None:
                 return candidate
         else:
             found = shutil.which(candidate)
-            if found:
+            if found and not _is_snap(found):
                 return found
     return None
 
 
+#: Name the browser, and say whether to isolate its profile. A machine with
+#: three chromiums installed needs a way to say which, and the isolated profile
+#: is the difference between a render that works and one that hangs on some
+#: builds -- see RULE #198 and the comment in rasterize_html.
+CHROME_ENV = "LH_CHROME"
+PROFILE_ENV = "LH_CHROME_PROFILE"
+
+
 def chrome_path() -> str | None:
-    """The browser to render HTML with, or None if there is not one."""
+    """The browser to render HTML with, or None if there is not one.
+
+    $LH_CHROME wins when it names something that exists. The candidate list is
+    a guess about where a browser lives; a person who has three of them and
+    knows which one works should not have to edit this file.
+    """
+    named = os.environ.get(CHROME_ENV, "").strip()
+    if named and Path(named).exists():
+        return named
     return _first_available(CHROME_CANDIDATES)
+
+
+def _isolate_profile() -> bool:
+    """Whether to hand chrome its own --user-data-dir. See rasterize_html."""
+    return os.environ.get(PROFILE_ENV, "1").strip() not in ("0", "no", "false")
 
 
 def rasterizer_path() -> str | None:
     """The SVG rasterizer, or None. Still OPTIONAL -- see the module docstring."""
     return _first_available(RASTERIZER_CANDIDATES)
+
+
+@lru_cache(maxsize=1)
+def _sandbox_is_unusable() -> bool:
+    """True where the kernel refuses the user namespace Chrome's sandbox needs.
+
+    Ubuntu 23.10 introduced kernel.apparmor_restrict_unprivileged_userns, on by
+    default, and 24.04 kept it. Nothing else this project runs on sets it.
+    """
+    try:
+        with open("/proc/sys/kernel/apparmor_restrict_unprivileged_userns",
+                  encoding="utf-8") as fh:
+            return fh.read().strip() == "1"
+    except OSError:
+        return False
 
 
 def chrome_argv(src: Path, out: Path, width: int,
@@ -118,9 +176,32 @@ def chrome_argv(src: Path, out: Path, width: int,
         "--force-device-scale-factor=1",
         "--default-background-color=FFFFFFFF",
         "--virtual-time-budget=2000",
+        # NOTHING THIS CHECKER DOES SHOULD TOUCH THE NETWORK. The docstring
+        # above says the generated page's external URLs must never be fetched,
+        # and then chrome went and fetched its OWN: the last thing Chromium
+        # printed before the Linux runner's timeout was a Google Cloud
+        # Messaging registration attempt. Component updates, variations seeds
+        # and GCM are all traffic a screenshot of a local file has no use for,
+        # and --virtual-time-budget waits on network that here never settles.
+        "--disable-background-networking",
+        "--disable-component-update",
+        "--disable-sync",
+        "--disable-client-side-phishing-detection",
         f"--window-size={width},{int(width * 0.75)}",
         f"--screenshot={out}",
     ]
+    if _sandbox_is_unusable():
+        # Chrome's renderer sandbox needs an unprivileged user namespace, and
+        # Ubuntu 23.10 and later deny one by AppArmor default. Without this it
+        # dies with "No usable sandbox!" and produces no screenshot at all, so
+        # the entire html and ink lanes go unmeasured on the machine.
+        #
+        # ASKED RATHER THAN ASSUMED: a machine whose kernel allows the
+        # namespace keeps the sandbox. The pages rendered here are markup this
+        # project generated, opened as file:// with no network fetch, but that
+        # is a reason to accept the risk where it is forced, not to take it
+        # everywhere.
+        argv.append("--no-sandbox")
     if profile is not None:
         # A fresh profile otherwise spends its first run on setup work and
         # first-run prompts, which is time added to every single check.
@@ -130,6 +211,19 @@ def chrome_argv(src: Path, out: Path, width: int,
                  "--disable-extensions"]
     argv.append(f"file://{src}")
     return argv
+
+
+#: Browsers that produced no screenshot when given their own --user-data-dir.
+#: Per process: the first render on such a machine pays one timeout, the rest
+#: skip straight to the arrangement that works.
+_PROFILE_HANGS: set[str] = set()
+
+
+def _profiles_to_try(scratch: Path) -> list:
+    """The --user-data-dir settings to attempt, in order."""
+    if _isolate_profile() and (chrome_path() or "") not in _PROFILE_HANGS:
+        return [scratch / "chrome-profile", None]
+    return [None]
 
 
 def rasterize_html(html: str, out: str | Path, width: int = 800) -> Path:
@@ -148,12 +242,36 @@ def rasterize_html(html: str, out: str | Path, width: int = 800) -> Path:
     try:
         src = Path(d) / "page.html"
         src.write_text(html, encoding="utf-8")
-        profile = Path(d) / "chrome-profile"
-        stderr = _shoot(chrome_argv(src, out, width, profile=profile), out, d)
+        # THE ISOLATED PROFILE IS NOT FREE, AND SOME BUILDS CANNOT TAKE IT.
+        # With one, chrome writes the screenshot and then never exits, which
+        # _shoot already handles by watching for the PNG. On some builds no
+        # screenshot arrives at all. MEASURED on a GitHub Linux runner holding
+        # two browsers of the same version:
+        #
+        #   Chromium 152.0.7977.0   profile: no screenshot   no profile: ok
+        #   Chrome   152.0.7977.82  profile: ok              no profile: ok
+        #
+        # So the profile is tried, and a browser that fails with one is
+        # remembered and never handed one again in this process. Dropping it
+        # everywhere would be the easy fix and would put every render back in
+        # the user's own Chrome profile, which is what issue #29 was about.
+        for profile in _profiles_to_try(Path(d)):
+            stderr = _shoot(chrome_argv(src, out, width, profile=profile),
+                            out, d)
+            if out.exists():
+                break
+            if profile is not None:
+                _PROFILE_HANGS.add(chrome_path() or "")
     finally:
         _remove_tree(Path(d))
     if not out.exists():
-        raise RenderError(f"chrome produced no screenshot: {stderr[:300]}")
+        # NAME THE BINARY, AND QUOTE THE END OF WHAT IT SAID. "chrome produced
+        # no screenshot" is unactionable on a machine with three of them
+        # installed, and chrome's stderr OPENS with dbus and GPU noise it emits
+        # on every start: the reason it stopped is the last thing it printed.
+        # Two CI rounds were spent reading the noise.
+        raise RenderError(f"chrome produced no screenshot: "
+                          f"{chrome_path()} said {stderr.strip()[-400:]}")
     return out
 
 

@@ -58,6 +58,17 @@ if [ "${OS:-}" = "Windows_NT" ]; then
     done <<< "$(printf '%s' "$NV_BIN" | tr ';' '\n')"
     export PATH="$NV_POSIX$PATH"
   fi
+else
+  # THE SAME PROBLEM ON LINUX, UNDER A DIFFERENT NAME. CTranslate2 resolves
+  # libcublas.so.12 and libcudnn_ops.so through ld.so, and the nvidia wheels
+  # put them under site-packages/nvidia/*/lib, which ld.so does not search. The
+  # symptom is the same: "Library libcublas.so.12 is not found" on a machine
+  # that has it. No cygpath here -- one spelling of a path on this side.
+  NV_LIB="$(uv run --no-project --with "$NVIDIA_CUBLAS_PIN" --with "$NVIDIA_CUDNN_PIN" \
+    python -c "import nvidia, os, glob; print(os.pathsep.join(d for r in nvidia.__path__ for d in glob.glob(os.path.join(r, '*', 'lib')) if os.path.isdir(d)))" 2>/dev/null || true)"
+  if [ -n "$NV_LIB" ]; then
+    export LD_LIBRARY_PATH="$NV_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  fi
 fi
 
 # UTF-8 REGARDLESS OF THE MACHINE'S CODEPAGE. Python picks its stdio encoding

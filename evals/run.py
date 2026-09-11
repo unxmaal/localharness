@@ -511,7 +511,8 @@ def main(argv: list[str] | None = None) -> int:
             gateway=args.gateway,
             adherence=getattr(args, "adherence", "") or "",
             tier="screen" if getattr(args, "screen", False) else "measure",
-            accelerator=accelerator_id())
+            accelerator=accelerator_id(),
+            instruments=instruments())
         (outdir / "results.json").write_text(json.dumps(
             {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
              "environment": capture(),
@@ -521,6 +522,27 @@ def main(argv: list[str] | None = None) -> int:
             encoding="utf-8")
         print(f"\nartifacts + results.json in {outdir}")
     return 0
+
+
+def instruments() -> dict:
+    """What measured this run, for the receipt. See core.Receipt.instruments.
+
+    Best effort by design: a receipt must not fail a finished run, and an
+    instrument nobody could name is recorded as absent rather than as a
+    mismatch -- comparable() compares only the keys both runs carry.
+    """
+    found = {}
+    try:
+        from harness import proc
+        found["peak"] = proc.PEAK_METHOD
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from harness.checks import ocr
+        found["ocr"] = ocr.available_backend() or ""
+    except Exception:  # noqa: BLE001
+        pass
+    return {k: v for k, v in found.items() if v}
 
 
 def accelerator_id() -> str:
@@ -567,7 +589,8 @@ def compare_runs(files: list[str]) -> int:
                                   gateway=raw["gateway"],
                                   adherence=raw.get("adherence", ""),
                                   tier=raw.get("tier", "measure"),
-                                  accelerator=raw.get("accelerator", "")),
+                                  accelerator=raw.get("accelerator", ""),
+                                  instruments=raw.get("instruments") or {}),
                        data.get("summary") or {}))
 
     first_file, first, _ = loaded[0]

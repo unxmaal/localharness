@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
-# Starting and stopping the services on Windows, on demand only.
+# Starting and stopping the services on the desktop, on demand only.
 #
 # THE DEFAULT IS OFF, AND THERE IS NOTHING TO TURN OFF. scripts/launchd.sh
 # installs units with RunAtLoad and KeepAlive, which is right for a mini whose
 # job is to serve. This machine's job is to play games and to run this
-# sometimes, so nothing here is registered with Windows at all: no scheduled
-# task, no Run key, no startup shortcut. A reboot leaves the card empty, and
-# `stop` leaves nothing behind that could start again on its own.
+# sometimes, so nothing here is registered with the operating system at all: no
+# scheduled task, no Run key, no startup shortcut, AND NO SYSTEMD UNIT. A
+# reboot leaves the card empty, and `stop` leaves nothing behind that could
+# start again on its own.
+#
+# BOTH OPERATING SYSTEMS ON THAT DESKTOP RUN THIS FILE. Linux on the spare NVMe
+# has the same property as Windows does -- it is the same box, dual booting --
+# so it gets the same on-demand treatment rather than a third supervision
+# system. The only differences are how a process is launched detached, how it
+# is asked whether it is alive, and how its whole tree is ended.
 #
 #   ./scripts/services.sh start          # gateway, text, audio
 #   ./scripts/services.sh start llamacpp # just one
@@ -51,12 +58,20 @@ winpath() {
   fi
 }
 
+# True on the Windows half of the desktop. $OS is set by Windows itself and
+# survives into Git Bash, which is the same test serve-audio-cuda.sh uses.
+is_windows() { [ "${OS:-}" = "Windows_NT" ]; }
+
 alive() {
   local pid="$1"
   [ -n "$pid" ] || return 1
-  # tasklist rather than kill -0: a Windows pid is not in bash's process table,
-  # so kill -0 reports every one of them as gone.
-  tasklist //FI "PID eq $pid" //NH 2>/dev/null | grep -q "$pid"
+  if is_windows; then
+    # tasklist rather than kill -0: a Windows pid is not in bash's process
+    # table, so kill -0 reports every one of them as gone.
+    tasklist //FI "PID eq $pid" //NH 2>/dev/null | grep -q "$pid"
+  else
+    kill -0 "$pid" 2>/dev/null
+  fi
 }
 
 start_one() {
@@ -68,25 +83,41 @@ start_one() {
     return 0
   fi
 
-  bash_exe="$(winpath "$(command -v bash)")"
-  work="$(winpath "$PWD")"
-  out="$(winpath "$LOGS/$name.log")"
-  err="$(winpath "$LOGS/$name.err.log")"
-  pidpath="$(winpath "$(pidfile "$name")")"
+  if is_windows; then
+    bash_exe="$(winpath "$(command -v bash)")"
+    work="$(winpath "$PWD")"
+    out="$(winpath "$LOGS/$name.log")"
+    err="$(winpath "$LOGS/$name.err.log")"
+    pidpath="$(winpath "$(pidfile "$name")")"
 
-  # Start-Process rather than `&`: a background job in this shell dies with the
-  # terminal, and the point is to close the terminal and go and play something.
-  #
-  # THE PID GOES TO A FILE RATHER THAN TO STDOUT. Capturing it with $( ) hangs
-  # forever: the process being launched inherits the pipe, so the substitution
-  # waits for an end-of-file that arrives only when the server it just started
-  # exits, which is the opposite of starting something in the background.
-  rm -f "$(pidfile "$name")"
-  powershell -NoProfile -Command \
-    "(Start-Process -FilePath '$bash_exe' -ArgumentList '$script'\
-     -WorkingDirectory '$work' -WindowStyle Hidden -PassThru\
-     -RedirectStandardOutput '$out' -RedirectStandardError '$err').Id\
-     | Set-Content -Path '$pidpath'" >/dev/null 2>&1
+    # Start-Process rather than `&`: a background job in this shell dies with
+    # the terminal, and the point is to close the terminal and go and play
+    # something.
+    #
+    # THE PID GOES TO A FILE RATHER THAN TO STDOUT. Capturing it with $( )
+    # hangs forever: the process being launched inherits the pipe, so the
+    # substitution waits for an end-of-file that arrives only when the server
+    # it just started exits, which is the opposite of starting something in the
+    # background.
+    rm -f "$(pidfile "$name")"
+    powershell -NoProfile -Command \
+      "(Start-Process -FilePath '$bash_exe' -ArgumentList '$script'\
+       -WorkingDirectory '$work' -WindowStyle Hidden -PassThru\
+       -RedirectStandardOutput '$out' -RedirectStandardError '$err').Id\
+       | Set-Content -Path '$pidpath'" >/dev/null 2>&1
+  else
+    # setsid, so the server leads its own process group and closing this
+    # terminal does not take it with it -- the same requirement Start-Process
+    # meets on the other half of this machine. nohup where there is no setsid,
+    # which is any BSD including macOS.
+    rm -f "$(pidfile "$name")"
+    if command -v setsid >/dev/null 2>&1; then
+      setsid bash "$script" >"$LOGS/$name.log" 2>"$LOGS/$name.err.log" &
+    else
+      nohup bash "$script" >"$LOGS/$name.log" 2>"$LOGS/$name.err.log" &
+    fi
+    printf '%s\n' "$!" > "$(pidfile "$name")"
+  fi
 
   pid="$(tr -d ' \r\n' < "$(pidfile "$name")" 2>/dev/null || true)"
   case "$pid" in
@@ -117,9 +148,21 @@ stop_one() {
     echo "$name not running"
     return 0
   fi
-  # /T for the tree. The pid recorded is bash; the server holding the card is
-  # its child, and ending the parent alone leaves the model resident.
-  taskkill //F //T //PID "$pid" >/dev/null 2>&1
+  # THE WHOLE TREE, not the pid recorded. That pid is bash; the server holding
+  # the card is its child, and ending the parent alone leaves the model
+  # resident.
+  if is_windows; then
+    taskkill //F //T //PID "$pid" >/dev/null 2>&1
+  else
+    # Negative pid is the process group, which setsid made this process lead.
+    # TERM first so the server can put the card down, then KILL what is left.
+    kill -TERM "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
+    for _ in 1 2 3 4 5; do
+      alive "$pid" || break
+      sleep 1
+    done
+    alive "$pid" && { kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null; }
+  fi
   rm -f "$(pidfile "$name")"
   echo "$name stopped"
 }

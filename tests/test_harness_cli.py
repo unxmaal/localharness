@@ -12,7 +12,7 @@ import httpx
 import pytest
 import respx
 
-from harness import cli
+from harness import audio, cli
 from harness.proc import Outcome
 
 GW = "http://127.0.0.1:4000"
@@ -255,7 +255,12 @@ def test_say_synthesizes_and_plays(monkeypatch, tmp_path):
     dest = tmp_path / "s.wav"
     assert cli.main(["say", "bonjour", "-o", str(dest)]) == 0
     assert dest.stat().st_size > 8000
-    assert played and "afplay" in played[0][0]
+    # NOT "afplay": that was hardcoded here and on Windows the command was a
+    # path from another operating system. What matters is that a player was
+    # asked for, and that it was asked for THIS file.
+    players = {Path(c).stem for c in audio.PLAYERS}
+    assert played and Path(played[0][0]).stem in players
+    assert str(dest) in played[0]
 
 
 @respx.mock

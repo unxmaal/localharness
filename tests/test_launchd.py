@@ -24,7 +24,9 @@ SERVICES = ("gateway", "mlx", "tts", "mcp")
 #: skip rather than fail, which keeps "not built yet" distinct from "broken".
 pytestmark = pytest.mark.skipif(
     sys.platform != "darwin",
-    reason="launchd is macOS-only; Windows service supervision is unimplemented")
+    reason="launchd is macOS-only. The desktop registers nothing with either "
+           "of its operating systems on purpose; scripts/services.sh is that "
+           "machine's answer and starts on demand")
 
 
 @pytest.fixture(scope="module")

@@ -1,7 +1,7 @@
 [project]
 name = "localharness"
 version = "0.1.0"
-description = "Local LLM serving + evaluation harness for Apple Silicon"
+description = "Local LLM serving + evaluation harness"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "mlx-lm>=0.31.3; sys_platform == 'darwin'",
@@ -14,6 +14,11 @@ dependencies = [
     # The same lane's Windows implementation. Both ship with their OS; this is
     # only the binding to it. See harness/checks/ocr.py.
     "winsdk>=1.0.0b10; sys_platform == 'win32'",
+    # The same lane on Linux, which ships no OCR engine of its own. An ONNX
+    # detector plus recogniser, CPU, no torch. Measured against Apple's Vision
+    # on this project's own text-render images: 18/18 either way, where
+    # tesseract managed 6. See harness/checks/ocr.py.
+    "rapidocr-onnxruntime>=1.4.4; sys_platform == 'linux'",
     "vtracer>=0.6.15",
 ]
 

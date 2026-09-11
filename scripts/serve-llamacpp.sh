@@ -23,7 +23,14 @@ mkdir -p "$LH_LOGS"
 BIN="${LLAMACPP_BIN:-llama-server}"
 if ! command -v "$BIN" >/dev/null 2>&1 && [ ! -x "$BIN" ]; then
   echo "FATAL: $BIN is not on PATH and is not an executable path." >&2
-  echo "       winget install --id ggml.llamacpp" >&2
+  if [ "${OS:-}" = "Windows_NT" ]; then
+    echo "       winget install --id ggml.llamacpp" >&2
+  else
+    echo "       Build it, or take a release binary:" >&2
+    echo "       https://github.com/ggml-org/llama.cpp/releases" >&2
+    echo "       An apt llama.cpp, where one exists, is usually built without" >&2
+    echo "       CUDA, which leaves the card idle and the lane slow." >&2
+  fi
   echo "       Last verified against build $LLAMACPP_BUILD." >&2
   exit 1
 fi

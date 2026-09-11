@@ -9,11 +9,32 @@ What comes back is a character error rate rather than a verdict, so two models
 that both render something legible can still be ordered. That is the whole
 reason the suite needed a quality axis.
 
-ONE LANE, TWO IMPLEMENTATIONS. Apple's Vision on macOS and Windows.Media.Ocr
-on Windows. Both ship with the operating system -- no model download, no
-server, a tenth of a second -- which is what makes either usable as a metric
-rather than a second thing to install. Which one runs is decided here, by what
-the machine has, and not by the caller.
+ONE LANE, THREE IMPLEMENTATIONS. Apple's Vision on macOS and Windows.Media.Ocr
+on Windows both ship with the operating system -- no model download, no server,
+a tenth of a second -- which is what makes either usable as a metric rather
+than a second thing to install. Linux ships nothing of the kind, so there the
+lane is RapidOCR, an ONNX detector plus recogniser that installs as a wheel and
+runs on the CPU.
+
+NOT TESSERACT, and this was measured rather than assumed. On the 18 text-render
+images this project has actually generated, asking whether the sign's word
+appears anywhere in the output at all:
+
+    Vision                  18 / 18
+    RapidOCR                18 / 18, exact, no surrounding noise
+    tesseract                6 / 18 across four page-segmentation modes
+    tesseract + greyscale, autocontrast, 2x    0 / 18
+
+Tesseract is built for scanned documents and this lane is scene text in a
+photograph. Shipping it would have reported twelve good renders as total
+failures, which is the exact failure the DEFAULT_MAX_CER note below warns
+about: measuring the OCR instead of the generator.
+
+WHICH ENGINE RAN IS PART OF THE RESULT. It goes in the eval receipt and
+comparable() refuses to rank across two of them, the same way PickScore is not
+HPSv2. RapidOCR is the one that runs on all three machines, so pinning it
+everywhere is the way to make a CER comparable ACROSS them; the OS engines are
+preferred here only because they are free and already installed.
 
 A machine with NEITHER is a third case, and it is not a failure: an image whose
 text could not be read is an unmeasured lane, not a bad render. Scoring it as a
@@ -24,6 +45,7 @@ from __future__ import annotations
 import importlib
 import sys
 from dataclasses import dataclass, field
+from functools import lru_cache
 import re
 from pathlib import Path
 
@@ -112,11 +134,42 @@ def _read_windows(path: Path) -> list[str]:
     return asyncio.run(recognize())
 
 
-#: backend -> (the platform it belongs to, the module that must import, the
-#: reader). Ordered, so "auto" takes the first that answers.
+@lru_cache(maxsize=1)
+def _rapidocr():
+    """The engine, built once. Constructing it loads two ONNX models, and this
+    is called per image in a sweep."""
+    from rapidocr_onnxruntime import RapidOCR
+    return RapidOCR()
+
+
+def _read_rapidocr(path: Path) -> list[str]:
+    """Every text region RapidOCR finds, in the order it found them."""
+    result, _ = _rapidocr()(str(path))
+    return [str(line[1]).strip() for line in (result or []) if str(line[1]).strip()]
+
+
+def _module_probe(name: str):
+    """Whether an optional binding imports. pyobjc and winsdk are both
+    installs that can be absent on the platform they belong to."""
+    def probe() -> bool:
+        try:
+            importlib.import_module(name)
+        except ImportError:
+            return False
+        return True
+    return probe
+
+
+#: backend -> (the platform it belongs to or "" for any, a probe saying whether
+#: it is actually there, the reader). ORDERED, so "auto" takes the first that
+#: answers: the OS's own engine where there is one, and RapidOCR where there
+#: is not. RapidOCR is not pinned to Linux, so a Mac without pyobjc measures the
+#: lane instead of skipping it -- and the receipt records which one ran.
 BACKENDS = {
-    "vision": ("darwin", "Vision", _read_vision),
-    "windows": ("win32", "winsdk.windows.media.ocr", _read_windows),
+    "vision": ("darwin", _module_probe("Vision"), _read_vision),
+    "windows": ("win32", _module_probe("winsdk.windows.media.ocr"),
+                _read_windows),
+    "rapidocr": ("", _module_probe("rapidocr_onnxruntime"), _read_rapidocr),
 }
 
 
@@ -124,15 +177,13 @@ def available_backend():
     """The backend this machine can actually run, or None.
 
     Both halves are asked. The platform alone is not enough -- Windows OCR is
-    an optional component and pyobjc is an optional install -- and an import
-    alone is not enough either.
+    an optional component and pyobjc is an optional install -- and a platform
+    match alone is not enough either.
     """
-    for name, (platform_name, module, _) in BACKENDS.items():
-        if sys.platform != platform_name:
+    for name, (platform_name, probe, _) in BACKENDS.items():
+        if platform_name and sys.platform != platform_name:
             continue
-        try:
-            importlib.import_module(module)
-        except ImportError:
+        if not probe():
             continue
         return name
     return None

@@ -50,7 +50,10 @@ def run_env(hf_root=None, shell="bash", min_free_gb="0", cwd=None):
     if hf_root is not None:
         env["HF_ROOT"] = hf_root
     p = subprocess.run(
-        [exe, "-c", f'source "{REPO}/scripts/env.sh" && echo "HF_HOME=$HF_HOME"'],
+        # `.` and not `source`: /bin/sh on Ubuntu is dash, which has no such
+        # builtin and exits 127. macOS ships bash as sh and accepts both, which
+        # is why this passed on two runners and not the third.
+        [exe, "-c", f'. "{REPO}/scripts/env.sh" && echo "HF_HOME=$HF_HOME"'],
         capture_output=True, text=True, env=env, cwd=cwd)
     home = ""
     for line in p.stdout.splitlines():
@@ -149,7 +152,7 @@ def test_hf_home_is_exported_to_children(tmp_path):
     # process boundary at all, and any child will do.
     p = subprocess.run(
         [exe, "-c",
-         f'source "{REPO}/scripts/env.sh" >/dev/null 2>&1 && '
+         f'. "{REPO}/scripts/env.sh" >/dev/null 2>&1 && '
          f'env | grep "^HF_HOME="'],
         capture_output=True, text=True, env=env)
     exported = ""
@@ -215,7 +218,7 @@ def test_helper_functions_print_nothing_but_their_answer(tmp_path):
     survived until someone sourced env.sh from a zsh login shell."""
     if not shutil.which("zsh"):
         pytest.skip("zsh not installed")
-    probe = (f'source "{REPO}/scripts/env.sh" >/dev/null 2>&1; '
+    probe = (f'. "{REPO}/scripts/env.sh" >/dev/null 2>&1; '
              f'echo "MP:[$(_hf_mountpoint {tmp_path}/deep/path)]"; '
              f'echo "GB:[$(_hf_free_gb {tmp_path}/deep/path)]"')
     env = {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"],
