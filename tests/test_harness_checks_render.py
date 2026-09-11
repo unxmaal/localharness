@@ -310,3 +310,33 @@ def test_the_isolated_profile_can_be_turned_off(monkeypatch):
     assert render._isolate_profile() is True
     monkeypatch.setenv(render.PROFILE_ENV, "0")
     assert render._isolate_profile() is False
+
+
+def test_a_browser_that_cannot_take_a_profile_is_retried_without_one(
+        monkeypatch, tmp_path):
+    """Measured on a Linux runner holding two browsers of the same version:
+    Chromium 152.0.7977.0 writes no screenshot when handed its own
+    --user-data-dir, and Chrome 152.0.7977.82 is fine either way. Dropping the
+    profile everywhere would put every render back in the user's own Chrome
+    profile, which is what issue #29 was about."""
+    render._PROFILE_HANGS.discard("/fake/chromium")
+    monkeypatch.setattr(render, "chrome_path", lambda: "/fake/chromium")
+    seen = []
+
+    def fake_shoot(argv, out, cwd, timeout=60.0):
+        had_profile = any(a.startswith("--user-data-dir") for a in argv)
+        seen.append(had_profile)
+        if not had_profile:
+            Path(out).write_bytes(b"\x89PNG\r\n\x1a\n")
+        return "chrome said nothing useful"
+
+    monkeypatch.setattr(render, "_shoot", fake_shoot)
+    render.rasterize_html("<p>x</p>", tmp_path / "a.png")
+    assert seen == [True, False], seen
+    assert "/fake/chromium" in render._PROFILE_HANGS
+
+    # And it is remembered: the next render does not pay the timeout again.
+    seen.clear()
+    render.rasterize_html("<p>x</p>", tmp_path / "b.png")
+    assert seen == [False], seen
+    render._PROFILE_HANGS.discard("/fake/chromium")

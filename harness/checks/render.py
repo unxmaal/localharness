@@ -213,6 +213,19 @@ def chrome_argv(src: Path, out: Path, width: int,
     return argv
 
 
+#: Browsers that produced no screenshot when given their own --user-data-dir.
+#: Per process: the first render on such a machine pays one timeout, the rest
+#: skip straight to the arrangement that works.
+_PROFILE_HANGS: set[str] = set()
+
+
+def _profiles_to_try(scratch: Path) -> list:
+    """The --user-data-dir settings to attempt, in order."""
+    if _isolate_profile() and (chrome_path() or "") not in _PROFILE_HANGS:
+        return [scratch / "chrome-profile", None]
+    return [None]
+
+
 def rasterize_html(html: str, out: str | Path, width: int = 800) -> Path:
     """Render an HTML document to a PNG with headless Chrome."""
     if chrome_path() is None:
@@ -229,14 +242,26 @@ def rasterize_html(html: str, out: str | Path, width: int = 800) -> Path:
     try:
         src = Path(d) / "page.html"
         src.write_text(html, encoding="utf-8")
-        # THE ISOLATED PROFILE IS NOT FREE. With one, chrome writes the
-        # screenshot and then never exits, which _shoot already handles by
-        # watching for the PNG. On some builds it is worse than that and no
-        # screenshot arrives at all (ERROR #17, recorded against a fresh empty
-        # profile directory). LH_CHROME_PROFILE=0 turns it off for a machine
-        # where that is the trade.
-        profile = Path(d) / "chrome-profile" if _isolate_profile() else None
-        stderr = _shoot(chrome_argv(src, out, width, profile=profile), out, d)
+        # THE ISOLATED PROFILE IS NOT FREE, AND SOME BUILDS CANNOT TAKE IT.
+        # With one, chrome writes the screenshot and then never exits, which
+        # _shoot already handles by watching for the PNG. On some builds no
+        # screenshot arrives at all. MEASURED on a GitHub Linux runner holding
+        # two browsers of the same version:
+        #
+        #   Chromium 152.0.7977.0   profile: no screenshot   no profile: ok
+        #   Chrome   152.0.7977.82  profile: ok              no profile: ok
+        #
+        # So the profile is tried, and a browser that fails with one is
+        # remembered and never handed one again in this process. Dropping it
+        # everywhere would be the easy fix and would put every render back in
+        # the user's own Chrome profile, which is what issue #29 was about.
+        for profile in _profiles_to_try(Path(d)):
+            stderr = _shoot(chrome_argv(src, out, width, profile=profile),
+                            out, d)
+            if out.exists():
+                break
+            if profile is not None:
+                _PROFILE_HANGS.add(chrome_path() or "")
     finally:
         _remove_tree(Path(d))
     if not out.exists():
