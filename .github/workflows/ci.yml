@@ -102,6 +102,29 @@ jobs:
 
       - run: uv sync --python 3.12
 
+      - name: Which browser, and what it says
+        # The html and ink lanes go through whatever browser render.py finds,
+        # and this runner has several. When they fail the first question is
+        # which binary ran and what it actually printed: two rounds went into
+        # reading the dbus noise every chrome emits at every start. Reports,
+        # never gates.
+        if: always()
+        run: |
+          {
+            echo "### Browsers on this runner"
+            echo
+            echo '```'
+            for name in chromium chromium-browser google-chrome google-chrome-stable; do
+              path="$(command -v "$name" 2>/dev/null || true)"
+              if [ -z "$path" ]; then echo "$name: absent"; continue; fi
+              echo "$name -> $path -> $(readlink -f "$path")"
+              echo "    $("$path" --version 2>&1 | head -1)"
+            done
+            echo
+            uv run python -c "from harness.checks import render; print('render.py chose:', render.chrome_path()); print('rendered:', render.rasterize_html('<p>ci</p>', '/tmp/ci-probe.png'))" 2>&1 | tail -12 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: make check
         run: set -o pipefail && make check 2>&1 | tee /tmp/check.log
 

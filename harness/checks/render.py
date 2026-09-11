@@ -202,11 +202,13 @@ def rasterize_html(html: str, out: str | Path, width: int = 800) -> Path:
     finally:
         _remove_tree(Path(d))
     if not out.exists():
-        # NAME THE BINARY. "chrome produced no screenshot" is unactionable on a
-        # machine with three of them installed, and the first 300 characters of
-        # chrome's stderr are usually dbus noise rather than the reason.
+        # NAME THE BINARY, AND QUOTE THE END OF WHAT IT SAID. "chrome produced
+        # no screenshot" is unactionable on a machine with three of them
+        # installed, and chrome's stderr OPENS with dbus and GPU noise it emits
+        # on every start: the reason it stopped is the last thing it printed.
+        # Two CI rounds were spent reading the noise.
         raise RenderError(f"chrome produced no screenshot: "
-                          f"{chrome_path()} said {stderr[:300]}")
+                          f"{chrome_path()} said {stderr.strip()[-400:]}")
     return out
 
 
