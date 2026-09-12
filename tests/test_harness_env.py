@@ -140,6 +140,11 @@ def test_the_default_directory_name_matches_env_sh():
 # ./hf_root works on a fresh clone, and env.sh mkdir -p's afterwards. The real
 # failures are an ancestor that cannot be written, and a volume without room.
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="chmod 500 does not remove write access on Windows, where the "
+           "equivalent is an ACL. Same reason as the unreadable-root test "
+           "above; the free-space case below covers this one on every machine")
 def test_an_inherited_hf_home_under_an_unwritable_ancestor_is_refused(tmp_path):
     """#140 made env.py and env.sh agree on PRECEDENCE and left VALIDATION
     split: the shell routed an inherited HF_HOME through _hf_usable while this
