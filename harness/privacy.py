@@ -122,6 +122,11 @@ def scan(text: str, origin: str,
     return out
 
 
+#: A detector's own fixtures must contain what it detects, so these two are
+#: never scanned. Nothing else gets an exemption without a privacy-ok marker.
+SELF = {"harness/privacy.py", "tests/test_harness_privacy.py"}
+
+
 def tracked(root: Path) -> list[Path]:
     r = subprocess.run(("git", "-C", str(root), "ls-files"),
                        capture_output=True, text=True, check=True)
@@ -132,10 +137,10 @@ def scan_paths(root: Path) -> list[Finding]:
     extra = name_pattern(root)
     out: list[Finding] = []
     for p in tracked(root):
-        if p.suffix not in TEXT_SUFFIXES or p.name == Path(__file__).name:
+        rel = p.relative_to(root).as_posix()
+        if p.suffix not in TEXT_SUFFIXES or rel in SELF:
             continue
-        out.extend(scan(p.read_text(encoding="utf-8", errors="replace"),
-                        str(p.relative_to(root)), extra))
+        out.extend(scan(p.read_text(encoding="utf-8", errors="replace"), rel, extra))
     return out
 
 

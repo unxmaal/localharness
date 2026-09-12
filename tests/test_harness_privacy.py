@@ -113,6 +113,15 @@ def test_the_name_list_is_never_committed():
 
 # ---- the repo itself -------------------------------------------------------
 
+def test_the_checker_skips_its_own_fixtures():
+    """These two files are FULL of the thing being detected, by necessity.
+    CI caught this the hard way: locally the new test file was untracked, so
+    `git ls-files` could not see it and lint passed; the same commit turned
+    all three runners red the moment git knew about it."""
+    assert "tests/test_harness_privacy.py" in privacy.SELF
+    assert "harness/privacy.py" in privacy.SELF
+
+
 def test_this_repo_is_clean():
     """`make lint` runs this too; here it fails with the list rather than a
     bare exit code."""
