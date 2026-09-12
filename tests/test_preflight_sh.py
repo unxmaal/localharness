@@ -102,12 +102,22 @@ def test_a_machine_with_everything_passes(tmp_path):
     assert code == 0, out
 
 
+#: The font check is guarded by `if [ "$uname_s" = "Linux" ]` in the script,
+#: because a Mac renders the OCR fixture with the faces it already ships. On
+#: macOS the section does not run at all, so there is no line to assert.
+linux_only = pytest.mark.skipif(
+    sys.platform != "linux", reason="preflight only checks fonts on Linux"
+)
+
+
+@linux_only
 def test_fonts_that_exist_are_not_reported_missing(tmp_path):
     """Directly pins the SIGPIPE/pipefail defect this script shipped with."""
     _, out = run_preflight(tmp_path, _bin(tmp_path), fonts=True)
     assert "ok       DejaVu fonts" in out, out
 
 
+@linux_only
 def test_absent_fonts_are_reported(tmp_path):
     code, out = run_preflight(tmp_path, _bin(tmp_path), fonts=False)
     assert "MISSING  DejaVu fonts" in out, out
