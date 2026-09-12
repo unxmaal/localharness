@@ -503,12 +503,131 @@ group: 370MB installed rather than 1.1GB. Dependencies are marked by platform
 in `pyproject.toml`, so a Windows install pulls neither mlx nor pyobjc and a
 Mac pulls no winsdk.
 
+## Bringing up the Ubuntu machine
+
+The third machine is Ubuntu 24.04 on a spare NVMe in the same desktop as
+Windows, dual booting, same RTX 4070. Ubuntu because GitHub's `ubuntu-latest`
+is 24.04: the CI job tests the release this machine runs, so a red job is a
+real failure rather than a runner-only one.
+
+Nothing here is a lane. The port was instruments and launchers, because
+`harness/machine.py` asks which runtimes are present rather than which
+operating system it is on, so the card's implementations came over unchanged.
+
+### 1. The driver, before anything else
+
+```bash
+sudo ubuntu-drivers install
+sudo reboot
+nvidia-smi                      # name, total and free memory
+```
+
+`nvidia-smi` ships with the driver, and it is the whole cuda probe: no toolkit
+and no Python binding is needed for the machine to identify itself. With Secure
+Boot on, the install queues a MOK enrolment and the driver does not load until
+you complete the blue screen on the next boot. A machine that reboots straight
+back to a working desktop with no `nvidia-smi` is usually that.
+
+### 2. Packages
+
+```bash
+sudo apt install -y git curl shellcheck librsvg2-bin ffmpeg time \
+                    fonts-dejavu-core zsh
+```
+
+Each earns its place: `librsvg2-bin` for the ink lane, which silently skips
+without it; `ffmpeg` for the video checks; `time` because `harness/proc.py`
+measures peak memory with `/usr/bin/time -v` and **raises rather than reporting
+a zero** when it is missing, and the `time` most shells have is a builtin that
+reports no memory at all; `fonts-dejavu-core` because the OCR fixture renders
+real type and PIL's bitmap fallback would measure the fixture; `zsh` because the
+`env.sh` tests run in three shells and a missing one is a silent skip.
+
+### 3. A browser, and specifically Chrome
+
+```bash
+curl -fsSLo /tmp/chrome.deb \
+  https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+sudo apt install -y /tmp/chrome.deb
+```
+
+**Not the snap.** `chromium` on Ubuntu is a snap, which is confined and cannot
+read a page written to a temporary directory, so `render.py` skips any candidate
+resolving under `/snap`. And measured on a runner carrying both: the Chromium
+build there writes no screenshot at all when handed its own `--user-data-dir`,
+while Chrome at the same version is fine either way. The code retries without
+the profile and remembers, so a Chromium-only machine still works; it pays a
+timeout on its first render.
+
+`LH_CHROME` names a browser explicitly and `LH_CHROME_PROFILE=0` drops the
+isolated profile, for a machine that has opinions about both.
+
+### 4. uv, then lh
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv tool install --python 3.12 --editable .
+export PATH="$HOME/.local/bin:$PATH"
+export HF_ROOT=/data/hf            # wherever the room is
+```
+
+### 5. The text lane
+
+`serve-llamacpp.sh` cannot install its own server, and there is no winget here.
+Take a CUDA release binary from `ggml-org/llama.cpp`, or build one:
+
+```bash
+cmake -B build -DGGML_CUDA=ON && cmake --build build --config Release -j
+export LLAMACPP_BIN=/path/to/llama-server     # or put it on PATH
+```
+
+An apt `llama.cpp`, where a distribution has one, is usually built without CUDA,
+which leaves the card idle and the lane slow. Record whichever build you end up
+with in `scripts/versions.sh`, next to the one Windows is running.
+
+GGUF weights go in `$HF_HOME/gguf`, beside the cache rather than inside it:
+huggingface_hub owns `$HF_HOME/hub` and nothing else belongs in there.
+
+### 6. The other lanes install themselves
+
+`scripts/diffusers-venv.sh` builds the image and video environment on first use,
+in a venv of its own so the test suite never drags a CUDA torch in.
+`serve-audio-cuda.sh` brings its own wheels through `uv run --with`, including
+the two nvidia ones that carry the CUDA runtime CTranslate2 needs, so no system
+CUDA install appears anywhere.
+
+### 7. Run it
+
+```bash
+GATEWAY_CONFIG=gateway/config.cuda.yaml ./scripts/services.sh start
+./scripts/services.sh status        # what is up, and what the card holds
+./scripts/smoke.sh                  # the seams, not the models
+uv sync && make check               # the suite
+lh discover                         # what this machine can do
+```
+
+`services.sh` registers nothing with Linux, exactly as it registers nothing with
+Windows. Same file, same verbs; the only differences are how a process is
+launched detached, how it is asked whether it is alive, and how its tree is
+ended. There is no systemd unit and that is a decision, not a gap: this box
+plays games, and the mini is the one that exists to serve.
+
+### What is different here, and worth knowing before it surprises you
+
+`lh say --play` uses `paplay`, `aplay` or `ffplay`, whichever is present. Text in
+a generated image is read by RapidOCR rather than by an engine the operating
+system ships, so it installs with the project through a `sys_platform` marker.
+Peak memory is `ru_maxrss` rather than a footprint, which means it cannot see
+pages that were swapped out, and a run measured here is refused a shared table
+with one measured on Windows for exactly that reason.
+
 ## Keeping the services up
 
-Two machines, two answers, because they have different jobs. The mini exists to
-serve, so its services come back after a reboot. The Windows box exists to play
-games and run this sometimes, so nothing there is registered with Windows at
-all -- see "A second machine" above for `scripts/services.sh`.
+Two answers, because the machines have different jobs. The mini exists to
+serve, so its services come back after a reboot. The desktop exists to play
+games and run this sometimes, so nothing is registered with either of its
+operating systems: no scheduled task, no Run key, no startup shortcut, no
+systemd unit. One `scripts/services.sh` serves both halves of it.
 
 ### On Apple Silicon
 
