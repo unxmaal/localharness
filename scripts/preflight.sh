@@ -62,20 +62,24 @@ need sox         "$apt sox             # provides rec, the stt lane's recorder"
 
 # Not just present: harness/proc.py RAISES rather than reporting a zero when
 # /usr/bin/time cannot report peak memory, and the shell builtin cannot.
-if [ -x /usr/bin/time ] && /usr/bin/time -v true 2>&1 | grep -q 'Maximum resident set size'; then
-  ok "/usr/bin/time -v reports peak memory"
-elif [ -x /usr/bin/time ] && /usr/bin/time -l true 2>&1 | grep -q 'maximum resident set size'; then
-  ok "/usr/bin/time -l reports peak memory"
+# The two paths below are overridable so the tests can drive this hermetically
+# rather than asserting whatever the runner happens to have installed.
+time_bin="${LH_PREFLIGHT_TIME_BIN:-/usr/bin/time}"
+if [ -x "$time_bin" ] && "$time_bin" -v true 2>&1 | grep -q 'Maximum resident set size'; then
+  ok "$time_bin -v reports peak memory"
+elif [ -x "$time_bin" ] && "$time_bin" -l true 2>&1 | grep -q 'maximum resident set size'; then
+  ok "$time_bin -l reports peak memory"
 else
-  bad "/usr/bin/time cannot report peak memory" \
+  bad "$time_bin cannot report peak memory" \
       "$apt time   # the shell builtin reports none, and proc.py raises"
 fi
 
 if [ "$uname_s" = "Linux" ]; then
   # The file, not fc-list: PIL opens the .ttf directly and fontconfig need not
   # be installed for that to work.
-  dejavu="$(find /usr/share/fonts /usr/local/share/fonts "$HOME/.local/share/fonts" \
-              -iname 'DejaVu*.ttf' -print -quit 2>/dev/null)"
+  # shellcheck disable=SC2086  # the default is a deliberate multi-path word list
+  font_dirs="${LH_PREFLIGHT_FONT_DIRS:-/usr/share/fonts /usr/local/share/fonts $HOME/.local/share/fonts}"
+  dejavu="$(find $font_dirs -iname 'DejaVu*.ttf' -print -quit 2>/dev/null)"
   if [ -n "$dejavu" ]; then
     ok "DejaVu fonts"
   else
