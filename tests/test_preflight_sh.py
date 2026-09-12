@@ -13,7 +13,9 @@ said so and not that the runner lacks ffmpeg. That is the same reasoning as
 test_env_sh.py: a test whose result depends on the machine is a test CI cannot
 defend.
 """
+import ast
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -179,3 +181,43 @@ def test_lh_absent_is_a_failure(tmp_path):
     code, out = run_preflight(tmp_path, _bin(tmp_path, present))
     assert "MISSING  lh on PATH" in out, out
     assert code == 1
+
+
+# ---- parity with the Python half (#153) -------------------------------------
+#
+# The list of audio players exists in two languages: harness/audio.py decides
+# what `lh say --play` will actually run, and preflight.sh reports whether the
+# machine has one. Nothing forced them to match, and they drifted the moment
+# #149 and #152 merged in sequence -- pw-play landed in the Python copy and not
+# the shell one.
+#
+# A preflight that FAILS on a player lh can use is noise. A preflight that
+# PASSES on a player lh cannot use is worse: it certifies a lane that does not
+# work. Same reasoning as test_the_python_and_shell_defaults_agree in
+# test_env_sh.py, which exists because this repo keeps making this mistake.
+
+
+def _players_from_python():
+    """The PLAYERS tuple, read from the source rather than imported, so this
+    does not depend on harness's dependencies being installed."""
+    tree = ast.parse((REPO / "harness" / "audio.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == "PLAYERS"
+                        for t in node.targets)):
+            return [ast.literal_eval(e) for e in node.value.elts]
+    raise AssertionError("harness/audio.py no longer defines PLAYERS")
+
+
+def _players_from_shell():
+    text = (REPO / "scripts" / "preflight.sh").read_text(encoding="utf-8")
+    m = re.search(r'^players="([^"]*)"', text, re.M)
+    assert m, ("preflight.sh has no single-line players=\"...\" list; this "
+               "test cannot compare what it cannot parse")
+    return m.group(1).split()
+
+
+def test_the_player_lists_agree():
+    """Order too, not just membership: first match wins in both, and pw-play
+    leading paplay is the entire point of #150."""
+    assert _players_from_shell() == _players_from_python()

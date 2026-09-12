@@ -159,14 +159,21 @@ done < <(git ls-files -s -- 'scripts/*.sh' 2>/dev/null)
 [ "$mode_bad" -eq 0 ] && ok "every script with a shebang is executable"
 
 section "audio out"
+# KEEP IN STEP WITH harness/audio.py's PLAYERS -- that tuple decides what
+# `lh say --play` actually runs, and this only reports. A preflight that passes
+# on a player lh cannot use certifies a lane that does not work.
+# tests/test_preflight_sh.py parses both and fails if they differ, so this stays
+# on ONE line in this exact shape.
+players="/usr/bin/afplay pw-play paplay aplay ffplay"
 player=""
-for p in /usr/bin/afplay paplay aplay ffplay; do
+# shellcheck disable=SC2086  # deliberate word-splitting: it is a candidate list
+for p in $players; do
   have "$p" && { player="$p"; break; }
 done
 if [ -n "$player" ]; then
   ok "$player"
 else
-  note "no audio player" "lh say --play needs one of afplay, paplay, aplay, ffplay"
+  note "no audio player" "lh say --play needs one of: $players"
 fi
 
 printf '\n'
