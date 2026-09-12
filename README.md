@@ -547,8 +547,8 @@ back to a working desktop with no `nvidia-smi` is usually that.
 ### 2. Packages
 
 ```bash
-sudo apt install -y git curl shellcheck librsvg2-bin ffmpeg time \
-                    fonts-dejavu-core zsh
+sudo apt install -y git curl make shellcheck librsvg2-bin ffmpeg time \
+                    fonts-dejavu-core zsh sox
 ```
 
 Each earns its place: `librsvg2-bin` for the ink lane, which silently skips
@@ -557,7 +557,9 @@ measures peak memory with `/usr/bin/time -v` and **raises rather than reporting
 a zero** when it is missing, and the `time` most shells have is a builtin that
 reports no memory at all; `fonts-dejavu-core` because the OCR fixture renders
 real type and PIL's bitmap fallback would measure the fixture; `zsh` because the
-`env.sh` tests run in three shells and a missing one is a silent skip.
+`env.sh` tests run in three shells and a missing one is a silent skip; `make`
+because step 7 runs `make check`; `sox` for `rec`, which the stt lane records
+with and `lh discover` reports missing without.
 
 ### 3. A browser, and specifically Chrome
 
@@ -578,28 +580,51 @@ timeout on its first render.
 `LH_CHROME` names a browser explicitly and `LH_CHROME_PROFILE=0` drops the
 isolated profile, for a machine that has opinions about both.
 
-### 4. uv, then lh
+### 4. The repo, uv, then lh
 
 ```bash
+git clone https://github.com/unxmaal/localharness.git
+cd localharness
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv tool install --python 3.12 --editable .
 export PATH="$HOME/.local/bin:$PATH"
 export HF_ROOT=/data/hf            # wherever the room is
 ```
 
+`--editable .` is the checkout, so the clone comes first. Only `HF_ROOT` needs
+setting: `scripts/env.sh` exports `HF_HOME` from it, and the two name the same
+directory everywhere below.
+
 ### 5. The text lane
 
 `serve-llamacpp.sh` cannot install its own server, and there is no winget here.
-Take a CUDA release binary from `ggml-org/llama.cpp`, or build one:
+There is also no CUDA release binary to take: every `-cuda-` asset `ggml-org`
+publishes is Windows, and `llama-*-bin-ubuntu-x64.tar.gz` is CPU-only. On Linux,
+CUDA means building it.
 
 ```bash
-cmake -B build -DGGML_CUDA=ON && cmake --build build --config Release -j
+sudo apt install -y cmake build-essential gcc-12 g++-12 nvidia-cuda-toolkit
+cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=89 \
+               -DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-12
+cmake --build build --config Release -j
 export LLAMACPP_BIN=/path/to/llama-server     # or put it on PATH
 ```
 
-An apt `llama.cpp`, where a distribution has one, is usually built without CUDA,
-which leaves the card idle and the lane slow. Record whichever build you end up
-with in `scripts/versions.sh`, beside the versions the other machines report.
+Neither flag is optional. Noble's `nvidia-cuda-toolkit` is CUDA 12.0, whose
+`nvcc` refuses any host compiler newer than gcc-12 while 24.04 defaults to
+gcc-13; pointing CUDA at `g++-12` fixes that without moving the system compiler.
+Without `CMAKE_CUDA_ARCHITECTURES` cmake builds every architecture rather than
+the one card present -- 89 is Ada, and `nvidia-smi --query-gpu=compute_cap`
+names yours.
+
+Then check the backend, not the exit status: `llama-cli --list-devices` has to
+name the card. A CPU-only build also exits 0 and also serves, with the card
+idle, which is the whole failure being guarded against here. An apt
+`llama.cpp`, where a distribution has one, is usually that. The prebuilt
+`-vulkan-x64` asset does drive the card and needs no toolchain, but a Vulkan
+backend and a CUDA one are two instruments, and `comparable()` will refuse them
+a shared table. Record whichever build you end up with in `scripts/versions.sh`,
+beside the versions the other machines report.
 
 GGUF weights go in `$HF_HOME/gguf`, beside the cache rather than inside it:
 huggingface_hub owns `$HF_HOME/hub` and nothing else belongs in there.
