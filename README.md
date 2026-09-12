@@ -201,7 +201,7 @@ reports system RAM as its budget.
 **Whether a machine comes back serving after a reboot is a decision about that
 machine's job.** On one that exists to serve, `scripts/launchd.sh` installs
 launchd agents with RunAtLoad and KeepAlive. On one that is borrowed -- a
-workstation, a gaming box, anything with a day job -- `scripts/services.sh`
+workstation, a shared box, anything with a day job -- `scripts/services.sh`
 registers nothing at all, so there is no scheduled task, no Run key, no startup
 shortcut and no systemd unit to find later. One file covers Windows and Linux
 both: the only differences between them are how a process is launched detached,
@@ -445,7 +445,7 @@ tools.
 
 ```bash
 ./scripts/serve-mcp.sh      # listen on 0.0.0.0:8899
-claude mcp add --transport http localharness http://styx.local:8899/mcp
+claude mcp add --transport http localharness http://<host>.local:8899/mcp
 ```
 
 > **There is no authentication.** Anyone who can reach port 8899 can use this
@@ -489,14 +489,14 @@ silently, and mflux once installed against 3.9 where every entry point died on
 `./hf_root` in the checkout, unless you say otherwise:
 
 ```sh
-export HF_ROOT=/Volumes/Models/hf     # an external drive on a Mac
+export HF_ROOT=/Volumes/FAST/hf     # an external drive on a Mac
 export HF_ROOT=D:/hf                  # a Windows box with a fast drive
 export HF_ROOT=/data/hf               # a Linux box, wherever the room is
 ```
 
 One location, checked for room and writability, and fatal if it is not usable.
 There is no candidate list and no search: a search is how the wrong disk gets
-chosen quietly, and the old list -- `/Volumes/Models/hf`, `/Volumes/T7/hf`,
+chosen quietly, and the old list -- `/Volumes/FAST/hf`, `/Volumes/PORTABLE/hf`,
 `~/.cache/huggingface` -- was one machine written into the repo, forked once for
 Windows and again in shell.
 

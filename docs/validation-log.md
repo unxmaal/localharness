@@ -32,25 +32,25 @@ sudo and does not survive a reboot.
     $ du -sh ~/.cache/huggingface
     9.3G                              # FLUX, CLIP, Chatterbox. Not LLM weights.
 
-/Volumes/Raid and /Volumes/External1 both resolve to /dev/disk3s5, the internal Data
+/Volumes/STALE1 and /Volumes/STALE2 both resolve to /dev/disk3s5, the internal Data
 volume. They are stale mountpoints, not attached drives. Confirmed by `df` reporting
-the same filesystem and by `mount | grep -E 'Raid|External1'` returning nothing.
+the same filesystem and by `mount | grep -E 'STALE1|STALE2'` returning nothing.
 
 ## External drives (measured after the user reconnected them)
 
-    $ df -h /Volumes/T7 /Volumes/2TB
-    /dev/disk53s1   931Gi  461Gi  470Gi  50%  /Volumes/T7
-    /dev/disk51s1   1.8Ti  1.1Ti  780Gi  59%  /Volumes/2TB
+    $ df -h /Volumes/PORTABLE /Volumes/FAST
+    /dev/disk53s1   931Gi  461Gi  470Gi  50%  /Volumes/PORTABLE
+    /dev/disk51s1   1.8Ti  1.1Ti  780Gi  59%  /Volumes/FAST
 
 Link speeds, ioreg "Device Speed" (3 = SuperSpeed 5Gbps, 4 = SuperSpeed+ 10Gbps):
 
     +-o AppleT8112USBXHCI@00000000
-    | +-o DockCase SSD Enclosure C1P@00200000     <- /Volumes/2TB
+    | +-o 10Gbps SSD Enclosure@00200000     <- /Volumes/FAST
     |       "Device Speed" = 4                     direct to host controller
     +-o AppleEmbeddedUSBXHCIASMedia3142@08000000
       +-o USB3.0 Hub@08100000  (VIA Labs)
       |     "Device Speed" = 3
-      +-o PSSD T7@08200000                         <- /Volumes/T7
+      +-o PORTABLE SSD@08200000                         <- /Volumes/PORTABLE
             "Device Speed" = 3                     behind the hub
 
 `SPThunderboltDataType` reports "No device connected" on every port, so neither drive
@@ -58,22 +58,22 @@ is Thunderbolt.
 
 Throughput, 1 GiB dd:
 
-    T7,  cold read of pre-existing itunes_backup.tar.gz : 459,927,758 B/s (460 MB/s)
-    T7,  same file at offset 400M (page cache)          : 1,117,559,080 B/s
-    T7,  write                                          : 430,744,510 B/s
+    PORTABLE,  cold read of pre-existing itunes_backup.tar.gz : 459,927,758 B/s (460 MB/s)
+    PORTABLE,  same file at offset 400M (page cache)          : 1,117,559,080 B/s
+    PORTABLE,  write                                          : 430,744,510 B/s
     internal, write                                     : 1,152,784,821 B/s
     2TB, read of a 12GB TM backup .img                  : 229,010,986 B/s
     2TB, same file at offset 2G                         : 118,718,271 B/s
 
-The T7 numbers are trustworthy: 460 MB/s cold, reproduced across two different
-pre-existing files, which is 5 Gbps saturation. The T7 is a 10 Gbps device, so the
+The PORTABLE numbers are trustworthy: 460 MB/s cold, reproduced across two different
+pre-existing files, which is 5 Gbps saturation. The PORTABLE is a 10 Gbps device, so the
 VIA hub is halving it.
 
 ### Superseded: the 2TB reclaimed and re-measured
 
 The user repartitioned the 2 TB NVMe into `Backups` and `Models`, two APFS volumes in
 one container with 1 TB quotas each. `Models` is not a Time Machine target, so it
-mounts `eric:staff` and writable.
+mounts `<user>:staff` and writable.
 
 Re-measured with 4 GiB dd and a cold read forced by `diskutil unmount` +
 `diskutil mount`, so the page cache cannot inflate it:
@@ -82,20 +82,20 @@ Re-measured with 4 GiB dd and a cold read forced by `diskutil unmount` +
     Models COLD read : 4294967296 bytes in 4.478884 secs (  958,936,935 B/s)
     Models warm read : 1073741824 bytes in 0.390211 secs (2,751,695,426 B/s)  <- cache, not the drive
 
-    T7 write         : 4294967296 bytes in 10.168272 secs (422,389,104 B/s)
-    T7 COLD read     : 4294967296 bytes in  9.932652 secs (432,408,917 B/s)
+    PORTABLE write         : 4294967296 bytes in 10.168272 secs (422,389,104 B/s)
+    PORTABLE COLD read     : 4294967296 bytes in  9.932652 secs (432,408,917 B/s)
 
-Models is 2.2x the T7 and effectively matches the internal SSD. This vindicates
+Models is 2.2x the portable SSD and effectively matches the internal SSD. This vindicates
 discarding the earlier 229 MB/s reading rather than recording it: the clean volume is
 over four times faster, confirming that number measured Time Machine's fragmented
 backup structure and not the drive.
 
-HF_HOME moved to /Volumes/Models/hf; the 1.1 GiB of existing weights were rsynced
-from the T7 (82 files, 1,169,990,654 bytes) and all six smoke checks pass on the new
+HF_HOME moved to /Volumes/FAST/hf; the 1.1 GiB of existing weights were rsynced
+from the portable SSD (82 files, 1,169,990,654 bytes) and all six smoke checks pass on the new
 volume.
 
 Guard re-verified by exit code after the switch: auto-pick 0, explicit Models 0,
-explicit T7 0, explicit nonexistent 1.
+explicit PORTABLE 0, explicit nonexistent 1.
 
 ### Original (superseded) reading
 
@@ -103,12 +103,12 @@ The 2TB numbers below are NOT trustworthy as a drive measurement. Every file on 
 is Time Machine backup data stored with APFS clones and heavy fragmentation, and a
 write test is impossible:
 
-    $ dd if=/dev/zero of=/Volumes/2TB/.bench_tmp bs=1m count=1024
-    dd: /Volumes/2TB/.bench_tmp: Permission denied
+    $ dd if=/dev/zero of=/Volumes/FAST/.bench_tmp bs=1m count=1024
+    dd: /Volumes/FAST/.bench_tmp: Permission denied
 
-    $ ls -ld /Volumes/2TB
-    drwxrwxr-x@ 8 root wheel /Volumes/2TB
-    $ id -Gn eric | grep -x wheel   ->  eric NOT in wheel
+    $ ls -ld /Volumes/FAST
+    drwxrwxr-x@ 8 root wheel /Volumes/FAST
+    $ id -Gn "$USER" | grep -x wheel   ->  NOT in wheel
 
 Time Machine owns the volume root. Re-measure with a clean write/read test once the
 user reclaims it.
@@ -273,14 +273,14 @@ value is true, including the string `false`. Set it to 1 or leave it unset.
 `~/.zshrc` is a symlink to `projects/github/unxmaal/dotfiles/zshrc`, so the export
 went in the repo, not the home directory:
 
-    export HF_HOME=/Volumes/Models/hf
+    export HF_HOME=/Volumes/FAST/hf
 
 Verified in a fresh login shell and through the library itself:
 
     $ zsh -lic 'echo $HF_HOME'
-    /Volumes/Models/hf
+    /Volumes/FAST/hf
     $ python -c "from huggingface_hub import constants; print(constants.HF_HUB_CACHE)"
-    /Volumes/Models/hf/hub
+    /Volumes/FAST/hf/hub
 
 Deliberately not guarded by a mount check. `/Volumes` is `drwxr-xr-x root:wheel`, and
 a user `mkdir` there fails with `Permission denied` (tested), so an absent drive makes
@@ -288,7 +288,7 @@ a user `mkdir` there fails with `Permission denied` (tested), so an absent drive
 
 Migration verified before deleting the source:
 
-    $ rsync -a --checksum --dry-run --itemize-changes ~/.cache/huggingface/ /Volumes/Models/hf/
+    $ rsync -a --checksum --dry-run --itemize-changes ~/.cache/huggingface/ /Volumes/FAST/hf/
     differences: 0
     src md5 (6.2GB fastchat-t5 blob): 583dfa4de314b9226939172dd8a9b914
     dst md5                         : 583dfa4de314b9226939172dd8a9b914
@@ -400,7 +400,7 @@ in `--info` confirms the optional component degrades cleanly.
 
 Command:
 
-    ./h3 -d /Volumes/Models/MiniMax-H3 \
+    ./h3 -d /Volumes/FAST/MiniMax-H3 \
       -p "A red fox walks through falling snow in a quiet forest." \
       -o outputs/test1.mp4 --ssd-streaming --profile \
       --width 320 --height 320 --frames 8 --steps 6 --layers 40
@@ -452,7 +452,7 @@ page cache from streaming ~74 GiB off disk, not just live tensors.
 Denoise is 501 s of the 750 s, and **68.25 s of that is `wait`**, the GPU idle on
 streaming I/O. That is the `--ssd-streaming` tax, about 14% of denoise wall here.
 It scales with disk throughput, which is the concrete payoff of putting weights on
-the Models volume at 959 MB/s rather than the T7 at 432.
+the Models volume at 959 MB/s rather than the portable SSD at 432.
 
 ### Flag note
 
@@ -462,7 +462,7 @@ is paired with very few steps.
 
 ## h3.c quality run at 512x512 (2026-09-05)
 
-    ./h3 -d /Volumes/Models/MiniMax-H3 \
+    ./h3 -d /Volumes/FAST/MiniMax-H3 \
       -p "A red fox walks through falling snow in a quiet forest, late afternoon
           light, shallow depth of field." \
       -o outputs/quality1.mp4 --ssd-streaming --profile \
@@ -507,7 +507,7 @@ Block loads went from 6x40=240 to 20x50=1000. The `--ssd-streaming` cost scales
 with steps x layers, so quality settings pay for it twice: more compute and more
 I/O stalls. At 29.6% idle, storage throughput is now a first-order term in wall
 time, which is the clearest argument yet for the Models volume at 959 MB/s over
-the T7 at 432.
+the portable SSD at 432.
 
 ### Prediction accuracy
 
@@ -566,7 +566,7 @@ this log: **wait for a process to exist before watching for its absence.**
 ## Image generation via mflux, measured (2026-09-05)
 
 Engine: `mflux` (2310 stars, MLX-native), model Z-Image Turbo 6B, 8 steps,
-512x512, seed 42, 8-bit quantized. Weights 6.1 GB to /Volumes/Models/hf.
+512x512, seed 42, 8-bit quantized. Weights 6.1 GB to /Volumes/FAST/hf.
 
     candidate                     pass   rate   median    total      peak
     mflux/z-image-turbo          3/3     100%  119.16s   624.4s    6.2GiB
@@ -645,7 +645,7 @@ Re-measure on a quiet machine before treating the absolute numbers as a baseline
 Both candidates scored 3/3. The suite therefore ranked them on speed and memory
 and presented the result as a tradeoff: klein faster, Z-Image Turbo lighter.
 
-Eric looked at the six images and said: "flux2 looks real. z-image-turbo not so
+A human looked at the six images and said: "flux2 looks real. z-image-turbo not so
 much."
 
 That inverts the conclusion. If klein is both faster AND visibly better, 3.3 GiB

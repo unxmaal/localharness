@@ -1,9 +1,9 @@
 """Which address the services listen on.
 
-Every service binds 0.0.0.0 by default, on purpose. This is a house LAN, the
+Every service binds 0.0.0.0 by default, on purpose. This is a trusted LAN, the
 models are local, and the point of the machine is that other machines on it can
 use the GPU -- which is also the shape the M5 Studio will need, with the Studio
-serving and the mini as a client.
+serving and the Apple Silicon machine as a client.
 
 There is no authentication and that is a deliberate, stated choice rather than
 an oversight. What matters is that the address is a PARAMETER: one variable per
@@ -56,7 +56,7 @@ def test_the_choice_is_argued_for_where_it_is_made(script):
 
 
 def test_smoke_can_be_pointed_at_another_host():
-    """If the Studio serves and the mini is a client, the smoke test has to be
+    """If the Studio serves and the Apple Silicon machine is a client, the smoke test has to be
     runnable against the Studio."""
     text = (REPO / "scripts" / "smoke.sh").read_text(encoding="utf-8")
     assert "${SMOKE_HOST:-" in text

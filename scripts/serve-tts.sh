@@ -5,10 +5,10 @@
 # Port 8890 is deliberate: voicemode's provider_discovery.py classifies that
 # port as "mlx-audio" and then stops sending it "whisper-1", which is the whole
 # reason the old stt_shim existed. Native detection replaces 120 lines of proxy.
-# Binds every interface by default. Deliberate: this is a house LAN, the models
+# Binds every interface by default. Deliberate: this is a trusted LAN, the models
 # are local, and the point of the machine is that other machines on it can use
 # the GPU. It is also the shape the M5 Studio needs, with the Studio serving and
-# the mini as a client. There is NO AUTHENTICATION -- set TTS_HOST=127.0.0.1 on an
+# the Apple Silicon machine as a client. There is NO AUTHENTICATION -- set TTS_HOST=127.0.0.1 on an
 # untrusted network.
 set -euo pipefail
 cd "$(dirname "$0")/.."

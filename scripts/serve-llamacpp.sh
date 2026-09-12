@@ -47,14 +47,14 @@ if [ ! -d "$MODELS" ]; then
 fi
 
 # Binds every interface by default. Deliberate, and the same reasoning as the
-# other services: this is a house LAN, the models are local, and the point of
-# this machine is that the mini can use its GPU. There is NO AUTHENTICATION --
+# other services: this is a trusted LAN, the models are local, and the point of
+# this machine is that the Apple Silicon machine can use its GPU. There is NO AUTHENTICATION --
 # set LLAMACPP_HOST=127.0.0.1 on an untrusted network.
 #
 # Port 8081 is mlx_lm.server's, on purpose. Only one of the two runs on any one
 # machine, and sharing the port means gateway/config.cuda.yaml differs from the
 # Mac config only in which weights it names.
-# GIVE THE CARD BACK WHEN IDLE. This machine is a gaming rig that also
+# GIVE THE CARD BACK WHEN IDLE. This machine is a machine with a day job that also
 # runs this, and a server left up otherwise holds the model for as long
 # as the process lives. Measured on the 4070: a request takes VRAM from
 # 2462 to 3296 MiB, and fifteen seconds after the last one it reads 2473

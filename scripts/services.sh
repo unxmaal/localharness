@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Starting and stopping the services on the desktop, on demand only.
+# Starting and stopping the services on demand only.
 #
 # THE DEFAULT IS OFF, AND THERE IS NOTHING TO TURN OFF. scripts/launchd.sh
-# installs units with RunAtLoad and KeepAlive, which is right for a mini whose
-# job is to serve. This machine's job is to play games and to run this
-# sometimes, so nothing here is registered with the operating system at all: no
+# installs units with RunAtLoad and KeepAlive, which is right for a machine
+# whose job is to serve. This one has a day job and runs this sometimes, so
+# nothing here is registered with the operating system at all: no
 # scheduled task, no Run key, no startup shortcut, AND NO SYSTEMD UNIT. A
 # reboot leaves the card empty, and `stop` leaves nothing behind that could
 # start again on its own.
 #
-# BOTH OPERATING SYSTEMS ON THAT DESKTOP RUN THIS FILE. Linux on the spare NVMe
-# has the same property as Windows does -- it is the same box, dual booting --
-# so it gets the same on-demand treatment rather than a third supervision
+# WINDOWS AND LINUX BOTH RUN THIS FILE. Neither registers anything, so a
+# machine that boots both gets the same on-demand treatment from each rather
+# than one supervision system per operating system, and no third supervision
 # system. The only differences are how a process is launched detached, how it
 # is asked whether it is alive, and how its whole tree is ended.
 #

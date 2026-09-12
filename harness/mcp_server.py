@@ -21,9 +21,9 @@ without a queue means each inserts a full model load into the other's request
 on a machine that swaps if both hold weights at once. So `image` returns a job
 id, and the queue reports what a caller is waiting behind.
 
-    ./scripts/serve-mcp.sh          # 0.0.0.0, no auth, house LAN only
+    ./scripts/serve-mcp.sh          # 0.0.0.0, no auth, trusted LAN only
 
-Rachel adds one entry pointing at http://styx.local:8899/mcp
+The other machine adds one entry pointing at http://<host>.local:8899/mcp
 """
 from __future__ import annotations
 
@@ -200,12 +200,12 @@ def transport_security(host: str, port: int, extra=()):
     """Who is allowed to name this server in a Host header.
 
     MCP 2.x enables DNS-rebinding protection with an EMPTY allowlist, so
-    binding 0.0.0.0 is not enough: a request carrying `Host: styx.local:8899`
+    binding 0.0.0.0 is not enough: a request carrying `Host: <host>.local:8899`
     is refused before it reaches a tool, and the error says nothing useful.
 
-    The protection STAYS ON. "No LAN auth, this is my house" is a decision
+    The protection STAYS ON. "No LAN auth, this network is trusted" is a decision
     about who can reach the port, and DNS rebinding does not need the port to
-    be reachable from outside -- it needs someone in the house to open a web
+    be reachable from outside -- it needs someone on the LAN to open a web
     page, and then their browser makes the request. Different threat, so it
     keeps its guard and gets an allowlist instead.
     """

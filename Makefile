@@ -12,6 +12,7 @@ test-slow:                ## the metrics tests: loads multi-GB scorers, minutes
 lint:                     ## shellcheck every script, syntax-check every one
 	shellcheck -S warning scripts/*.sh
 	@for f in scripts/*.sh; do bash -n "$$f" || exit 1; done
+	uv run python -m harness.privacy
 	@echo "lint ok"
 
 smoke:                    ## end-to-end; REQUIRES the services to be running

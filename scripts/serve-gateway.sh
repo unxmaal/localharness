@@ -21,10 +21,10 @@ mkdir -p "$LH_LOGS"
 # because the failure mode is a confusing 404 rather than a clear error.
 export LITELLM_USE_CHAT_COMPLETIONS_URL_FOR_ANTHROPIC_MESSAGES=1
 
-# Binds every interface by default. Deliberate: this is a house LAN, the models
+# Binds every interface by default. Deliberate: this is a trusted LAN, the models
 # are local, and the point of the machine is that other machines on it can use
 # the GPU. It is also the shape the M5 Studio needs, with the Studio serving and
-# the mini as a client. There is NO AUTHENTICATION -- set GATEWAY_HOST=127.0.0.1 on an
+# the Apple Silicon machine as a client. There is NO AUTHENTICATION -- set GATEWAY_HOST=127.0.0.1 on an
 # untrusted network.
 #
 # --host is passed explicitly regardless. LiteLLM's own default is 0.0.0.0, so

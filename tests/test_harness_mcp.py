@@ -1,7 +1,7 @@
 """The MCP surface: the same `lh` a local agent runs, reachable from the LAN.
 
-Rachel gets svg, web, code and image from her own Claude Code on her own
-machine. Everything here shells out to `lh` rather than reimplementing it,
+A second operator gets svg, web, code and image from their own Claude Code on
+their own machine. Everything here shells out to `lh` rather than reimplementing it,
 because the repo's rule is that every caller runs identical commands -- the CLI
 and the eval suite already do, and a third caller that drifted would expose a
 product nobody ships.
@@ -142,27 +142,29 @@ def test_video_and_speech_are_not_exposed():
 
 # ---- reachable from the LAN, and only from it ------------------------------
 
-def test_the_lan_hostname_is_allowed_or_rachel_gets_a_rejection():
+def test_the_lan_hostname_is_allowed_or_the_other_machine_gets_a_rejection():
     """MCP 2.x turns DNS-rebinding protection ON by default with an EMPTY
-    allowlist, so a request carrying `Host: styx.local:8899` is refused before
-    it reaches a tool. Binding 0.0.0.0 is not enough on its own."""
+    allowlist, so a request carrying this host's own `.local` name is refused
+    before it reaches a tool. Binding 0.0.0.0 is not enough on its own."""
     s = mcp_server.transport_security(host="0.0.0.0", port=8899)
     assert s.enable_dns_rebinding_protection
     joined = " ".join(s.allowed_hosts)
-    assert "styx.local:8899" in joined or ".local:8899" in joined
+    assert ".local:8899" in joined
     assert "127.0.0.1:8899" in joined
 
 
-def test_protection_stays_on_because_the_house_rule_does_not_cover_it():
+def test_protection_stays_on_because_the_lan_rule_does_not_cover_it():
     """No LAN auth is a decision about who can reach the port. DNS rebinding
-    does not need the port to be reachable: it needs someone in the house to
+    does not need the port to be reachable: it needs someone on the LAN to
     open a web page. Different threat, so it keeps its guard."""
     assert mcp_server.transport_security("0.0.0.0", 8899).enable_dns_rebinding_protection
 
 
-def test_an_extra_host_can_be_allowed_for_the_studio():
-    s = mcp_server.transport_security("0.0.0.0", 8899, extra=["studio.local"])
-    assert any("studio.local:8899" == h for h in s.allowed_hosts)
+def test_an_extra_host_can_be_allowed():
+    # privacy-ok: a fabricated name, which is the point of the test
+    s = mcp_server.transport_security("0.0.0.0", 8899, extra=["other-host.local"])
+    # privacy-ok: same fabricated name
+    assert any("other-host.local:8899" == h for h in s.allowed_hosts)
 
 
 def test_a_job_comes_back_as_fields_not_json_in_a_string():

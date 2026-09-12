@@ -8,8 +8,8 @@ starts re-downloading weights that are already on the volume -- gigabytes, with
 no error, onto the disk this machine has least of.
 
 THERE IS NO CANDIDATE LIST ANY MORE. This used to hunt through
-/Volumes/Models/hf, /Volumes/T7/hf and ~/.cache/huggingface, which is one
-person's Mac mini written into the repo: the Windows port had to fork the list
+two named external volumes and ~/.cache/huggingface, which is one person's
+Mac written into the repo: the Windows port had to fork the list
 in Python, env.sh had to fork it again in shell, and a test existed whose only
 job was to notice when the two forks drifted. The default is now a path inside
 the working tree, and a machine that wants a fast drive says so with HF_ROOT.
@@ -18,7 +18,7 @@ WHAT IS SAID IS STILL CHECKED. An explicit HF_ROOT goes through the same
 writability and free-space tests as the default; it does NOT bypass them. That
 was a real bug once -- an unwritable and a nonexistent path both passed with
 exit 0 -- and "the caller says where" must not become "and stop looking".
-The rule is FREE SPACE, not "is this external": that refuses this mini's
+The rule is FREE SPACE, not "is this external": that refuses this machine's
 internal disk, which sits at 91%, for the reason that actually matters, and it
 will not refuse the Studio's.
 """
@@ -39,12 +39,12 @@ HF_MIN_FREE_GB = 20
 
 #: Where weights land when nobody says otherwise. Inside the checkout, so it
 #: exists on every machine, needs no drive letter and no mount, and is the same
-#: answer on the mini, the Windows box and a CI runner. Gitignored.
+#: answer on every machine, needing no drive letter and no mount. Gitignored.
 #: env.sh computes the same path; test_harness_env.py fails if they disagree.
 DEFAULT_ROOT = "hf_root"
 
 #: This machine's real weights volume, set in the environment rather than
-#: shipped in the source. See README: HF_ROOT=/Volumes/Models/hf on the mini.
+#: shipped in the source. See README for the HF_ROOT examples.
 ROOT_VAR = "HF_ROOT"
 
 
@@ -58,6 +58,13 @@ def default_root() -> str:
 def configured() -> str:
     """What this machine says, or the default. One place that decides."""
     return os.environ.get(ROOT_VAR) or default_root()
+
+
+def beside() -> Path:
+    """Where the things too big for the hub cache go: corpora, and the 134 GiB
+    of H3 weights. Beside the weights root, so pointing HF_ROOT at a drive
+    moves them together and the default stays inside the checkout."""
+    return Path(configured()).resolve().parent
 
 
 def _anchor(path: str) -> Path | None:
@@ -87,7 +94,7 @@ def _writable(anchor: Path) -> bool:
     `os.access(W_OK)` reflects only the read-only ATTRIBUTE on Windows: it
     answered True for the drive root, which a standard user cannot write to,
     while an actual write raised PermissionError. That matters here because an
-    unmounted candidate walks up to the root -- `/Volumes/Models/hf` with
+    unmounted candidate walks up to the root -- `/Volumes/FAST/hf` with
     nothing mounted anchors at `/`, and on macOS the check holds only because
     `/` genuinely is not user-writable. Windows had no such backstop, so every
     bogus candidate resolved to the drive root and was accepted.

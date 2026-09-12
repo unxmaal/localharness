@@ -84,7 +84,7 @@ generate() {
 preflight() {
   local probe="/tmp/localharness-preflight.$$"
   local label="$PREFIX.preflight"
-  local root="${HF_ROOT:-/Volumes/Models/hf}"
+  local root="${HF_ROOT:-$PWD/hf_root}"
   cat > "$probe.sh" <<PROBE
 #!/bin/bash
 ls "$root" >/dev/null 2>&1 && echo ok > "$probe.out" || echo denied > "$probe.out"
@@ -166,7 +166,7 @@ status() {
 
 case "${1:-}" in
   generate)  shift; generate "${1:-}" ;;
-  probe)     preflight && echo "ok: a launchd agent can read ${HF_ROOT:-/Volumes/Models/hf}" ;;
+  probe)     preflight && echo "ok: a launchd agent can read ${HF_ROOT:-$PWD/hf_root}" ;;
   install)   install_units ;;
   uninstall) uninstall_units ;;
   status)    status ;;

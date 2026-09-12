@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.." || exit 2
 
 # One place for everything this project produces; see harness/paths.py.
 LH_LOGS="${LOCALHARNESS_HOME:-$HOME/localharness}/logs"
-DEST="${H3_MODEL_DIR:-/Volumes/Models/MiniMax-H3}"
+DEST="${H3_MODEL_DIR:-$(dirname "$HF_HOME")/MiniMax-H3}"
 PIDFILE="${H3_DOWNLOAD_PIDFILE:-$LH_LOGS/h3-weights.pid}"
 TARGET_GIB="${H3_TARGET_GIB:-134.2}"
 

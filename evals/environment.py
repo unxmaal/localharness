@@ -1,7 +1,7 @@
 """Snapshot of what produced a result set.
 
 A score sheet without its machine is not comparable to anything, and comparing
-this mini against the incoming Studio is a stated goal. This also records
+this machine against the incoming Studio is a stated goal. This also records
 memory pressure, because a run competing with something else is pessimistic and
 that fact should live in the results rather than in someone's memory.
 

@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from harness import env
+
 Argv = Callable[[str, Path, dict], list[str]]
 
 GRAMMAR = "engine:model[,key=value,...]  (engines: mflux, h3, diffusers, diffusers-video)"
@@ -194,7 +196,7 @@ _H3_OPTIONS = {"steps", "layers", "reuse", "width", "height", "ssd_streaming"}
 H3_MIN_FRAMES = 22
 H3_FPS = 24
 H3_DEFAULT_BIN = str(Path.home() / "projects/github/antirez/h3.c/h3")
-H3_DEFAULT_MODEL_DIR = "/Volumes/Models/MiniMax-H3"
+H3_DEFAULT_MODEL_DIR = os.environ.get("H3_MODEL_DIR") or str(env.beside() / "MiniMax-H3")
 
 
 def _h3(spec: str, model: str, options: dict) -> Engine:

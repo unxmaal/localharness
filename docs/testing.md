@@ -43,7 +43,7 @@ a rejected path returns before any side effect is reachable. The test pins a
 real property; the property is simply also protected by ordering.
 
 **The "accept unresolvable volumes" mutation survives** because removing the
-mountpoint guard changes nothing observable: `/Volumes/NoSuchVolume/hf` walks up
+mountpoint guard changes nothing observable: `/Volumes/NO_SUCH_VOLUME/hf` walks up
 to `/Volumes`, which resolves to `/`, and the internal-disk check refuses it
 anyway. That is redundancy, not a gap. Both guards stay; the note exists so the
 next person does not read the surviving mutation as a missing test.

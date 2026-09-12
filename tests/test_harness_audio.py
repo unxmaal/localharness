@@ -188,7 +188,7 @@ def test_the_default_voice_resolves():
 
 
 def test_the_default_voice_is_a_cloned_french_accent():
-    """A stated preference: Eric auditioned three and kept this one."""
+    """A stated preference: three were auditioned and this one kept."""
     assert audio.DEFAULT_VOICE in audio.VOICE_PRESETS
     assert audio.resolve_voice(audio.DEFAULT_VOICE).lang_code == "en"
 

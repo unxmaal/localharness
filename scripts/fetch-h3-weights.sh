@@ -13,7 +13,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh
 
-DEST="${H3_MODEL_DIR:-/Volumes/Models/MiniMax-H3}"
+DEST="${H3_MODEL_DIR:-$(dirname "$HF_HOME")/MiniMax-H3}"
 mkdir -p "$DEST"
 
 # ~134 GiB needs headroom; refuse rather than fill the volume.

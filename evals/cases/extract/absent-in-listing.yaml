@@ -5,9 +5,9 @@ modality: extract
 prompt: |
   Which of these files is a shell script? Reply with the filename only.
 context: |
-  -rw-r--r--  1 eric  staff    2141 Sep  6 09:12 core.py
-  -rw-r--r--  1 eric  staff    1877 Sep  6 09:12 run.py
-  -rw-r--r--  1 eric  staff     412 Sep  6 09:12 README.md
-  -rw-r--r--  1 eric  staff   14203 Sep  6 09:12 results.json
+  -rw-r--r--  1 user  staff    2141 Sep  6 09:12 core.py
+  -rw-r--r--  1 user  staff    1877 Sep  6 09:12 run.py
+  -rw-r--r--  1 user  staff     412 Sep  6 09:12 README.md
+  -rw-r--r--  1 user  staff   14203 Sep  6 09:12 results.json
 assert:
   must_contain: ["NOT FOUND"]

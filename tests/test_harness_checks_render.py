@@ -175,7 +175,7 @@ def test_chrome_uses_an_isolated_profile(tmp_path):
     profile: it contends for the lock with a live browser, writes into the
     real profile, bounces the dock, and renders the page through whatever
     extensions happen to be installed -- so the result is not reproducible
-    either. Eric spotted it as a bouncing dock icon."""
+    either. It was spotted as a bouncing dock icon."""
     argv = render.chrome_argv(tmp_path / "p.html", tmp_path / "o.png", 800,
                               profile=tmp_path / "profile")
     joined = " ".join(argv)

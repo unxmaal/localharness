@@ -87,7 +87,7 @@ VOICE_PRESETS = {
 
 
 # What `lh say` uses when nobody says otherwise. A cloned preset rather than a
-# Kokoro voice: Eric auditioned three French-accented candidates and kept this
+# Kokoro voice: three French-accented candidates were auditioned, and this
 # one. It costs a Chatterbox load -- seconds rather than the sub-second Kokoro
 # reply -- which is the price of the voice being the one that was wanted.
 DEFAULT_VOICE = "fr-male"
