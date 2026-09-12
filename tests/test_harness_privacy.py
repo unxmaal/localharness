@@ -107,7 +107,7 @@ def test_a_name_is_not_matched_inside_another_word(tmp_path, monkeypatch):
 
 def test_the_name_list_is_never_committed():
     """The checker would otherwise publish exactly what it exists to hide."""
-    ignored = (Path(__file__).resolve().parent.parent / ".gitignore").read_text()
+    ignored = (Path(__file__).resolve().parent.parent / ".gitignore").read_text(encoding="utf-8")
     assert privacy.NAMES_FILE in ignored
 
 
