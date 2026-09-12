@@ -19,6 +19,8 @@ different model from zero out of four, and a binary pass throws that away.
 """
 from __future__ import annotations
 
+import ast
+import importlib.util
 import json
 import subprocess
 import sys
@@ -72,6 +74,67 @@ class CodeResult:
     @property
     def metrics(self) -> dict:
         return {"code_pass": round(self.passed / self.total, 4) if self.total else 0.0}
+
+
+def unresolvable_imports(source: str) -> list[str]:
+    """Top-level modules this machine cannot import. EXECUTES NOTHING.
+
+    This is deliberately NOT a quality check -- the docstring above is right
+    that the interesting failures all parse, and a syntax pass proves almost
+    nothing about generated code. This answers a different and much narrower
+    question, the one the screen tier asks: can this run here AT ALL.
+
+    It exists because it is the failure actually observed. `lh code "a python
+    function that parses an ISO timestamp"` returned, on q3-4b:
+
+        from datetime import datetime
+        import iso8601
+        ...
+            return iso8601.parse_date(timestamp)
+
+    Confidently formatted, correctly structured, docstringed, and dead on line
+    two: iso8601 is a third-party package that is not installed, where
+    datetime.fromisoformat has been in the standard library since 3.7 and is
+    imported-but-unused directly above. The eval suite catches this by RUNNING
+    the code against a case's assertions; a one-off prompt at the CLI has no
+    assertions, so this is the only cheap thing left that would have caught it.
+
+    A WARNING, NEVER A VERDICT. The caller's target environment is not
+    necessarily this machine, so a name missing here may be present there.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        # Unparseable is a different complaint, and check() reports it.
+        return []
+
+    names: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names += [a.name.split(".")[0] for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names.append(node.module.split(".")[0])
+
+    missing = []
+    for name in dict.fromkeys(names):
+        try:
+            if importlib.util.find_spec(name) is None:
+                missing.append(name)
+        except (ImportError, ValueError):
+            missing.append(name)
+    return missing
+
+
+def syntax_error(source: str) -> str:
+    """The one structural failure worth naming at the CLI: a generation that
+    stopped mid-token. The svg lane already checks for its equivalent, an
+    unclosed document, because a truncated artifact is not a bad answer, it is
+    no answer."""
+    try:
+        ast.parse(source)
+    except SyntaxError as exc:
+        return f"line {exc.lineno}: {exc.msg}"
+    return ""
 
 
 def recover(text: str) -> str:

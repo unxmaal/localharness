@@ -128,3 +128,59 @@ def test_raises_does_not_swallow_the_wrong_exception():
     src = "def f(x):\n    return undefined_name\n"
     r = code.check(src, ["raises(f, 1, exc=ValueError)"])
     assert not r.ok
+
+
+# ---- the two checks that execute NOTHING (#143) ---------------------------
+
+def test_an_uninstalled_import_is_named():
+    """THE OBSERVED FAILURE. `lh code "a python function that parses an ISO
+    timestamp"` returned `import iso8601` on q3-4b: third-party, not installed,
+    dead on line two, where datetime.fromisoformat is stdlib and was imported
+    but unused directly above."""
+    src = ("from datetime import datetime\n"
+           "import iso8601\n\n"
+           "def f(t):\n"
+           "    return iso8601.parse_date(t)\n")
+    assert code.unresolvable_imports(src) == ["iso8601"]
+
+
+def test_stdlib_and_installed_imports_are_not_named():
+    assert code.unresolvable_imports("import json, os, sys\nimport pytest\n") == []
+
+
+def test_a_dotted_import_is_judged_on_its_TOP_level():
+    """`import os.path` is not a missing module, and `import nope.deep` is
+    missing once, not twice."""
+    assert code.unresolvable_imports("import os.path\n") == []
+    assert code.unresolvable_imports("import nope_xyz.deep\n") == ["nope_xyz"]
+
+
+def test_from_imports_count_too():
+    assert code.unresolvable_imports("from nope_xyz import thing\n") == ["nope_xyz"]
+
+
+def test_a_relative_import_is_not_a_missing_package():
+    """`from . import x` has no top-level name to resolve, and reporting one
+    would be noise on any file that is part of a package."""
+    assert code.unresolvable_imports("from . import sibling\n") == []
+
+
+def test_each_missing_name_is_reported_once():
+    src = "import nope_xyz\nimport nope_xyz\nfrom nope_xyz import a\n"
+    assert code.unresolvable_imports(src) == ["nope_xyz"]
+
+
+def test_unparseable_source_yields_no_import_claims():
+    """A truncated generation should be reported as not parsing, not as
+    importing nothing. The two complaints are separate."""
+    assert code.unresolvable_imports("def f(:\n") == []
+
+
+def test_syntax_error_names_the_line():
+    """Go, from a prompt that never said Python. Observed 2026-09-12."""
+    broken = code.syntax_error("func main() {\n\tfmt.Println(1)\n}")
+    assert "line 1" in broken
+
+
+def test_working_python_has_no_syntax_complaint():
+    assert code.syntax_error("def f(t):\n    return t\n") == ""
