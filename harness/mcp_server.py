@@ -34,7 +34,7 @@ from pathlib import Path
 from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel
 
-from harness import env, jobs, paths
+from harness import env, exclusive, jobs, paths
 
 
 class JobInfo(BaseModel):
@@ -146,7 +146,15 @@ def code(prompt: str, model: str = "") -> str:
 
 
 # ---------------------------------------------------------------------------
-# The expensive lane: queued, because it holds 11.4 GiB on a 32 GB machine.
+# The expensive lane. The JOB here is about the network, not the machine: a
+# generation runs for 20-55s and a video for forty minutes, which is not a
+# synchronous HTTP call, so the caller gets an id and polls.
+#
+# SERIALISATION IS NO LONGER THIS QUEUE'S JOB (issue #137). `lh` takes a
+# cross-process lock around the run itself, which is the only layer that can
+# see a local invocation and a remote one at the same time. This queue stays
+# because a remote caller needs somewhere to put the wait, not because it is
+# what keeps two generations apart.
 # ---------------------------------------------------------------------------
 
 @SERVER.tool(description="Generate an image. Queued: returns a job id "
@@ -188,7 +196,14 @@ def _describe(job) -> JobInfo:
         info.ahead = job.ahead
         # A wait that names what it is behind is a queue; one that does not is
         # a slow tool.
-        info.waiting_for = running.kind if running else None
+        #
+        # ISSUE #137: this queue can only see its OWN jobs, and since `lh`
+        # started taking the cross-process lock it is no longer the only thing
+        # holding the machine. Someone at the keyboard running `lh video` is
+        # forty minutes this caller will wait and zero jobs this queue knows
+        # about, so ask the lock who actually has it before answering.
+        info.waiting_for = running.kind if running else (
+            exclusive.holder().get("kind") or None)
     if job.state == "done":
         info.path = job.result
     if job.state == "failed":
