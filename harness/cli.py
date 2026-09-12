@@ -28,7 +28,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from harness import audio, completion, discover as discovery, env, paths, proc, vector
+from harness import audio, completion, discover as discovery, env, exclusive, paths, proc, vector
 from harness.checks import html as html_check
 from harness.checks import image as image_check
 from harness.checks import svg as svg_check
@@ -151,9 +151,15 @@ def _generate(spec: str, prompt: str, out: Path, params: dict) -> int:
     except ValueError as exc:
         return err(str(exc))
 
+    def waiting(message: str) -> None:
+        print(message, file=sys.stderr)
+
     try:
-        r = proc.run(argv, timeout=engine.timeout, stream=engine.stream,
-                     cwd=engine.cwd)
+        # Issue #137. Held across the RUN only: resolving a spec and building
+        # an argv cost nothing and should not make anyone queue.
+        with exclusive.held(engine.modality, announce=waiting):
+            r = proc.run(argv, timeout=engine.timeout, stream=engine.stream,
+                         cwd=engine.cwd)
     except FileNotFoundError as exc:
         return err(f"{exc} is not installed or not on PATH.{INSTALL_HINT.get(spec.split(':')[0], '')}")
     except subprocess.TimeoutExpired:
