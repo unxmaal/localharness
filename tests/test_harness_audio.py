@@ -604,6 +604,30 @@ def test_play_argv_resolves_a_player_rather_than_naming_one(monkeypatch):
     assert audio.play_argv("/tmp/a.wav") == ["/usr/bin/paplay", "/tmp/a.wav"]
 
 
+def test_pw_play_is_preferred_on_a_pipewire_machine(monkeypatch):
+    """A PipeWire desktop need not have pulseaudio-utils, so paplay can be
+    absent where pw-play is present -- measured on Ubuntu 24.04, which had
+    pw-play and aplay but neither paplay nor ffplay. aplay still worked, so
+    nothing was broken; it reached the card through ALSA compatibility rather
+    than the sound server actually running."""
+    monkeypatch.setattr(audio.os.path, "isabs", lambda p: False)
+    monkeypatch.setattr(audio.shutil, "which",
+                        lambda name: f"/usr/bin/{name}"
+                        if name in ("pw-play", "aplay") else None)
+    assert audio.play_argv("/tmp/a.wav") == ["/usr/bin/pw-play", "/tmp/a.wav"]
+
+
+def test_pw_play_is_preferred_over_paplay_when_both_exist(monkeypatch):
+    """paplay on a PipeWire box is a compatibility shim over the same server
+    pw-play talks to directly, so native first. On a genuine PulseAudio
+    machine pw-play does not exist and paplay is reached unchanged."""
+    monkeypatch.setattr(audio.os.path, "isabs", lambda p: False)
+    monkeypatch.setattr(audio.shutil, "which",
+                        lambda name: f"/usr/bin/{name}"
+                        if name in ("pw-play", "paplay", "aplay") else None)
+    assert audio.play_argv("/tmp/a.wav") == ["/usr/bin/pw-play", "/tmp/a.wav"]
+
+
 def test_ffplay_is_told_not_to_open_a_window(monkeypatch):
     """ffplay otherwise opens a window and waits for a keypress, which is a
     hang in anything scripted."""
