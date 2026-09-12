@@ -63,10 +63,9 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   check-linux:
-    # The third machine. `ubuntu-latest` is 24.04, which is the release the
-    # desktop's spare NVMe will run, so a failure here is a failure on a real
-    # box rather than on a runner nobody owns. That parity is the whole reason
-    # the distro question was settled the way it was.
+    # `ubuntu-latest` is 24.04, the release the Linux machines here run, so a
+    # failure is a failure on a real box rather than on a runner nobody owns.
+    # That parity is the whole reason the distro question was settled this way.
     runs-on: ubuntu-latest
     timeout-minutes: 20
 

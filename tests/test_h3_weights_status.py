@@ -47,7 +47,7 @@ def test_unrelated_process_is_not_mistaken_for_the_downloader(tmp_path):
     # vacuously against code that had the bug.
     decoy = subprocess.Popen(
         ["python3", "-c", "import time; time.sleep(20)",
-         "/Volumes/Models/MiniMax-H3"])
+         "/Volumes/FAST/MiniMax-H3"])
     try:
         time.sleep(0.5)
         code, out = run_status(tmp_path)

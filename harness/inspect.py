@@ -41,7 +41,7 @@ def ceiling_bytes(acc=None) -> int:
     its VRAM is the wall.
 
     Unified memory deliberately keeps the measured constant. Deriving it too
-    (32 * GPU_FRACTION is 24 GiB) would move the mini's ceiling from 22 to 24
+    (32 * GPU_FRACTION is 24 GiB) would move an Apple Silicon machine's ceiling from 22 to 24
     and change which candidates it accepts -- a decision about the Mac, which a
     Windows port has no business making on its way past.
     """

@@ -14,3 +14,4 @@ assumptions.md
 
 # The default weights location. This machine sets HF_ROOT elsewhere.
 hf_root/
+.privacy-names

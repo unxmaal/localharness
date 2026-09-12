@@ -192,7 +192,7 @@ def test_the_system_reserve_is_smaller_on_a_discrete_card():
 
 
 def test_the_accelerator_is_detected_on_this_machine():
-    """Runs on the mini today and the CUDA box in the next room."""
+    """Runs on the Apple Silicon machine today and the CUDA box in the next room."""
     acc = memory.detect()
     assert acc.kind in ("unified", "discrete")
     assert acc.total_gb > 1, "no accelerator memory was detected"

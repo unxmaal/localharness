@@ -3,7 +3,7 @@
 # mlx-lm or litellm upgrade. Non-zero exit means the seam broke.
 set -uo pipefail
 # SMOKE_HOST so this can be run against another machine: when the Studio serves
-# and the mini is a client, the seam to check is the Studio's.
+# and the Apple Silicon machine is a client, the seam to check is the Studio's.
 H="${SMOKE_HOST:-127.0.0.1}"
 G="http://$H:${GATEWAY_PORT:-4000}"
 E="http://$H:${MLX_PORT:-8081}"

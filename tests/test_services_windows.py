@@ -1,7 +1,7 @@
 """Running the services on a machine whose main job is something else.
 
 scripts/launchd.sh installs units with RunAtLoad and KeepAlive, which is right
-for a mini that exists to serve. The Windows box is a gaming rig that also
+for a machine that exists to serve. The Windows box is a machine with a day job that also
 runs this, so the same behaviour there would hold VRAM and CPU against whatever
 is being played, and would do it again after every reboot without being asked.
 
@@ -34,7 +34,7 @@ def test_the_windows_services_script_exists():
 
 
 def test_nothing_registers_itself_to_start_on_its_own():
-    """THE POINT OF THIS FILE. A gaming rig that quietly starts a language
+    """THE POINT OF THIS FILE. A machine with a day job that quietly starts a language
     model server at logon has lost 8 GB of VRAM to a machine that was supposed
     to be idle, and the owner finds out from a frame rate rather than a log."""
     text = SERVICES.read_text(encoding="utf-8")

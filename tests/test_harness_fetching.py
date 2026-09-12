@@ -110,10 +110,10 @@ def test_a_failed_download_does_not_condemn_the_candidate(db):
 def test_a_finished_download_records_where_it_landed(db):
     seen(db, "org/a")
     ms.decide(db, "org/a", "queued", tier="inspect")
-    f.run(db, {"org/a": 2 * f.GIB}, snapshot=lambda repo_id: "/Volumes/Models/hf/a",
+    f.run(db, {"org/a": 2 * f.GIB}, snapshot=lambda repo_id: "/Volumes/FAST/hf/a",
           free=900 * f.GIB)
     row = db.execute("SELECT run_path FROM verdicts WHERE tier='fetch'").fetchone()
-    assert row["run_path"] == "/Volumes/Models/hf/a"
+    assert row["run_path"] == "/Volumes/FAST/hf/a"
 
 
 # ---- a repo is not a weight ------------------------------------------------

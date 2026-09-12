@@ -5,15 +5,15 @@
 # speech over the LAN was ruled out; both stay reachable locally through `lh`.
 #
 # Binds every interface by default, like the other services and for the same
-# reason: this is a house LAN, the models are local, and the point of the
-# machine is that other machines on it can use the GPU. There is NO
+# reason: on a trusted LAN the models are local, and the point of the machine
+# is that other machines on it can use the GPU. There is NO
 # AUTHENTICATION -- set MCP_HOST=127.0.0.1 on an untrusted network.
 #
 # It shells out to `lh`, so `lh` has to be installed:
 #   uv tool install --python 3.12 --editable .
 #
 # The client entry, on the other machine:
-#   claude mcp add --transport http localharness http://styx.local:8899/mcp
+#   claude mcp add --transport http localharness http://<host>.local:8899/mcp
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh

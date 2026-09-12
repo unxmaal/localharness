@@ -11,7 +11,7 @@ Chatterbox clones from a reference clip and speaks French. Measured:
       -H 'Content-Type: application/json' \
       -d '{"model":"litmudoc/Chatterbox-Multilingual-MLX-v2-Q8",
            "input":"Bonjour, la passerelle est en marche.",
-           "ref_audio":"/Volumes/Models/corpora/voice-refs/fleurs-fr-male-1.wav",
+           "ref_audio":"/Volumes/FAST/corpora/voice-refs/fleurs-fr-male-1.wav",
            "lang_code":"fr",
            "response_format":"wav"}' -o out.wav
 
@@ -37,7 +37,7 @@ nothing mentions until it fails.
 
 ## Staged reference material
 
-`/Volumes/Models/corpora/voice-refs/` — three French male clips, 9-11 seconds,
+`/Volumes/FAST/corpora/voice-refs/` — three French male clips, 9-11 seconds,
 with `manifest.json` giving the transcript for each.
 
 Source: **google/fleurs**, `fr_fr` dev split, CC-BY-4.0. It ships a TSV with
@@ -45,8 +45,8 @@ the transcript AND a gender label per utterance, which is why it was chosen
 over Common Voice (gated) or Multilingual LibriSpeech (60GB for French). 227
 male French clips are available; three were copied out.
 
-`/Volumes/Models/corpora/fleurs-fr/` holds the whole dev split (289 clips),
-`/Volumes/Models/corpora/LibriSpeech/` the English test-clean used by the stt
+`/Volumes/FAST/corpora/fleurs-fr/` holds the whole dev split (289 clips),
+`/Volumes/FAST/corpora/LibriSpeech/` the English test-clean used by the stt
 lane.
 
 ## The blocker

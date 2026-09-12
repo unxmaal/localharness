@@ -12,7 +12,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-REFS=/Volumes/Models/corpora/voice-refs
+REFS="${LH_CORPORA:-$(dirname "${HF_ROOT:-$PWD/hf_root}")/corpora}/voice-refs"
 # Clones live wherever the eval wrote them; newest run wins. One output
 # root, so this no longer needs to know which directory someone chose.
 LH_RUNS="${LOCALHARNESS_HOME:-$HOME/localharness}/runs"

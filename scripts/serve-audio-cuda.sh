@@ -29,7 +29,7 @@ if [ ! -f "$KOKORO_MODEL" ] || [ ! -f "$KOKORO_VOICES" ]; then
 fi
 
 # Binds every interface by default, for the same reason as the other services:
-# a house LAN, local models, and the point of the machine is that the mini can
+# a trusted LAN, local models, and the point of the machine is that the Apple Silicon machine can
 # use its GPU. There is NO AUTHENTICATION -- set AUDIO_HOST=127.0.0.1 on an
 # untrusted network.
 export AUDIO_HOST="${AUDIO_HOST:-0.0.0.0}"

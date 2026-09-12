@@ -16,11 +16,11 @@ utterance, so finding a male French speaker is a filter rather than a listen.
 | `fr-male-2.wav` | fleurs-fr-male-2 | 10.5 | Les critères qui déterminent une sous-culture comme distincte peuvent être linguistiques, esthétiques, religieux, politiques, sexuels, géographiques ou une combinaison de facteurs. |
 
 227 more male French clips are available from the same split; the full 289-clip
-dev split is staged at `/Volumes/Models/corpora/fleurs-fr/` on this machine.
+dev split is staged at `/Volumes/FAST/corpora/fleurs-fr/` on this machine.
 
 ## Why these two
 
-They are the two Eric picked by ear out of three, reading English. The third
+They are the two picked by ear out of three, reading English. The third
 (`fleurs-fr-male-1`) is not shipped.
 
 The clips speak FRENCH and are used to say ENGLISH: Chatterbox clones across

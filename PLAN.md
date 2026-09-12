@@ -115,7 +115,7 @@ combination space deliberately.
 Installed with `uv tool install --python 3.12 --editable .`, which puts `lh` on
 PATH in its own venv and touches nothing the system Python can see.
 
-**The primary caller is an agent, not a person.** Eric asks Claude Code for an
+**The primary caller is an agent, not a person.** You ask Claude Code for an
 SVG; Claude Code runs `lh`. That is not a fallback for the CLI, it is the point
 of it, and it is why the verbs print paths and exit non-zero on a bad artifact
 rather than being chatty. A second machine's agent reaches the same commands
@@ -147,27 +147,27 @@ serving machine. Section 7 lists what has to change for it.
 
 ### Storage
 
-Model weights live on `/Volumes/Models`, and nowhere else. One statement, since
+Model weights live on `/Volumes/FAST`, and nowhere else. One statement, since
 this document previously contradicted itself four times over whether it was the
-T7:
+PORTABLE:
 
 | Volume | Interface | Write | Cold read |
 |---|---|---|---|
-| `/Volumes/Models` | DockCase C1P, direct to a host controller, `ioreg` Speed=4 (10 Gbps) | 1013 MB/s | **959 MB/s** |
-| `/Volumes/T7` | Samsung T7 behind a VIA Labs USB 3.0 hub, `ioreg` Speed=3 (5 Gbps) | 422 MB/s | 432 MB/s |
+| `/Volumes/FAST` | a 10Gbps enclosure, direct to a host controller, `ioreg` Speed=4 (10 Gbps) | 1013 MB/s | **959 MB/s** |
+| `/Volumes/PORTABLE` | the portable SSD behind a VIA Labs USB 3.0 hub, `ioreg` Speed=3 (5 Gbps) | 422 MB/s | 432 MB/s |
 
-The T7 is itself a 10 Gbps device; the hub halves it. Cold reads were forced by
+The PORTABLE is itself a 10 Gbps device; the hub halves it. Cold reads were forced by
 unmount and remount so the page cache could not flatter them.
 
 This matters more than it looks. `mlx_lm.server` hot-swaps models per request,
 so load time is paid on every switch, and h3's `--ssd-streaming` reads a DiT
-block off disk per step. On the T7 that feature would cost roughly twice as
+block off disk per step. On the portable SSD that feature would cost roughly twice as
 much.
 
 `scripts/env.sh` enforces it, and refuses to run rather than let
 `huggingface_hub` silently recreate its cache under `$HOME`. Its rule is free
 space, not "is this external": 160 GB, because MiniMax-H3's checkpoint alone is
-134 GiB. That refuses this mini's internal disk, which sits at 91%, for the
+134 GiB. That refuses this machine's internal disk, which sits at 91%, for the
 reason that actually matters, and it will not refuse the Studio's.
 
 ## 3. Architecture
@@ -206,7 +206,7 @@ change, and that it speaks both `/v1/chat/completions` and Anthropic's
 
 `scripts/serve-mcp.sh` exposes `svg`, `web`, `code` and `image` over MCP on
 `0.0.0.0:8899`, so another person's Claude Code on another machine can use this
-one's GPU. `claude mcp add --transport http localharness http://styx.local:8899/mcp`
+one's GPU. `claude mcp add --transport http localharness http://<host>.local:8899/mcp`
 is the whole client setup.
 
 Every tool SHELLS OUT TO `lh`. The CLI, the eval suite and the MCP server run
@@ -734,7 +734,7 @@ of those.
 
    `q3-1.7b` matches `q3-4b` on extract at 0.39s against 0.65s, and nearly
    doubles `local-small`'s 4/10. That is the "small and fast, watches a log,
-   answers one question" lane Eric asked for originally, and it had been sitting
+   answers one question" lane this was built for originally, and it had been sitting
    defined and unmeasured while a 0.5B answered four questions in ten.
 
    NOT a clean supersede, which is why it stays a table rather than a swap:
@@ -796,7 +796,7 @@ of those.
    quietly stop being true.
 
    THE HUMAN EAR HAS NOW ANSWERED IT, and the answer is that the cloning works.
-   Eric listened to three clones of three different men saying one English
+   A human listened to three clones of three different men saying one English
    sentence: "they all sound different". So the reference clip DOES transfer
    speaker identity, `fr-male` and `fr-male-2` are a real distinction, and it
    was only the metric that failed. That is the finding; the numbers above are
@@ -811,7 +811,7 @@ of those.
 9. **DONE 2026-09-07 (first pass). A defect sweep of the codebase**, standing
    rather than one-off.
 
-   FIRST FINDING, Eric's: outputs had FOUR homes and one was relative --
+   FIRST FINDING, a human's: outputs had FOUR homes and one was relative --
    `out/` (relative to the caller's cwd), `~/localharness-out/` (MCP),
    `.logs/` (eval runs mixed with service logs) and `/tmp/` (whatever I was
    doing). `lh` installs onto PATH, so the relative one scattered artifacts
@@ -872,7 +872,7 @@ the hours. Revisit every one on the Studio.
 | Qwen-Image-2512-4bit (image quality leader) | **24.1 GB** vs an 18 GB safe budget |
 | Qwen3-30B-A3B, Qwen3-Coder-30B-A3B | **16 GB** each; attempting one crashed the machine |
 | A second video engine | **40 min** per generation here; the lane costs hours per candidate |
-| The other 49 Kokoro voices | Eric's call: the lane already has enough to rank |
+| The other 49 Kokoro voices | A human's call: the lane already has enough to rank |
 | Canary-Qwen-2.5B | NeMo format, no MLX port |
 | MCP from a real second machine | Needs the second machine |
 
@@ -928,7 +928,7 @@ the hours. Revisit every one on the Studio.
   checking from your shell proves nothing, because the shell has consent the
   agent can never be prompted for.
 - **`env.sh` used to relocate the cache silently.** A reboot came back without
-  the weights drive, so it walked its candidate list, found the T7 with room,
+  the weights drive, so it walked its candidate list, found the portable SSD with room,
   and started every service against an empty cache. They listened, served
   nothing, and said nothing. `HF_HUB_OFFLINE=1` is the only reason that was a
   confusing hour rather than a 93 GB re-download onto the wrong disk. It now
@@ -943,7 +943,7 @@ the hours. Revisit every one on the Studio.
 - **MCP SDK 2.x moved everything.** `FastMCP` is `MCPServer`, host and port are
   `run()` kwargs rather than settings, the client names went snake_case, and
   DNS-rebinding protection defaults ON with an EMPTY allowlist -- so binding
-  `0.0.0.0` is not enough and `Host: styx.local` is refused before it reaches a
+  `0.0.0.0` is not enough and `Host: <host>.local` is refused before it reaches a
   tool. That guard stays on with an allowlist: "no LAN auth" is about who can
   reach the port, and rebinding only needs someone here to open a web page.
 
@@ -961,7 +961,7 @@ the hours. Revisit every one on the Studio.
   and has to be redone. `./scripts/launchd.sh probe` before anything else.
 - **The 30B models are the reason to want the Studio.** Qwen3-30B-A3B and
   Qwen3-Coder-30B-A3B are 16 GB each against a 24 GB Metal working set here, and
-  attempting one is what took this mini down. On 96 GB they are comfortable, and
+  attempting one is what took this machine down. On 96 GB they are comfortable, and
   they are the strongest local coding models available. Re-run the section 4
   comparison there before assuming they win.
 - Re-run every lane. The whole point of the eval suite is that a hardware change

@@ -4,7 +4,7 @@ This script exists to stop huggingface_hub silently recreating its cache
 somewhere with no room, re-downloading tens of GB with no error.
 
 NOTHING HERE NEEDS A MOUNTED VOLUME. It used to: every test was skipped unless
-/Volumes/Models was attached, so all 29 skipped on both CI runners and ran only
+/Volumes/FAST was attached, so all 29 skipped on both CI runners and ran only
 on one Mac. Ten of them then failed there for a week while CI stayed green,
 because a skip and a pass look the same at a glance. A test CI cannot execute
 is a test CI cannot defend, so these use tmp_path and the free-space threshold
@@ -193,7 +193,7 @@ def test_the_python_and_shell_defaults_agree():
 
 # ---- readability, not just existence ---------------------------------------
 #
-# A launchd agent gets "Operation not permitted" on /Volumes/Models: macOS TCC
+# A launchd agent gets "Operation not permitted" on /Volumes/FAST: macOS TCC
 # protects removable volumes and a background job has no way to ask for
 # consent. The volume stats fine and appears in /Volumes, so every check this
 # script had said it was usable -- and mlx_lm then hung forever inside
@@ -234,7 +234,7 @@ def test_helper_functions_print_nothing_but_their_answer(tmp_path):
 # ---- what replaced the cache-moved guard -----------------------------------
 #
 # A reboot once brought this machine back without the weights volume. The
-# candidate loop skipped the missing /Volumes/Models, found /Volumes/T7 with
+# candidate loop skipped the missing /Volumes/FAST, found /Volumes/PORTABLE with
 # room, and the services started against an EMPTY CACHE, silently. A state file
 # then remembered where we landed and refused to move without HF_ALLOW_MOVE=1.
 #
@@ -243,7 +243,7 @@ def test_helper_functions_print_nothing_but_their_answer(tmp_path):
 # to fall back TO. These are the tests for that property.
 
 def test_an_unreachable_root_is_fatal_rather_than_falling_back(tmp_path):
-    code, home, err = run_env(hf_root="/Volumes/NoSuchVolume/hf")
+    code, home, err = run_env(hf_root="/Volumes/NO_SUCH_VOLUME/hf")
     assert code == 1
     assert home == ""
     assert "FATAL" in err
@@ -251,5 +251,5 @@ def test_an_unreachable_root_is_fatal_rather_than_falling_back(tmp_path):
 
 def test_it_does_not_quietly_use_the_default_when_hf_root_is_bad(tmp_path):
     """The whole failure was starting somewhere else without saying so."""
-    _, home, _ = run_env(hf_root="/Volumes/NoSuchVolume/hf")
+    _, home, _ = run_env(hf_root="/Volumes/NO_SUCH_VOLUME/hf")
     assert not same_dir(home, REPO / "hf_root")

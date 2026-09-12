@@ -45,7 +45,7 @@ class Rubric:
         time, so `novelty@5` on a Mac and `novelty@5` on a card are two
         different prompts -- different what_scores_high, different
         what_scores_low -- under one name. A candidate scored 8 on the card and
-        4 on the mini is the system working; the same two scores under one
+        4 on the Apple Silicon machine is the system working; the same two scores under one
         identity is a contradiction someone will try to reconcile.
         """
         suffix = f"+{'+'.join(self.fragments)}" if self.fragments else ""

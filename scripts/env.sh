@@ -8,11 +8,11 @@
 # Candidate order is by MEASURED throughput (4 GiB dd, cold read forced by
 # unmount/remount so the page cache cannot flatter the number):
 #
-#   /Volumes/Models  DockCase C1P, ioreg Speed=4 (SuperSpeed+, 10 Gbps), direct
-#                    to a host controller. 1013 MB/s write, 959 MB/s cold read.
-#   /Volumes/T7      Samsung PSSD T7, ioreg Speed=3 (5 Gbps) because it sits
-#                    behind a VIA Labs USB3.0 hub. 422/432 MB/s, 2.2x slower.
-#                    The T7 is itself a 10 Gbps device; the hub halves it.
+#   a 10Gbps enclosure, ioreg Speed=4 (SuperSpeed+), direct to a host
+#     controller. 1013 MB/s write, 959 MB/s cold read.
+#   a portable SSD, ioreg Speed=3 (5 Gbps) because it sits behind a USB3.0
+#     hub. 422/432 MB/s, 2.2x slower. The drive is itself a 10 Gbps device;
+#     the hub halves it.
 #
 # Load time scales directly with this, and mlx_lm.server hot-swaps models per
 # request, so the cost is paid on every switch: ~40GB is ~42s at 959 MB/s.
@@ -154,7 +154,7 @@ _hf_fatal() {
   echo "       A location needs ${HF_MIN_FREE_GB}GB free (HF_MIN_FREE_GB)." >&2
   echo "       Point HF_ROOT at a drive with room, or lower the threshold if" >&2
   echo "       you know what you are fetching. The default is ./hf_root in the" >&2
-  echo "       checkout; this machine sets HF_ROOT=/Volumes/Models/hf." >&2
+  echo "       checkout; this machine sets HF_ROOT=/Volumes/FAST/hf." >&2
   echo >&2
   echo "       If the volume IS attached and this still fails, it is probably" >&2
   echo "       macOS TCC. A launchd agent or other background process gets" >&2
@@ -177,7 +177,7 @@ _hf_usable "$HF_ROOT" \
 #
 # A reboot once brought this machine back WITHOUT the weights volume attached.
 # The candidate loop did exactly what it was designed to do: it skipped the
-# missing /Volumes/Models, found /Volumes/T7 with room to spare, and the
+# missing /Volumes/FAST, found /Volumes/PORTABLE with room to spare, and the
 # services started against an EMPTY CACHE. They listened, served nothing, and
 # said nothing about it. A state file was added to remember where we landed
 # last time and refuse to move without HF_ALLOW_MOVE=1.
@@ -187,7 +187,7 @@ _hf_usable "$HF_ROOT" \
 # which is the property the state file was reconstructing after the fact.
 # Broadening the guard to fire whenever HF_ROOT differs from last time would
 # false-alarm on this machine every time the suite (./hf_root) and the services
-# (/Volumes/Models/hf) alternate, and a guard people learn to override is worse
+# (/Volumes/FAST/hf) alternate, and a guard people learn to override is worse
 # than none. HF_STATE_FILE and HF_ALLOW_MOVE are gone with it.
 
 # Only now, once a location is chosen, do we create anything.

@@ -31,7 +31,7 @@ def test_the_shipped_rubric_loads_and_is_versioned():
 def test_the_identity_names_the_machine_fragments_it_merged():
     """A rubric is loaded with the fragments for whatever runtimes this machine
     has, so `novelty@5` on a Mac and `novelty@5` on a card are two different
-    prompts under one name. A candidate scored 8 on the card and 4 on the mini
+    prompts under one name. A candidate scored 8 on the card and 4 on the Apple Silicon machine
     is the system working; the same two scores under one identity is a
     contradiction someone will try to reconcile."""
     mac = load(machine=_APPLE)

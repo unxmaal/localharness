@@ -101,30 +101,39 @@ lh svg "a settings gear icon"
 ```
 
 That prints a path. Open it. For speech on Apple Silicon, also start
-`./scripts/serve-tts.sh`; on the card it is already up. Then `lh say "hello"`.
+`./scripts/serve-tts.sh`; with an NVIDIA card it is already up. Then
+`lh say "hello"`.
 
 ## What it is not
 
 Before you invest an afternoon:
 
-- **Every lane runs on both machines, with a different tool on each.** What is
-  missing on Windows is voice cloning and service supervision. See "A second
-  machine" below for which tool serves which lane.
-- **There is no Linux path.**
+- **Every lane runs on every machine, with a different tool per runtime.** What
+  is missing away from Apple Silicon is voice cloning. See "Running on more than
+  one machine" below for which tool serves which lane.
+- **The lanes are built for two runtimes so far, `mlx` and `cuda`.** macOS,
+  Windows and Linux are each tested on every push, but on a machine with
+  neither runtime most candidates are refused for want of an engine rather than
+  run slowly. `rocm` is probed and has no implementations behind it yet.
 - **It needs disk.** The models this uses run 4 GB to 31 GB each.
 - **Video takes about 40 minutes a generation** on an M2 Pro with 32 GB. It
   works; it is not something you will use casually.
 - **It is a workshop, not a product.** There is no GUI, and some lanes are better
   than others.
 
-## A second machine
+## Running on more than one machine
 
-**Every lane is meant to run on either machine, with a different tool on each.**
+**Every lane is meant to run on any machine, with a different tool per runtime.**
 What draws an image on Apple Silicon is not what will draw one on an NVIDIA
 card, and it is not meant to be. What has to match is that the lane has an
-implementation on both, that the implementation is tested there, and that the
-result says which one produced it. A lane that exists on one machine and not the
-other is unfinished.
+implementation for each runtime, that the implementation is tested there, and
+that the result says which one produced it. A lane that exists on one machine
+and not another is unfinished.
+
+Nothing here branches on the operating system. `harness/machine.py` asks which
+runtimes are present -- `mlx`, `cuda`, `rocm`, `cpu` -- so adding a machine is
+adding a row to a probe table, not forking a lane. That is why nothing below
+counts them.
 
 The checks work that way now. Text in a generated image is read by Apple's
 Vision on macOS, by Windows.Media.Ocr on Windows, and by RapidOCR on Linux,
@@ -134,7 +143,7 @@ named by the caller: each is found by asking the platform and the install, and
 a machine with none warns and withholds the metric instead of failing the
 candidate.
 
-Which one ran is part of the result. The three engines do not agree -- on this
+Which one ran is part of the result. The engines do not agree -- on this
 project's own generated images Vision and RapidOCR read the sign 18 times out
 of 18 and tesseract 6 -- so the engine goes into the run's receipt and two runs
 graded by different ones are refused a shared table. The same holds for peak
@@ -178,8 +187,9 @@ creates.
 **A result records what produced it.** `hw_model` identifies the GPU on Apple
 Silicon because it is the same part. On a PC it says nothing about it, so
 results.json carries an `accelerator` field with the kind, the name and the
-memory. Without it a run from the mini and a run from the 4070 are the same row
-to a score sheet, which is the one thing this suite exists to tell apart.
+memory. Without it a run on unified memory and a run on a discrete card are the
+same row to a score sheet, which is the one thing this suite exists to tell
+apart.
 
 **The memory ceiling is read off the card.** Unified memory hands the GPU a
 fraction of system RAM. A discrete card is a wall, and the 61.6 GB of RAM behind
@@ -188,13 +198,14 @@ exist. Qwen3-30B-A3B at 4-bit is too big for that card and fits a 24 GB one, the
 same candidate and two answers. Without a card the harness still runs and
 reports system RAM as its budget.
 
-**The desktop does not come back serving after a reboot, on purpose.** Its main
-job is games. `scripts/launchd.sh` installs units with RunAtLoad and KeepAlive
-because the mini exists to serve; `scripts/services.sh` registers nothing at
-all, so there is no scheduled task, no Run key, no startup shortcut and no
-systemd unit to find later. That file runs both halves of a dual-booting
-desktop: the only differences between them are how a process is launched
-detached, how it is asked whether it is alive, and how its tree is ended.
+**Whether a machine comes back serving after a reboot is a decision about that
+machine's job.** On one that exists to serve, `scripts/launchd.sh` installs
+launchd agents with RunAtLoad and KeepAlive. On one that is borrowed -- a
+workstation, a shared box, anything with a day job -- `scripts/services.sh`
+registers nothing at all, so there is no scheduled task, no Run key, no startup
+shortcut and no systemd unit to find later. One file covers Windows and Linux
+both: the only differences between them are how a process is launched detached,
+how it is asked whether it is alive, and how its tree is ended.
 
 ```bash
 ./scripts/services.sh start      # gateway, text, audio
@@ -351,10 +362,11 @@ which weights it names and how big they are, which RUNTIME they need as a
 anything to call, and when it was really last touched. Nothing is executed and
 nothing is downloaded.
 
-The verdict names the runtime, not the operating system. `needs-cuda` on the
-mini and `needs-mlx` on the card are one rule read from two directions, which
-is why the mini refuses a candidate the card queues and neither is wrong. A
-repo offering both paths runs wherever one of them lands.
+The verdict names the runtime, not the operating system. `needs-cuda` on an
+Apple Silicon machine and `needs-mlx` on a machine with an NVIDIA card are one
+rule read from two directions, which is why each refuses a candidate the other
+queues and neither is wrong. A repo offering both paths runs wherever one of
+them lands.
 
 The declared-versus-mentioned distinction is load-bearing. An Apple on-device
 repo mentions `torch.cuda` in one export recipe; treating that as a CUDA
@@ -433,7 +445,7 @@ tools.
 
 ```bash
 ./scripts/serve-mcp.sh      # listen on 0.0.0.0:8899
-claude mcp add --transport http localharness http://styx.local:8899/mcp
+claude mcp add --transport http localharness http://<host>.local:8899/mcp
 ```
 
 > **There is no authentication.** Anyone who can reach port 8899 can use this
@@ -477,13 +489,14 @@ silently, and mflux once installed against 3.9 where every entry point died on
 `./hf_root` in the checkout, unless you say otherwise:
 
 ```sh
-export HF_ROOT=/Volumes/Models/hf     # this mini
+export HF_ROOT=/Volumes/FAST/hf     # an external drive on a Mac
 export HF_ROOT=D:/hf                  # a Windows box with a fast drive
+export HF_ROOT=/data/hf               # a Linux box, wherever the room is
 ```
 
 One location, checked for room and writability, and fatal if it is not usable.
 There is no candidate list and no search: a search is how the wrong disk gets
-chosen quietly, and the old list -- `/Volumes/Models/hf`, `/Volumes/T7/hf`,
+chosen quietly, and the old list -- `/Volumes/FAST/hf`, `/Volumes/PORTABLE/hf`,
 `~/.cache/huggingface` -- was one machine written into the repo, forked once for
 Windows and again in shell.
 
@@ -503,16 +516,19 @@ group: 370MB installed rather than 1.1GB. Dependencies are marked by platform
 in `pyproject.toml`, so a Windows install pulls neither mlx nor pyobjc and a
 Mac pulls no winsdk.
 
-## Bringing up the Ubuntu machine
+## Bringing up a Linux machine
 
-The third machine is Ubuntu 24.04 on a spare NVMe in the same desktop as
-Windows, dual booting, same RTX 4070. Ubuntu because GitHub's `ubuntu-latest`
-is 24.04: the CI job tests the release this machine runs, so a red job is a
-real failure rather than a runner-only one.
+Written against Ubuntu 24.04 with an NVIDIA card. Any distribution will run
+this; 24.04 is the one under test, because GitHub's `ubuntu-latest` **is**
+24.04, so a red `check-linux` is a real failure rather than a runner-only one.
+On anything else the package names in step 2 are the part that changes.
 
-Nothing here is a lane. The port was instruments and launchers, because
+Nothing here is a lane. Linux needed instruments and launchers only, because
 `harness/machine.py` asks which runtimes are present rather than which
-operating system it is on, so the card's implementations came over unchanged.
+operating system it is on, so every CUDA implementation came over unchanged.
+That also makes this the cheapest machine to add if you already run Windows on
+the card: the two can share a disk, and neither registers anything with its
+operating system, so dual booting costs nothing here.
 
 ### 1. The driver, before anything else
 
@@ -583,7 +599,7 @@ export LLAMACPP_BIN=/path/to/llama-server     # or put it on PATH
 
 An apt `llama.cpp`, where a distribution has one, is usually built without CUDA,
 which leaves the card idle and the lane slow. Record whichever build you end up
-with in `scripts/versions.sh`, next to the one Windows is running.
+with in `scripts/versions.sh`, beside the versions the other machines report.
 
 GGUF weights go in `$HF_HOME/gguf`, beside the cache rather than inside it:
 huggingface_hub owns `$HF_HOME/hub` and nothing else belongs in there.
@@ -609,8 +625,10 @@ lh discover                         # what this machine can do
 `services.sh` registers nothing with Linux, exactly as it registers nothing with
 Windows. Same file, same verbs; the only differences are how a process is
 launched detached, how it is asked whether it is alive, and how its tree is
-ended. There is no systemd unit and that is a decision, not a gap: this box
-plays games, and the mini is the one that exists to serve.
+ended. There is no systemd unit and that is a decision, not a gap: a machine
+with a day job should start these when asked and not before. If this is the
+machine you want serving on boot, write the unit yourself -- nothing in the
+harness will fight you.
 
 ### What is different here, and worth knowing before it surprises you
 
@@ -619,15 +637,16 @@ a generated image is read by RapidOCR rather than by an engine the operating
 system ships, so it installs with the project through a `sys_platform` marker.
 Peak memory is `ru_maxrss` rather than a footprint, which means it cannot see
 pages that were swapped out, and a run measured here is refused a shared table
-with one measured on Windows for exactly that reason.
+with one measured on Windows for exactly that reason -- the same card under two
+operating systems is one accelerator and two rigs.
 
 ## Keeping the services up
 
-Two answers, because the machines have different jobs. The mini exists to
-serve, so its services come back after a reboot. The desktop exists to play
-games and run this sometimes, so nothing is registered with either of its
-operating systems: no scheduled task, no Run key, no startup shortcut, no
-systemd unit. One `scripts/services.sh` serves both halves of it.
+The answer depends on what else the machine is for. A machine that exists to
+serve gets launchd agents and comes back after a reboot. A machine with a day
+job gets nothing registered at all: no scheduled task, no Run key, no startup
+shortcut, no systemd unit. One `scripts/services.sh` covers that case on
+Windows and Linux alike.
 
 ### On Apple Silicon
 

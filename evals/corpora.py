@@ -15,7 +15,7 @@ committed and the cases are not, and the sample is seeded so a comparison run a
 week later is the same comparison.
 
     curl -LO https://www.openslr.org/resources/12/test-clean.tar.gz
-    tar xzf test-clean.tar.gz -C /Volumes/Models/corpora
+    tar xzf test-clean.tar.gz -C "$(dirname "${HF_ROOT:-./hf_root}")/corpora"
 """
 from __future__ import annotations
 
@@ -28,7 +28,9 @@ from pathlib import Path
 
 import yaml
 
-DEFAULT_ROOT = Path("/Volumes/Models/corpora/LibriSpeech")
+from harness import env
+
+DEFAULT_ROOT = env.beside() / "corpora" / "LibriSpeech"
 DEFAULT_OUT = Path(__file__).resolve().parent / "cases" / "stt"
 DOWNLOAD = "https://www.openslr.org/resources/12/test-clean.tar.gz"
 

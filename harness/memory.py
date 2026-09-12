@@ -14,7 +14,7 @@ postmortem, not a guard.
 Two numbers matter and they are different:
 
   * TOTAL RAM is not the budget. Apple's Metal driver reports a recommended
-    working set well below it (25.0 GiB of 32 on this mini, per tools/h3probe),
+    working set well below it (25.0 GiB of 32 on this machine, per tools/h3probe),
     and exceeding that is where things go wrong rather than at the RAM figure.
   * WHAT IS FREE RIGHT NOW is not the budget either. mlx_lm.server hot-swaps
     models per request and the outgoing weights are not guaranteed to be freed

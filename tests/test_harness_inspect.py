@@ -435,7 +435,7 @@ def test_inspect_still_defaults_to_the_module_threshold(tmp_path):
 
 # ---- capacity gating ------------------------------------------------------
 # The ceiling was a constant describing ONE machine. Two Windows boxes differ
-# from each other as much as either differs from the mini, so what a candidate
+# from each other as much as either differs from the Apple Silicon machine, so what a candidate
 # is measured against has to be read off the machine running the sweep.
 
 
