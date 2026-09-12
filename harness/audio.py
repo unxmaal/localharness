@@ -286,9 +286,15 @@ def record_argv(out: str | Path, seconds: float) -> list[str]:
 
 #: The player, per machine, first match wins. afplay ships with macOS and
 #: nothing ships with the other two, so the rest are what a machine is likely
-#: to already have: paplay and aplay come with PulseAudio/PipeWire and ALSA,
-#: and ffplay comes with the ffmpeg this repo already asks for elsewhere.
-PLAYERS = ("/usr/bin/afplay", "paplay", "aplay", "ffplay")
+#: to already have: pw-play and paplay for PipeWire and PulseAudio, aplay for
+#: ALSA, and ffplay from the ffmpeg this repo already asks for elsewhere.
+#:
+#: pw-play leads because "paplay comes with PipeWire" was only half true:
+#: paplay belongs to pulseaudio-utils, which a PipeWire desktop need not
+#: install. Measured on Ubuntu 24.04 -- pw-play and aplay present, paplay and
+#: ffplay absent. aplay carried it, so nothing was broken; audio reached the
+#: card through ALSA compatibility rather than the server actually running.
+PLAYERS = ("/usr/bin/afplay", "pw-play", "paplay", "aplay", "ffplay")
 
 
 def play_argv(path: str | Path) -> list[str]:

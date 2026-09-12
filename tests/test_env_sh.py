@@ -40,7 +40,7 @@ def same_dir(a: str, b) -> bool:
         return False
 
 
-def run_env(hf_root=None, shell="bash", min_free_gb="0", cwd=None):
+def run_env(hf_root=None, shell="bash", min_free_gb="0", cwd=None, hf_home=None):
     """Source env.sh in a clean shell; return (exit_code, HF_HOME, stderr)."""
     exe = shells.resolve(shell)
     if exe is None:
@@ -49,6 +49,8 @@ def run_env(hf_root=None, shell="bash", min_free_gb="0", cwd=None):
            "HF_MIN_FREE_GB": str(min_free_gb)}
     if hf_root is not None:
         env["HF_ROOT"] = hf_root
+    if hf_home is not None:
+        env["HF_HOME"] = hf_home
     p = subprocess.run(
         # `.` and not `source`: /bin/sh on Ubuntu is dash, which has no such
         # builtin and exits 127. macOS ships bash as sh and accepts both, which
@@ -253,3 +255,56 @@ def test_it_does_not_quietly_use_the_default_when_hf_root_is_bad(tmp_path):
     """The whole failure was starting somewhere else without saying so."""
     _, home, _ = run_env(hf_root="/Volumes/NO_SUCH_VOLUME/hf")
     assert not same_dir(home, REPO / "hf_root")
+
+
+# ---- an HF_HOME the caller already set (#140) -------------------------------
+#
+# harness/env.py returns an existing HF_HOME untouched, and said so in a
+# comment. env.sh read only HF_ROOT and exported over the top of it, so a
+# machine whose profile sets HF_HOME and nothing else had its weights cache
+# silently moved into the checkout the moment anything sourced env.sh. These
+# pin the agreed precedence: HF_ROOT, then an inherited HF_HOME, then the
+# default -- and the inherited one is CHECKED like every other location,
+# because "what is said is still checked" is this script's whole posture.
+
+def test_an_existing_hf_home_is_respected(tmp_path):
+    """The reported bug: env.sh used to overwrite this without looking."""
+    home = tmp_path / "already-set"
+    home.mkdir()
+    code, got, err = run_env(hf_home=str(home), cwd=tmp_path)
+    assert code == 0, err
+    assert same_dir(got, home), f"{got!r} should be {home}"
+
+
+def test_hf_root_still_wins_over_an_inherited_hf_home(tmp_path):
+    """Explicit beats inherited; otherwise HF_ROOT would stop working."""
+    root = tmp_path / "explicit"
+    root.mkdir()
+    home = tmp_path / "inherited"
+    home.mkdir()
+    code, got, err = run_env(hf_root=str(root), hf_home=str(home), cwd=tmp_path)
+    assert code == 0, err
+    assert same_dir(got, root), f"{got!r} should be {root}"
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="chmod 500 does not remove write access on Windows, where the "
+           "equivalent is an ACL")
+def test_an_unusable_inherited_hf_home_is_refused(tmp_path):
+    """Respecting it is not the same as trusting it.
+
+    A location that does not exist yet is fine and gets created -- that is how
+    an explicit HF_ROOT has always worked, and an inherited HF_HOME goes
+    through the identical check. Unusable means unusable: no write access.
+    """
+    unwritable = tmp_path / "locked"
+    unwritable.mkdir()
+    subprocess.run(["chmod", "500", str(unwritable)], check=True)
+    try:
+        code, _, err = run_env(hf_home=str(unwritable / "hf"), cwd=tmp_path)
+        assert code == 1
+        assert "FATAL" in err
+        assert "HF_HOME" in err, "the message should name what the caller set"
+    finally:
+        subprocess.run(["chmod", "700", str(unwritable)], check=True)

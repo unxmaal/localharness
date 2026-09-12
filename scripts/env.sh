@@ -168,9 +168,24 @@ _hf_fatal() {
 # WHAT IS SAID IS STILL CHECKED. An explicit HF_ROOT does not bypass the
 # writability and free-space tests -- skipping them was a real bug once, and an
 # unwritable and a nonexistent path both passed with exit 0.
-HF_ROOT="${HF_ROOT:-$_HF_DEFAULT}"
+#
+# PRECEDENCE: an explicit HF_ROOT, then an HF_HOME the caller already set, then
+# the in-tree default. This used to read HF_ROOT alone and export over the top
+# of HF_HOME, so a machine whose profile set only HF_HOME had its weights cache
+# silently relocated into the checkout by anything that sourced this file --
+# while harness/env.py returned that same HF_HOME untouched. Two halves, one
+# question, opposite answers.
+if [ -n "${HF_ROOT:-}" ]; then
+  _hf_said="HF_ROOT"
+elif [ -n "${HF_HOME:-}" ]; then
+  _hf_said="HF_HOME"
+  HF_ROOT="$HF_HOME"
+else
+  _hf_said="the default"
+  HF_ROOT="$_HF_DEFAULT"
+fi
 _hf_usable "$HF_ROOT" \
-  || _hf_fatal "HF_ROOT=$HF_ROOT is not writable or has under ${HF_MIN_FREE_GB}GB free." \
+  || _hf_fatal "$_hf_said=$HF_ROOT is not writable or has under ${HF_MIN_FREE_GB}GB free." \
   || return 1 2>/dev/null || exit 1
 
 # THERE IS NO SILENT FALLBACK TO GUARD AGAINST ANY MORE.
