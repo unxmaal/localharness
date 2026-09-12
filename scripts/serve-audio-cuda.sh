@@ -17,13 +17,27 @@ mkdir -p "$LH_LOGS"
 # named rather than resolved. Fetch them once:
 #   curl -L -o "$KOKORO_MODEL" https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
 #   curl -L -o "$KOKORO_VOICES" https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
-KOKORO_DIR="${KOKORO_DIR:-${LOCALHARNESS_HOME:-$HOME/localharness}/models/kokoro}"
+# WHERE: beside the other weights, not beside the outputs. LOCALHARNESS_HOME
+# is the artifact root -- out/, runs/, logs/ -- and these are ~350MB of model
+# that every other weight in this project keeps under HF_ROOT, behind env.sh's
+# writability and free-space guard. KOKORO_DIR overrides it.
+KOKORO_DIR="${KOKORO_DIR:-${HF_ROOT:-${LOCALHARNESS_HOME:-$HOME/localharness}}/kokoro}"
+_KOKORO_WAS="${LOCALHARNESS_HOME:-$HOME/localharness}/models/kokoro"
 export KOKORO_MODEL="${KOKORO_MODEL:-$KOKORO_DIR/kokoro-v1.0.onnx}"
 export KOKORO_VOICES="${KOKORO_VOICES:-$KOKORO_DIR/voices-v1.0.bin}"
 if [ ! -f "$KOKORO_MODEL" ] || [ ! -f "$KOKORO_VOICES" ]; then
   echo "FATAL: Kokoro weights missing." >&2
   echo "       expected $KOKORO_MODEL" >&2
   echo "       and      $KOKORO_VOICES" >&2
+  echo "       Set KOKORO_DIR to say where they are, or KOKORO_MODEL and" >&2
+  echo "       KOKORO_VOICES individually." >&2
+  if [ -f "$_KOKORO_WAS/kokoro-v1.0.onnx" ]; then
+    echo >&2
+    echo "       They ARE at $_KOKORO_WAS, which is where this looked before" >&2
+    echo "       the weights moved under HF_ROOT. Move them, or set" >&2
+    echo "       KOKORO_DIR=$_KOKORO_WAS." >&2
+  fi
+  echo >&2
   echo "       The two curl commands are in the comment above this check." >&2
   exit 1
 fi

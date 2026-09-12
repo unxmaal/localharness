@@ -127,3 +127,44 @@ def _alive(pid: int) -> bool:
     except OSError:
         return False
     return True
+
+
+# ---- kokoro weights live with the weights, not with the outputs (#151) -----
+
+def _kokoro_dir(env: dict) -> str:
+    """Ask serve-audio-cuda.sh where it would look, without starting it.
+
+    Through shells.resolve, never a bare "bash": on a Windows runner that name
+    resolves to WSL, which has no distribution installed and answers "Windows
+    Subsystem for Linux has no installed distributions." in UTF-16. That is
+    what tests/shells.py exists for, and this file already imported it."""
+    script = Path(__file__).resolve().parent.parent / "scripts" / "serve-audio-cuda.sh"
+    line = [ln for ln in script.read_text(encoding="utf-8").splitlines()
+            if ln.startswith("KOKORO_DIR=")][0]
+    r = subprocess.run([BASH, "-c", f'{line}\nprintf "%s" "$KOKORO_DIR"'],
+                       capture_output=True, text=True,
+                       env={"PATH": os.environ["PATH"], **env})
+    return r.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash on this machine")
+def test_kokoro_weights_default_under_hf_root():
+    """They are ~350MB of model. Every other weight in this project lives under
+    HF_ROOT, behind env.sh's writability and free-space guard; these were under
+    LOCALHARNESS_HOME, which is the ARTIFACT root -- out/, runs/, logs/."""
+    got = _kokoro_dir({"HF_ROOT": "/weights/hf", "LOCALHARNESS_HOME": "/artifacts"})
+    assert got == "/weights/hf/kokoro", got
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash on this machine")
+def test_kokoro_dir_overrides_everything():
+    got = _kokoro_dir({"KOKORO_DIR": "/elsewhere", "HF_ROOT": "/weights/hf"})
+    assert got == "/elsewhere", got
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash on this machine")
+def test_without_hf_root_it_falls_back_rather_than_guessing():
+    """No HF_ROOT set is the fresh-clone case, and it must still name ONE
+    place rather than searching."""
+    got = _kokoro_dir({"LOCALHARNESS_HOME": "/artifacts"})
+    assert got == "/artifacts/kokoro", got

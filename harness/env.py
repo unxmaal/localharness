@@ -167,9 +167,14 @@ def apply(environ=None, root: str | None = None,
     # wifi blip turns into a model "failure" mid-run.
     environ.setdefault("HF_HUB_OFFLINE", "1")
 
+    # #140 made this agree with env.sh on PRECEDENCE and left VALIDATION
+    # split: the shell routed an inherited HF_HOME through _hf_usable while
+    # this returned it untouched, so an unmounted volume was fatal from the
+    # shell and silently accepted from `lh`. With HF_HUB_OFFLINE set two lines
+    # above, that reads as a model missing from a machine that has it.
     existing = environ.get("HF_HOME")
     if existing:
-        return existing
+        return existing if usable(existing, min_free_gb) else None
     found = resolve(root if root is not None else environ.get(ROOT_VAR),
                     min_free_gb)
     if found:

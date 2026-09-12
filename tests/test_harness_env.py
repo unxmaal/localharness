@@ -46,10 +46,18 @@ def test_the_environment_overrides_the_default(tmp_path, monkeypatch):
 
 # ---- what apply() does -----------------------------------------------------
 
-def test_an_explicit_hf_home_is_respected(tmp_path):
-    environ = {"HF_HOME": "/somewhere/deliberate"}
-    assert env.apply(environ, root=big(tmp_path, "a")) == "/somewhere/deliberate"
-    assert environ["HF_HOME"] == "/somewhere/deliberate"
+def test_an_explicit_hf_home_beats_the_configured_root(tmp_path):
+    """Precedence, settled in #140. The inherited value wins over the root
+    this call was handed.
+
+    It used to be asserted with an unusable path (`/somewhere/deliberate`),
+    which quietly made this a test of BOTH precedence and the absence of any
+    check. #155 added the check, so the path here is a real one and the
+    refusal case is tested separately below."""
+    mine = big(tmp_path, "mine")
+    environ = {"HF_HOME": mine}
+    assert env.apply(environ, root=big(tmp_path, "a"), min_free_gb=0) == mine
+    assert environ["HF_HOME"] == mine
 
 
 def test_the_configured_root_is_used(tmp_path):
@@ -122,3 +130,70 @@ def test_the_threshold_matches_the_one_env_sh_uses():
 def test_the_default_directory_name_matches_env_sh():
     text = open("scripts/env.sh", encoding="utf-8").read()
     assert f"/{env.DEFAULT_ROOT}" in text
+
+
+# ---- an inherited HF_HOME is CHECKED, not just honoured (#155) -------------
+#
+# NOTE ON WHAT "UNUSABLE" MEANS HERE, because the first cut of these tests got
+# it wrong: a path that does not exist yet is USABLE if its nearest existing
+# ancestor is writable. That is deliberate and load-bearing -- it is how
+# ./hf_root works on a fresh clone, and env.sh mkdir -p's afterwards. The real
+# failures are an ancestor that cannot be written, and a volume without room.
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="chmod 500 does not remove write access on Windows, where the "
+           "equivalent is an ACL. Same reason as the unreadable-root test "
+           "above; the free-space case below covers this one on every machine")
+def test_an_inherited_hf_home_under_an_unwritable_ancestor_is_refused(tmp_path):
+    """#140 made env.py and env.sh agree on PRECEDENCE and left VALIDATION
+    split: the shell routed an inherited HF_HOME through _hf_usable while this
+    returned it untouched. So an unmounted volume was fatal from the shell and
+    silently accepted from `lh` -- and with HF_HUB_OFFLINE set, that reads as a
+    model missing from a machine that plainly has it."""
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o500)
+    try:
+        environ = {"HF_HOME": str(locked / "hf")}
+        assert env.apply(environ, min_free_gb=0) is None
+    finally:
+        locked.chmod(0o700)
+
+
+def test_an_inherited_hf_home_without_room_is_refused(tmp_path):
+    good = tmp_path / "hf"
+    good.mkdir()
+    assert env.apply({"HF_HOME": str(good)}, min_free_gb=10 ** 9) is None
+
+
+def test_an_inherited_hf_home_that_is_usable_still_wins(tmp_path):
+    """Validation must not change precedence. #140 settled that order."""
+    good = tmp_path / "hf"
+    good.mkdir()
+    environ = {"HF_HOME": str(good)}
+    assert env.apply(environ, min_free_gb=0) == str(good)
+
+
+def test_a_path_that_does_not_exist_yet_is_still_usable(tmp_path):
+    """The ./hf_root case on a fresh clone. Validation must not break it."""
+    environ = {"HF_HOME": str(tmp_path / "not" / "made" / "yet")}
+    assert env.apply(environ, min_free_gb=0) is not None
+
+
+def test_validation_does_not_rewrite_what_the_caller_set(tmp_path):
+    good = tmp_path / "hf"
+    good.mkdir()
+    environ = {"HF_HOME": str(good)}
+    env.apply(environ, min_free_gb=0)
+    assert environ["HF_HOME"] == str(good)
+
+
+def test_a_refused_hf_home_is_not_silently_replaced(tmp_path):
+    """Returning None rather than falling back: env.py's own comment says a
+    wrong HF_HOME is worse than none, because huggingface_hub will fill it."""
+    good = tmp_path / "hf"
+    good.mkdir()
+    environ = {"HF_HOME": str(good)}
+    assert env.apply(environ, min_free_gb=10 ** 9) is None
+    assert environ["HF_HOME"] == str(good)

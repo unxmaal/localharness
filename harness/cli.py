@@ -28,6 +28,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from harness.checks import code as code_check
 from harness import audio, completion, discover as discovery, env, exclusive, paths, proc, vector
 from harness.checks import html as html_check
 from harness.checks import image as image_check
@@ -286,6 +287,22 @@ def _answer(a, modality: str, context: str = "") -> int:
         return err(str(exc))
 
     body = completion.artifact(raw, modality)
+
+    # #143. `svg` and `web` are checked before the caller sees them and `code`
+    # was not, which is backwards: it is the one lane whose output is meant to
+    # be executed. Neither check here RUNS anything -- harness/checks/code.py
+    # does that, and it needs a case's assertions, which a one-off prompt has
+    # no equivalent of. These are warnings rather than a verdict because the
+    # caller's target environment is not necessarily this machine.
+    if modality == "code":
+        broken = code_check.syntax_error(body)
+        if broken:
+            print(f"warning: does not parse, {broken}", file=sys.stderr)
+        missing = code_check.unresolvable_imports(body)
+        if missing:
+            print(f"warning: imports not installed here: {', '.join(missing)}",
+                  file=sys.stderr)
+
     if getattr(a, "output", None):
         out = Path(a.output)
         out.parent.mkdir(parents=True, exist_ok=True)
