@@ -1,0 +1,34 @@
+{{- if .Values.inspect.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "localharness.name" . }}-inspect
+  labels:
+    {{- include "localharness.labels" . | nindent 4 }}
+    localharness.io/tier: inspect
+spec:
+  # THE FAN-OUT, and the reason this issue targets discovery before lanes.
+  # harness/inspect.py imports no model and calls no gateway: it clones source,
+  # reads it, and asks the registry for weight sizes. Embarrassingly parallel,
+  # and it must never land on the GPU pool -- a pod holding a card to read a
+  # README starves the only tier that needs one.
+  parallelism: {{ .Values.inspect.parallelism }}
+  completions: {{ .Values.inspect.completions }}
+  backoffLimit: {{ .Values.inspect.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "localharness.labels" . | nindent 8 }}
+        localharness.io/tier: inspect
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: inspect
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["discover", "--inspect", "--json"]
+          env:
+            {{- include "localharness.storeEnv" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources.cheap | nindent 12 }}
+{{- end }}

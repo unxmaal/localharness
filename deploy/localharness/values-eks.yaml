@@ -1,0 +1,22 @@
+# RENDERED, NEVER RUN. Nobody here has an EKS cluster, and the chart README
+# says so rather than implying this has been exercised.
+#
+# The driver is the operator's on a managed node pool, which is the exact
+# opposite of the host-driver profile. Weights are the hard part: 134 GiB for
+# H3 means EFS or a very large volume plus a cold start that dwarfs any
+# generation, and baking them into an image is not viable at that size.
+postgres:
+  dev:
+    enabled: false
+  host: "localharness.cluster-xxxx.us-east-1.rds.amazonaws.com"
+  existingSecret: "localharness-postgres"
+gpu:
+  enabled: true
+  driver: operator
+  count: 1
+  nodeSelector:
+    node.kubernetes.io/instance-type: g5.xlarge
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule

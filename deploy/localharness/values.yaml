@@ -1,0 +1,67 @@
+# Defaults are the SAFE profile: no GPU, nothing claiming a driver, nothing
+# scheduled onto hardware that may not exist. A profile turns capability on.
+
+image:
+  repository: localharness
+  # Pinned, never `latest`: a CronJob that pulls a moving tag runs a different
+  # program every week and reports the difference as a discovery. Asserted.
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+# The discovery store. Postgres, decided 2026-09-13: the fan-out writes from
+# several pods, and SQLite's locking depends on the filesystem honouring it,
+# which is exactly what a ReadWriteMany claim does not promise.
+#
+# `lh` on a laptop keeps its SQLite path with no cluster at all. That is a
+# requirement of the issue, not an accident.
+postgres:
+  enabled: true
+  host: ""            # empty means the in-chart service
+  database: discovery
+  user: discovery
+  existingSecret: ""  # a Secret with `password`; created if empty and dev is on
+  dev:
+    # An in-chart Postgres for a laptop cluster. Never for a real one.
+    enabled: false
+    storage: 2Gi
+
+sweep:
+  enabled: true
+  # WEEKLY, and that is not a taste. github.TTL_BY_ENDPOINT_HOURS["/starred"]
+  # is 48h, so a sweep more often than that re-reads its own cache and reports
+  # success without looking (#77). The test asserts this schedule stays above
+  # the TTL, because two numbers in two languages drift.
+  schedule: "0 4 * * 0"
+  suspend: false
+
+inspect:
+  enabled: true
+  # The fan-out. No model, no gateway: clone, read, ask the registry for sizes.
+  parallelism: 4
+  completions: 4
+  backoffLimit: 2
+
+judge:
+  # A small text model through the gateway. NOT in-cluster on a laptop: the
+  # Docker VM here is 8 GB and a resident judge would take most of it.
+  enabled: false
+  gateway: ""   # http://host.docker.internal:4000 on Docker Desktop
+
+gpu:
+  # OFF by default. On a machine with no card, a GPU workload is not slow, it
+  # is unschedulable and silently Pending.
+  enabled: false
+  # host      - the driver lives on the machine and must stay there,
+  #             because the machine has another operating system with a
+  #             prior claim on it
+  # operator  - GPU Operator owns the driver, as on a managed node pool
+  # Both claiming it is the failure this chart refuses to render.
+  driver: host
+  nodeSelector: {}
+  tolerations: []
+  count: 1
+
+resources:
+  cheap:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 1Gi}

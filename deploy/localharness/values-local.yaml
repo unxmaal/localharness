@@ -1,0 +1,16 @@
+# This machine: Docker Desktop's Kubernetes, arm64, an 8 GB VM, no card.
+#
+# NOTE it is Docker Desktop rather than kind, so there is no `kind load
+# docker-image`; a locally built image is already visible to the node and
+# IfNotPresent finds it.
+postgres:
+  dev:
+    enabled: true
+judge:
+  # OFF in-cluster. The gateway runs on the HOST and the pod reaches it, which
+  # is both the only thing that fits in 8 GB and the right production shape:
+  # models belong on GPU nodes or outside the scheduler entirely.
+  enabled: false
+  gateway: "http://host.docker.internal:4000"
+gpu:
+  enabled: false

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: localharness
+description: Discovery on Kubernetes. The cheap tiers fan out; the GPU stays a queue of one.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
