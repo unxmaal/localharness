@@ -73,9 +73,14 @@ testpaths = ["tests"]
 # `slow` is deselected by default: these load a 4GB model and take minutes,
 # which is not what `make check` is for. `make check-slow` runs them.
 # -rs: a silently skipped test reports green for something it never checked.
-addopts = "-q --strict-markers -rs -m 'not slow'"
+addopts = "-q --strict-markers -rs -m 'not slow and not network'"
 markers = [
     "slow: needs the optional `metrics` group and loads a multi-GB model",
+    # Kept apart from `slow` deliberately. They are excluded for opposite
+    # reasons: `slow` costs minutes and gigabytes, `network` is cheap and
+    # depends on somebody else's uptime. A lint that fails when a registry has
+    # a bad afternoon teaches people to skip lint.
+    "network: asks a third party whether something it publishes is still there",
 ]
 # The repo root, so `from evals...` resolves without a sys.path hack in every
 # test module.
