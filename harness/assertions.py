@@ -19,9 +19,10 @@ looked like a regression. See RULE on "a number without its configuration".
 from __future__ import annotations
 
 import re
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from harness import repo
 
 #: A number with a unit is the decaying kind of claim: it was measured once, on
 #: one machine, in one configuration, and nothing about the sentence says so.
@@ -66,6 +67,14 @@ QUALIFIER = re.compile(
 #: date is often on the line above and the machine on the line below.
 QUALIFIER_WINDOW = 2
 
+#: A command a reader will type. A number on one of these lines is not a
+#: measurement of a component or a phase -- it is a promise about what the
+#: reader will WAIT FOR, which is the distinction that made "lh say costs
+#: about 2s a line" false (2s was the fixed per-call overhead) and "Kokoro,
+#: sub-second" false (3.5s through the CLI, whatever the synthesis costs).
+COMMAND = re.compile(r"\blh\s+(?:image|video|svg|web|code|extract|say|hear|"
+                     r"voices|models|discover)\b")
+
 #: Dated records rather than live claims. A validation log SHOULD be full of
 #: numbers from one afternoon; that is what it is for. The claims that rot are
 #: the ones a reader takes as current.
@@ -82,6 +91,18 @@ class Claim:
     kinds: tuple[str, ...]
     text: str
     qualified: bool = True
+    #: The line invokes a command a reader will type, so its number is a
+    #: promise about their wait rather than about a component.
+    user_facing: bool = False
+
+    @property
+    def unqualified_cost(self) -> bool:
+        """The worst kind, and the one that produced three of four refutations.
+
+        A cost quoted beside the command that incurs it, with nothing said
+        about the conditions. A reader takes it as what THEY will wait for.
+        """
+        return self.config_less and self.user_facing
 
     @property
     def config_less(self) -> bool:
@@ -94,7 +115,9 @@ class Claim:
 
     def __str__(self) -> str:
         marks = list(self.kinds)
-        if self.config_less:
+        if self.unqualified_cost:
+            marks.append("UNQUALIFIED-COST")
+        elif self.config_less:
             marks.append("CONFIG-LESS")
         return f"{self.path}:{self.line}\t{','.join(marks)}\t{self.text}"
 
@@ -114,27 +137,53 @@ def is_prose(path: Path, line: str) -> bool:
     return s.startswith("#") or s.startswith('"""') or '"""' in s
 
 
+def _fence_openers(lines: list[str]) -> dict[int, int]:
+    """For each line inside a ``` block, the index of the line that opened it.
+
+    A reader does not read an example in isolation: the sentence above the
+    fence says what the example is, and that is where "Measured 2026-09-12 on
+    an M2 Pro" lives while the number lives three lines below it inside the
+    block. Without this the window ends at the fence and every annotated
+    example reads as config-less.
+    """
+    out, opener = {}, None
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("```"):
+            opener = None if opener is not None else i
+            continue
+        if opener is not None:
+            out[i] = opener
+    return out
+
+
 def scan(text: str, path: Path, origin: str) -> list[Claim]:
     out = []
     lines = text.splitlines()
+    openers = _fence_openers(lines) if path.suffix == ".md" else {}
     for n, line in enumerate(lines, 1):
         if not is_prose(path, line):
             continue
         kinds = tuple(k for k, pat in (("NUM", NUMBER), ("ABS", ABSOLUTE),
                                        ("SAYS-MEASURED", PROVENANCE))
                       if pat.search(line))
-        if kinds:
-            lo, hi = max(0, n - 1 - QUALIFIER_WINDOW), n + QUALIFIER_WINDOW
-            near = "\n".join(lines[lo:hi])
-            out.append(Claim(origin, n, kinds, line.strip()[:160],
-                             bool(QUALIFIER.search(near))))
+        if not kinds:
+            continue
+        lo, hi = max(0, n - 1 - QUALIFIER_WINDOW), n + QUALIFIER_WINDOW
+        window = lines[lo:hi]
+        opener = openers.get(n - 1)
+        if opener is not None:
+            window += lines[max(0, opener - QUALIFIER_WINDOW - 1):opener]
+        out.append(Claim(origin, n, kinds, line.strip()[:160],
+                         bool(QUALIFIER.search("\n".join(window))),
+                         bool(COMMAND.search(line))))
     return out
 
 
 def tracked(root: Path) -> list[Path]:
-    r = subprocess.run(("git", "-C", str(root), "ls-files"),
-                       capture_output=True, text=True, check=True)
-    return [root / line for line in r.stdout.splitlines() if line]
+    """What a push would publish, not what a commit already did. See
+    harness/repo.publishable: a check that cannot see the file you just wrote
+    goes green on your desk and red on the runner, on the same content."""
+    return repo.publishable(root)
 
 
 def collect(root: Path, include_archives: bool = False) -> list[Claim]:
@@ -163,6 +212,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--config-less", action="store_true",
                     help="only numbers with nothing said about the conditions "
                          "they were taken in, which is the kind that rots")
+    ap.add_argument("--cost", action="store_true",
+                    help="only unqualified costs quoted beside the command "
+                         "that incurs them, which a reader takes as their own "
+                         "wait")
     a = ap.parse_args(argv)
 
     found = collect(Path(__file__).resolve().parent.parent, a.archives)
@@ -170,6 +223,8 @@ def main(argv: list[str] | None = None) -> int:
         found = [c for c in found if a.kind in c.kinds]
     if a.config_less:
         found = [c for c in found if c.config_less]
+    if a.cost:
+        found = [c for c in found if c.unqualified_cost]
     for c in found:
         print(c)
     print(f"{len(found)} claim(s)")

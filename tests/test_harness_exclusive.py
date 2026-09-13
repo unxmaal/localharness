@@ -33,9 +33,9 @@ def test_the_expensive_lanes_are_the_exclusive_ones():
 
 @pytest.mark.parametrize("lane", ["svg", "web", "code", "extract", "say", "hear"])
 def test_a_cheap_lane_does_not_wait(lane):
-    """`lh extract` measured 0.96s. Putting it behind a forty-minute video
-    would be a downgrade wearing the clothes of enforcement: those lanes go to
-    servers that already serialise."""
+    """`lh extract` measured 0.96s on an M2 Pro, 2026-09-12, one run. Putting
+    it behind a forty-minute video would be a downgrade wearing the clothes of
+    enforcement: those lanes go to servers that already serialise."""
     started = time.perf_counter()
     with exclusive.held(lane) as waited:
         assert waited is False
