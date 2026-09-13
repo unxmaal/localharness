@@ -34,6 +34,13 @@ REFERENCE = re.compile(
 #: CREATES a file is the clearest case, and so is a glob.
 ALLOW = re.compile(r"\*|<|\$|\{")
 
+#: Paths the documentation names BEFORE they exist, each with the step that
+#: creates it. Enumerated rather than inferred: "it is gitignored" would excuse
+#: a typo in any ignored path, which is most of what a build produces.
+BUILT_BY_A_DOCUMENTED_STEP = {
+    "tools/h3probe": "built by the h3probe step in PLAN.md; gitignored binary",
+}
+
 
 def documents():
     return [p for p in repo.publishable(REPO)
@@ -50,13 +57,44 @@ def references(path: Path):
     return out
 
 
+def shipped():
+    """What a READER gets, not what happens to be on this disk.
+
+    The first cut of this test called Path.exists(), passed here and failed on
+    all three runners naming `tools/h3probe` -- a gitignored binary that exists
+    on the machine that built it and on no clone. That is violation 5 from
+    #160, committed inside the test written to catch violation 6, which is a
+    fair measure of how easy it is: the check must see what a reader sees.
+    """
+    return {p.relative_to(REPO).as_posix() for p in repo.publishable(REPO)}
+
+
 @pytest.mark.parametrize("doc", documents(),
                          ids=lambda p: p.relative_to(REPO).as_posix())
-def test_every_path_named_in_prose_exists(doc):
-    missing = [(n, r) for n, r in references(doc) if not (REPO / r).exists()]
+def test_every_path_named_in_prose_reaches_the_reader(doc):
+    have = shipped()
+    dirs = {d for p in have for d in _parents(p)}
+    missing = [(n, r) for n, r in references(doc)
+               if r not in have and r not in dirs
+               and r not in BUILT_BY_A_DOCUMENTED_STEP]
     assert not missing, (
-        f"{doc.relative_to(REPO)} names paths that are not there: "
+        f"{doc.relative_to(REPO)} names paths a clone does not have: "
         + ", ".join(f"line {n}: {r}" for n, r in missing))
+
+
+def _parents(rel: str):
+    parts = rel.split("/")
+    return ["/".join(parts[:i]) for i in range(1, len(parts))]
+
+
+def test_the_exceptions_are_still_exceptions():
+    """An allowlist that outlives its reason is how a check rots. Every entry
+    must still be absent from a clone; one that starts shipping belongs in the
+    checked set, not in the excuses."""
+    have = shipped()
+    for path, why in BUILT_BY_A_DOCUMENTED_STEP.items():
+        assert path not in have, \
+            f"{path} ships now, so it no longer needs the exception: {why}"
 
 
 def test_another_project_s_path_is_not_read_as_ours():
