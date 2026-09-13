@@ -29,8 +29,8 @@ from harness.engines import Engine, parse_options, resolve
 
 from dataclasses import replace
 
-from evals.core import (MODALITIES, Case, Receipt, comparable, direction_of,
-                        load_cases, summarize)
+from evals.core import (MODALITIES, Case, Receipt, cases_digest, comparable,
+                        direction_of, load_cases, summarize)
 from evals.environment import capture
 from evals.runners.process import ProcessRunner
 from evals.runners.chain import ChainRunner
@@ -512,7 +512,8 @@ def main(argv: list[str] | None = None) -> int:
             adherence=getattr(args, "adherence", "") or "",
             tier="screen" if getattr(args, "screen", False) else "measure",
             accelerator=accelerator_id(),
-            instruments=instruments())
+            instruments=instruments(),
+            cases_digest=cases_digest(cases))
         (outdir / "results.json").write_text(json.dumps(
             {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
              "environment": capture(),
@@ -590,7 +591,8 @@ def compare_runs(files: list[str]) -> int:
                                   adherence=raw.get("adherence", ""),
                                   tier=raw.get("tier", "measure"),
                                   accelerator=raw.get("accelerator", ""),
-                                  instruments=raw.get("instruments") or {}),
+                                  instruments=raw.get("instruments") or {},
+                                  cases_digest=raw.get("cases_digest", "")),
                        data.get("summary") or {}))
 
     first_file, first, _ = loaded[0]
