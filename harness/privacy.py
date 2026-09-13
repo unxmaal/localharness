@@ -42,8 +42,13 @@ PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     ),
     (
         "private-host",
+        # `.local` is mDNS, and a real hostname there identifies a person's
+        # LAN. `cluster.local` is Kubernetes' own DNS suffix, byte-identical on
+        # every cluster on earth, so `postgres.localharness.svc.cluster.local`
+        # is a protocol constant rather than an address. Excluded by name
+        # rather than by loosening the rule.
         re.compile(r"\b(?:10|192\.168|172\.(?:1[6-9]|2\d|3[01]))\.\d+\.\d+\b"
-                   r"|(?<![\w<])[a-z0-9-]+\.local\b"),
+                   r"|(?<![\w<])(?!cluster\.local)[a-z0-9-]+\.local\b"),
         "a LAN address; use <host> or a documented placeholder",
     ),
     (

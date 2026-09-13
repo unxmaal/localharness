@@ -1,0 +1,42 @@
+{{- if .Values.sweep.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "localharness.name" . }}-sweep
+  labels:
+    {{- include "localharness.labels" . | nindent 4 }}
+    localharness.io/tier: sweep
+spec:
+  schedule: {{ .Values.sweep.schedule | quote }}
+  suspend: {{ .Values.sweep.suspend }}
+  # A sweep that overruns its window must not start a second one: two sweeps
+  # race on the same cache and the same store for no extra information.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "localharness.labels" . | nindent 12 }}
+            localharness.io/tier: sweep
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: sweep
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args: ["discover", "--feeds", "--json"]
+              env:
+                {{- include "localharness.storeEnv" . | nindent 16 }}
+                - name: GH_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "localharness.name" . }}-gh
+                      key: token
+                      optional: true
+              resources:
+                {{- toYaml .Values.resources.cheap | nindent 16 }}
+{{- end }}

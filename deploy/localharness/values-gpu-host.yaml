@@ -1,0 +1,19 @@
+# A machine whose card is driven by its host: the driver stays where it is,
+# because another operating system on the same box has a prior claim on it.
+# GPU Operator's driver management is therefore off, which is the exact
+# opposite of the setting a managed node pool wants.
+postgres:
+  dev:
+    enabled: false
+  host: "postgres.localharness.svc.cluster.local"
+  existingSecret: "localharness-postgres"
+gpu:
+  enabled: true
+  driver: host
+  count: 1
+  nodeSelector:
+    localharness.io/gpu: "true"
+  tolerations:
+    - key: localharness.io/gpu
+      operator: Exists
+      effect: NoSchedule

@@ -1,0 +1,42 @@
+{{- if .Values.gpu.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "localharness.name" . }}-measure
+  labels:
+    {{- include "localharness.labels" . | nindent 4 }}
+    localharness.io/tier: measure
+spec:
+  # A QUEUE OF ONE, by the scheduler rather than by hope. `limits.nvidia.com/gpu`
+  # on a single-card node IS the lock built in #137: a second pod will not be
+  # placed. That lock still earns its keep, because a person running `lh` on the
+  # host is invisible to this scheduler.
+  parallelism: 1
+  completions: 1
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        {{- include "localharness.labels" . | nindent 8 }}
+        localharness.io/tier: measure
+    spec:
+      restartPolicy: Never
+      {{- with .Values.gpu.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.gpu.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: measure
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["--", "python", "-m", "evals.run", "--modality", "image"]
+          env:
+            {{- include "localharness.storeEnv" . | nindent 12 }}
+          resources:
+            limits:
+              nvidia.com/gpu: {{ .Values.gpu.count }}
+{{- end }}

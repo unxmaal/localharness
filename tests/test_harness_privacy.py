@@ -127,3 +127,19 @@ def test_this_repo_is_clean():
     bare exit code."""
     found = privacy.scan_paths(Path(__file__).resolve().parent.parent)
     assert not found, "\n" + "\n".join(str(f) for f in found)
+
+
+# ---- a protocol constant is not an address --------------------------------
+
+def test_the_kubernetes_dns_suffix_is_not_a_lan_address():
+    """`svc.cluster.local` is byte-identical on every cluster on earth, so it
+    identifies nobody. Flagging it would make the chart unlintable and teach
+    the next person to switch the scanner off, which is the failure mode a
+    detector dies of."""
+    assert scan("host: postgres.localharness.svc.cluster.local") == []
+
+
+def test_a_real_mdns_host_is_still_caught():
+    """The negative control for the carve-out. Narrowing a rule is how a rule
+    stops working, so the thing it was written for must still fire."""
+    assert scan("url: http://basement.local:8899/mcp") == ["private-host"]

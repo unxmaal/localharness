@@ -1,0 +1,66 @@
+{{- if and .Values.postgres.enabled .Values.postgres.dev.enabled }}
+{{- if .Values.gpu.enabled }}
+{{- fail "postgres.dev is a laptop convenience and must not run beside a GPU profile: give it a real database" }}
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "localharness.name" . }}-postgres
+  labels:
+    {{- include "localharness.labels" . | nindent 4 }}
+spec:
+  ports:
+    - port: 5432
+      targetPort: 5432
+  selector:
+    app.kubernetes.io/name: {{ include "localharness.name" . }}
+    localharness.io/tier: store
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "localharness.name" . }}-postgres
+  labels:
+    {{- include "localharness.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "localharness.name" . }}-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "localharness.name" . }}
+      localharness.io/tier: store
+  template:
+    metadata:
+      labels:
+        {{- include "localharness.labels" . | nindent 8 }}
+        localharness.io/tier: store
+    spec:
+      containers:
+        - name: postgres
+          image: "postgres:16-alpine"
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.database | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.user | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "localharness.name" . }}-postgres
+                  key: password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.postgres.dev.storage }}
+{{- end }}
