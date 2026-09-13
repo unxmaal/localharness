@@ -36,9 +36,12 @@ LOCK = "generation.lock"
 #: THE ABSENT ONES ARE THE DELIBERATE PART. svg, web, code and extract go to
 #: mlx_lm.server, which already serialises through a single queue of its own;
 #: say and hear go to a small resident audio service. Making `lh extract` --
-#: measured at 0.96s -- wait behind a 40-minute video would be a downgrade
-#: wearing the clothes of enforcement. The resource protected here is a large
-#: LOCAL working set, not the machine.
+#: one run of one prompt at 0.96s, M2 Pro, 2026-09-12, never repeated -- wait
+#: behind a 40-minute video would be a downgrade wearing the clothes of
+#: enforcement. The argument does not rest on that number: two orders of
+#: magnitude is the claim, and a re-measurement would have to find seconds
+#: rather than milliseconds to change it. The resource protected here is a
+#: large LOCAL working set, not the machine.
 EXCLUSIVE = {"image", "video"}
 
 #: How often a waiter re-reads the holder to refresh what it reports.

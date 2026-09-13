@@ -37,9 +37,21 @@ from harness.engines import resolve
 
 DEFAULT_IMAGE_ENGINE = "mflux:flux2-klein-4b"
 DEFAULT_VIDEO_ENGINE = "h3"
+
+# Every evals/cases/{image,video}/*.yaml pins a resolution. The CLI did not, so
+# it inherited whatever each engine defaults to -- 1024 for mflux -- and ran a
+# different exam from the suite that chose its engine, which is how two correct
+# measurements came to look like a regression (#157, #141, #142). Named rather
+# than inlined so tests/test_cli_resolution.py can hold the two to each other.
+DEFAULT_RESOLUTION = 512
 # Per-lane defaults, set from the eval of 2026-09-06 rather than from a tier
 # name. NO SINGLE MODEL WINS ALL FOUR LANES, so there is no one default to
-# pick. Re-derive with:
+# pick.
+#
+# EVERY NUMBER BELOW IS FROM ONE EXAM: an M2 Pro with 32 GB, mlx_lm.server
+# behind the LiteLLM gateway, DEFAULT_TEMPERATURE 0.2, 2026-09-06. None of it
+# has been re-run on a discrete card (#96), and a different temperature is a
+# different exam (#90). Re-derive with:
 #   uv run python -m evals.run --modality <lane> --repeat 3 \
 #     --candidates local-mid,local-large,q3-4b,q3-8b,q3-14b
 #
@@ -102,7 +114,7 @@ def err(msg: str) -> int:
     return 1
 
 
-def say(*, path=None, body=None, seconds=None, peak_kb=None,
+def say(*, path=None, body=None, seconds=None, peak_kb=None, size=None,
         human: str = "") -> int:
     """Report a success, in whichever shape the caller asked for."""
     if _JSON:
@@ -115,6 +127,8 @@ def say(*, path=None, body=None, seconds=None, peak_kb=None,
             out["seconds"] = round(seconds, 3)
         if peak_kb:
             out["peak_gib"] = round(peak_kb / 1024 / 1024, 2)
+        if size is not None:
+            out["size"] = size
         print(json.dumps(out))
     else:
         print(human)
@@ -183,9 +197,14 @@ def _generate(spec: str, prompt: str, out: Path, params: dict) -> int:
     elif not out.exists() or out.stat().st_size == 0:
         return err(f"{engine.name} exited 0 but left no output at {out}")
 
-    return say(path=out, seconds=r.seconds, peak_kb=r.peak_kb,
+    # The resolution is printed because a wall time and a peak mean nothing
+    # without it: 512 costs 11.4 GiB here and 1024 costs 23.9.
+    size = (f"{params['width']}x{params['height']}"
+            if params.get("width") and params.get("height") else None)
+    return say(path=out, seconds=r.seconds, peak_kb=r.peak_kb, size=size,
                human=f"{out}  ({r.seconds:.1f}s, "
-                     f"peak {r.peak_kb / 1024 / 1024:.1f} GiB)")
+                     f"peak {r.peak_kb / 1024 / 1024:.1f} GiB"
+                     + (f", {size}" if size else "") + ")")
 
 
 def cmd_image(a) -> int:
@@ -1020,8 +1039,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("-o", "--output")
         p.add_argument("-m", "--model", default=engine_default,
                        help="engine spec, e.g. mflux:z-image-turbo,quantize=4")
-        p.add_argument("--width", type=int)
-        p.add_argument("--height", type=int)
+        p.add_argument("--width", type=int, default=DEFAULT_RESOLUTION)
+        p.add_argument("--height", type=int, default=DEFAULT_RESOLUTION)
         p.add_argument("--steps", type=int)
         p.add_argument("--seed", type=int)
         p.set_defaults(func=func)

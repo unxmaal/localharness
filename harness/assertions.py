@@ -39,6 +39,33 @@ ABSOLUTE = re.compile(
 PROVENANCE = re.compile(
     r"\b(?:measured|verified|confirmed|proven?|reproduc\w+)\b", re.I)
 
+#: What separates a MEASUREMENT from a NUMBER, which is the distinction this
+#: whole file is about. Matching any one of these near a NUM claim means the
+#: sentence says something about the conditions it was taken in: when, on what,
+#: at what size, with which tool.
+#:
+#:   README:219  "Measured on the 4070, a request takes VRAM from 2462 to 3296
+#:               MiB and fifteen idle seconds return it to 2473"   qualified
+#:   README:33   "an image, ~19s"                                  not
+#:
+#: Deliberately generous. A scanner that flags everything gets switched off
+#: within a week, and the cost of missing one is a row nobody re-checks, while
+#: the cost of a false positive is an edit that makes prose worse.
+QUALIFIER = re.compile(
+    r"\b20\d\d-\d\d-\d\d\b"                    # a date
+    r"|\b\d+\s*x\s*\d+\b"                        # a resolution or a grid
+    r"|\b(?:M1|M2|M3|M4|M5)\b"                     # which Apple part
+    r"|\bRTX\b|\b\d0[679]0\b"                     # which card
+    r"|\b(?:macOS|Windows|Linux|Ubuntu|runner|unified|VRAM)\b"
+    r"|\b\d+\s*-?\s*bit\b"                        # which quantisation
+    r"|\bmeasured\s+(?:on|at|with|against)\b"
+    r"|\bon (?:an?|the|this) \w+",                 # on an M2 Pro, on the 4070
+    re.I)
+
+#: How far from the number the conditions may sit. A paragraph, roughly: the
+#: date is often on the line above and the machine on the line below.
+QUALIFIER_WINDOW = 2
+
 #: Dated records rather than live claims. A validation log SHOULD be full of
 #: numbers from one afternoon; that is what it is for. The claims that rot are
 #: the ones a reader takes as current.
@@ -54,9 +81,22 @@ class Claim:
     line: int
     kinds: tuple[str, ...]
     text: str
+    qualified: bool = True
+
+    @property
+    def config_less(self) -> bool:
+        """A number with nothing said about where it came from.
+
+        Only NUM decays this way. An absolute needs a counter-example rather
+        than a configuration, and a provenance word is itself the claim.
+        """
+        return "NUM" in self.kinds and not self.qualified
 
     def __str__(self) -> str:
-        return f"{self.path}:{self.line}\t{','.join(self.kinds)}\t{self.text}"
+        marks = list(self.kinds)
+        if self.config_less:
+            marks.append("CONFIG-LESS")
+        return f"{self.path}:{self.line}\t{','.join(marks)}\t{self.text}"
 
 
 def is_prose(path: Path, line: str) -> bool:
@@ -76,14 +116,18 @@ def is_prose(path: Path, line: str) -> bool:
 
 def scan(text: str, path: Path, origin: str) -> list[Claim]:
     out = []
-    for n, line in enumerate(text.splitlines(), 1):
+    lines = text.splitlines()
+    for n, line in enumerate(lines, 1):
         if not is_prose(path, line):
             continue
         kinds = tuple(k for k, pat in (("NUM", NUMBER), ("ABS", ABSOLUTE),
                                        ("SAYS-MEASURED", PROVENANCE))
                       if pat.search(line))
         if kinds:
-            out.append(Claim(origin, n, kinds, line.strip()[:160]))
+            lo, hi = max(0, n - 1 - QUALIFIER_WINDOW), n + QUALIFIER_WINDOW
+            near = "\n".join(lines[lo:hi])
+            out.append(Claim(origin, n, kinds, line.strip()[:160],
+                             bool(QUALIFIER.search(near))))
     return out
 
 
@@ -116,11 +160,16 @@ def main(argv: list[str] | None = None) -> int:
                     help="include the dated records, which are meant to be full of numbers")
     ap.add_argument("--kind", choices=("NUM", "ABS", "SAYS-MEASURED"),
                     help="only this kind of claim")
+    ap.add_argument("--config-less", action="store_true",
+                    help="only numbers with nothing said about the conditions "
+                         "they were taken in, which is the kind that rots")
     a = ap.parse_args(argv)
 
     found = collect(Path(__file__).resolve().parent.parent, a.archives)
     if a.kind:
         found = [c for c in found if a.kind in c.kinds]
+    if a.config_less:
+        found = [c for c in found if c.config_less]
     for c in found:
         print(c)
     print(f"{len(found)} claim(s)")

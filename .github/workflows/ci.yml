@@ -65,12 +65,27 @@ jobs:
   check-linux:
     # `ubuntu-latest` is 24.04, the release the Linux machines here run, so a
     # failure is a failure on a real box rather than on a runner nobody owns.
-    # That parity is the whole reason the distro question was settled this way.
+    # That parity is the whole reason the distro question was settled this way,
+    # and the step below is what notices when GitHub moves the label.
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    env:
+      EXPECT_UBUNTU: "24.04"
+
     steps:
       - uses: actions/checkout@v4
+
+      - name: The runner is still the release the distro choice rests on
+        run: |
+          . /etc/os-release
+          echo "runner: $PRETTY_NAME"
+          if [ "$VERSION_ID" != "$EXPECT_UBUNTU" ]; then
+            echo "::error::ubuntu-latest is now $VERSION_ID, not $EXPECT_UBUNTU." >&2
+            echo "::error::CI parity with the Linux machines here was the whole reason for picking this distro, and it is gone." >&2
+            echo "::error::Either pin runs-on: ubuntu-$EXPECT_UBUNTU, or move the machines and update EXPECT_UBUNTU and the comment above." >&2
+            exit 1
+          fi
 
       - uses: astral-sh/setup-uv@v5
         with:

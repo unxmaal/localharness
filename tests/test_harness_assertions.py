@@ -79,3 +79,61 @@ def test_the_scan_finds_the_repo_it_documents():
     found = assertions.collect(Path(__file__).resolve().parent.parent)
     assert len(found) > 100
     assert any("cli.py" in c.path for c in found)
+
+
+# ---- a measurement against a number ---------------------------------------
+#
+# The distinction the whole file exists for. Both lines below state 11.4 GiB;
+# only one of them can be compared to anything later.
+
+def claims(text, name="t.py"):
+    return assertions.scan(text, Path(name), name)
+
+
+@pytest.mark.parametrize("line", [
+    "# it holds 11.4 GiB",
+    "# an image takes ~19s",
+    "# the icon preset is 3.2x smaller",
+])
+def test_a_number_alone_is_config_less(line):
+    assert claims(line)[0].config_less
+
+
+@pytest.mark.parametrize("line", [
+    "# 11.4 GiB at 512x512",
+    "# measured at 40.5 minutes on the M2 Pro",
+    "# 23.9 GiB, measured on 2026-09-12",
+    "# a request takes VRAM from 2462 to 3296 MiB",
+    "# 4.3 GB at 4-bit",
+])
+def test_a_number_with_its_conditions_is_not(line):
+    assert not claims(line)[0].config_less
+
+
+def test_the_conditions_may_sit_on_a_neighbouring_line():
+    """The date is usually the line above and the machine the line below, so a
+    single-line test would call almost every real measurement config-less."""
+    got = claims("# Measured 2026-09-12, mflux at its default:\n"
+                 "# the image lane peaks at 23.9 GiB")
+    assert not got[-1].config_less
+
+
+def test_only_numbers_decay_this_way():
+    """An absolute needs a counter-example rather than a configuration, and a
+    provenance word is itself the claim being made."""
+    assert not claims("# this never returns None")[0].config_less
+    assert not claims("# verified against the vendor guide")[0].config_less
+
+
+def test_config_less_is_a_subset_of_the_numbers():
+    root = Path(__file__).resolve().parent.parent
+    found = assertions.collect(root)
+    bare = [c for c in found if c.config_less]
+    nums = [c for c in found if "NUM" in c.kinds]
+    assert 0 < len(bare) < len(nums), \
+        "flagging every number, or none, means the qualifier stopped working"
+
+
+def test_the_mark_reaches_the_output():
+    assert "CONFIG-LESS" in str(claims("# it holds 11.4 GiB")[0])
+    assert "CONFIG-LESS" not in str(claims("# 11.4 GiB at 512x512")[0])
