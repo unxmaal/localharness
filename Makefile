@@ -1,5 +1,5 @@
 # Entry points. `make check` is what CI would run and what to run before a commit.
-.PHONY: check test test-slow lint smoke services clean
+.PHONY: check test test-slow test-network lint smoke services clean
 
 check: lint test          ## static checks + unit tests (no services needed)
 
@@ -8,6 +8,9 @@ test:                     ## unit tests (fast; excludes the model-loading ones)
 
 test-slow:                ## the metrics tests: loads multi-GB scorers, minutes
 	uv run --group metrics pytest tests/ -q -m slow
+
+test-network:             ## ask third parties whether what they publish is still there
+	uv run pytest tests/ -q -m network
 
 lint:                     ## shellcheck every script, syntax-check every one
 	shellcheck -S warning scripts/*.sh

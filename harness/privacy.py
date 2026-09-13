@@ -16,6 +16,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from harness import repo
+
 #: Opt out when a match is genuinely generic or is the anti-pattern being
 #: quoted: put the marker on the line, or on the line above it for something
 #: that will not take a trailing comment. Costs a visible marker, which is the
@@ -128,9 +130,10 @@ SELF = {"harness/privacy.py", "tests/test_harness_privacy.py"}
 
 
 def tracked(root: Path) -> list[Path]:
-    r = subprocess.run(("git", "-C", str(root), "ls-files"),
-                       capture_output=True, text=True, check=True)
-    return [root / line for line in r.stdout.splitlines() if line]
+    """What a push would publish, not what a commit already did. See
+    harness/repo.publishable: a check that cannot see the file you just wrote
+    goes green on your desk and red on the runner, on the same content."""
+    return repo.publishable(root)
 
 
 def scan_paths(root: Path) -> list[Finding]:

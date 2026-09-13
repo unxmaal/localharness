@@ -19,7 +19,8 @@ Mechanical, so it regenerates rather than being curated from memory:
 ```sh
 uv run python -m harness.assertions                 # 684 live claims
 uv run python -m harness.assertions --kind NUM      # 173, the decaying kind
-uv run python -m harness.assertions --config-less   # 105, the kind that rots
+uv run python -m harness.assertions --config-less   # 103, the kind that rots
+uv run python -m harness.assertions --cost          # 0, and gated at 0
 uv run python -m harness.assertions --archives      # include the dated records
 ```
 
@@ -213,6 +214,41 @@ Every row above that says *fixed*, plus:
 - **`tests/test_cli_resolution.py`** holds the CLI to the case files, the fifth
   instance of the parity-test shape in this repo.
 - **`check-linux` asserts its own runner.**
+
+## Phase 3: the violation behind each defect
+
+Phase 2 fixed four wrong claims. It did not ask why each one was *possible*,
+and the answers are six recurring logical violations rather than six unrelated
+mistakes. Each now has a test that encodes the principle, so the next instance
+fails on arrival instead of being found by someone reading prose (#160).
+
+| the violation | what it produced | what holds it now |
+|---|---|---|
+| one question, two answers | `lh image` ran 1024 while every case pinned 512 | `tests/test_duplicated_policy.py` — a census of all six instances, so the seventh costs a row |
+| identity by name, not content | `comparable()` ranked runs whose cases had been rewritten in place | `cases_digest` on the receipt, `tests/test_evals_core.py` |
+| a part's cost reported as the whole's | "2s a line"; "Kokoro, sub-second" | `--cost`, and a gate asserting it stays empty |
+| a failure mode inferred, not observed | "concurrent SQLite writers corrupt it" | `tests/test_concurrent_writers.py` runs two writers |
+| external state with no assertion on it | `ubuntu-latest` is 24.04 | the `check-linux` runner assertion |
+| a reference that no longer resolves | `PLAN.md` cited another project's file as if it were ours | `tests/test_prose_references.py`, which found it on its first run |
+
+**The two that were live code defects, not prose:**
+
+`comparable()` is the machinery built to refuse exactly the comparison that
+produced #141 and #142, and it compared case **ids**. A name survives every
+edit to the thing it names: change `fox-snow.yaml` from 512 to 1024 and the id,
+the count and the receipt are unchanged while the exam is not. The receipt now
+carries a digest of what the cases actually said.
+
+`memory_store.connect()` set neither `journal_mode` nor `busy_timeout`, so a
+second writer failed immediately rather than waiting — which is what made
+"concurrent writes do not work" look true. Both are set, and a test runs two
+processes rather than reasoning about it.
+
+**One violation is deliberately not automated.** "A statistic blind to the
+effect under test" — the decay sweep measured with counts that cannot see
+ordering — is a question to ask before running an experiment, not a property of
+a file. A test claiming to check it would pass while the thinking was still
+wrong.
 
 ## What is left
 

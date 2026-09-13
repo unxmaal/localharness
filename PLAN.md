@@ -580,7 +580,8 @@ of those.
    every case. Separate "wrong answer" from "no answer".
 
    **(b) Comparability.** Borrowed from EnviousWispr
-   (`scripts/eval/model_registry.py::comparable()`), which is further along than
+   (`EnviousWispr/scripts/eval/model_registry.py::comparable()`, that repo's
+   file rather than one of ours), which is further along than
    this suite: an explicit authority on whether two evaluations may be ranked
    TOGETHER. It enumerates every axis off the run receipt -- corpus and case
    count, rubric identity, judge identity, grading system, blinding, prompt
