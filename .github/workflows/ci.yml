@@ -156,6 +156,34 @@ jobs:
       - name: make check
         run: set -o pipefail && make check 2>&1 | tee /tmp/check.log
 
+      - name: Coverage, reported and never gated
+        # LINUX ONLY, on purpose. Platform skips differ, so running this on
+        # three runners yields three different numbers for one commit and
+        # invites comparing them -- three exams, one table.
+        #
+        # Reported rather than gated: there is no baseline, so a threshold
+        # would start red and teach everyone to skip it. And the repo figure is
+        # blind twice over -- it cannot tell an executed line from an asserted
+        # one, and it barely moves when a change adds fifty unexercised lines.
+        # The number worth reading on a pull request is the differential.
+        if: always()
+        continue-on-error: true
+        run: |
+          uv run pytest tests/ -q --cov=harness --cov=evals \
+            --cov-report=term --cov-report=json > /tmp/cov.log 2>&1 || true
+          total="$(grep -E '^TOTAL' /tmp/cov.log | awk '{print $NF}' || true)"
+          {
+            echo "### Coverage"
+            echo
+            echo "Repo total: **${total:-unavailable}**, reported and not gated."
+            echo
+            echo "Lines this change adds that no test runs:"
+            echo '```'
+            uv run python -m harness.covdiff --base "origin/${GITHUB_BASE_REF:-main}" 2>&1 \
+              || echo 'differential unavailable on this event'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: What did not run
         if: always()
         run: |
