@@ -1,4 +1,4 @@
-"""Class 11 of the gauntlet: external state with no assertion on it.
+"""Gauntlet, "external state with no assertion on it".
 
 Every gateway alias points at somebody else's published artifact. Each was
 obtainable when written, and nothing here notices when one stops being. #147 is
