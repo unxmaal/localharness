@@ -70,17 +70,29 @@ class Change:
 
 
 def changes(days: int = DEFAULT_DAYS, branch: str = DEFAULT_BRANCH,
-            git=_git) -> list[Change]:
+            git=None) -> list[Change]:
     """Merges into the default branch, with when each one's work STARTED.
 
     The start is the oldest commit reachable from the merge's second parent and
     not from its first, which is the branch's own history. An earlier cut used
     `--not main~50` and reported a lead time of six days for a branch created
     that morning: the window, not the branch.
+
+    `git` is resolved HERE rather than defaulted in the signature. A default
+    argument captures the function at DEFINITION time, so a test rebinding
+    `dora._git` changed nothing and the real git ran underneath it: green on a
+    machine with the branch checked out, red on three runners without it. The
+    same trap is documented at harness/sensitivity.py:84.
     """
+    git = git or _git
     since = f"--since={days}.days"
-    raw = git("log", f"{branch}", "--merges", since,
-              "--pretty=%H%x1f%aI%x1f%P%x1f%s")
+    try:
+        raw = git("log", f"{branch}", "--merges", since,
+                  "--pretty=%H%x1f%aI%x1f%P%x1f%s")
+    except subprocess.CalledProcessError:
+        # A shallow clone or a PR ref may not carry the branch locally. No
+        # merges to report is the honest answer; an exception is not.
+        return []
     out = []
     for line in filter(None, raw.splitlines()):
         sha, merged_at, parents, subject = line.split("\x1f")
@@ -115,7 +127,7 @@ def restore_times(runs: list[dict], branch: str = DEFAULT_BRANCH) -> list[float]
 
 
 def report(days: int = DEFAULT_DAYS, branch: str = DEFAULT_BRANCH,
-           git=_git, runs=None) -> dict:
+           git=None, runs=None) -> dict:
     runs = _gh_runs(300) if runs is None else runs
     merged = changes(days, branch, git=git)
     on_branch = [r for r in runs if r.get("headBranch") == branch

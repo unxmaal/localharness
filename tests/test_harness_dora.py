@@ -165,3 +165,24 @@ def test_main_emits_parseable_json(capsys, monkeypatch):
     monkeypatch.setattr(dora, "_gh_runs", lambda *a, **k: [])
     dora.main(["--json"])
     assert json.loads(capsys.readouterr().out)["window_days"] == 14
+
+
+def test_the_injection_seam_is_read_at_call_time(monkeypatch):
+    """A default argument captures the function at DEFINITION time, so
+    `monkeypatch.setattr(dora, "_git", ...)` changed nothing and the real git
+    ran. It passed here, where `main` is a local ref, and failed on all three
+    runners, where a PR checkout has no such branch. Same trap documented at
+    harness/sensitivity.py:84."""
+    monkeypatch.setattr(dora, "_git", fake_git(MERGE))
+    assert dora.changes(14)[0].lead_hours == 3.0
+
+
+def test_a_branch_this_checkout_lacks_reports_no_merges(monkeypatch):
+    """A shallow clone or a PR ref. Missing, not an exception."""
+    import subprocess as sp
+
+    def absent(*a):
+        raise sp.CalledProcessError(128, a)
+
+    monkeypatch.setattr(dora, "_git", absent)
+    assert dora.changes(14) == []
