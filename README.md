@@ -30,10 +30,16 @@ than the one it would have replaced.
 
 | | |
 |---|---|
-| `lh image "a red fox in falling snow"` | an image, ~19s |
+| `lh image "a red fox in falling snow"` | an image, tens of seconds |
 | `lh video "a fox running" --seconds 2` | a video with sound, ~40 min |
 | `lh svg "a settings gear icon"` | a real vector icon |
 | `lh web "a landing page for a coffee roaster"` | a self-contained HTML page |
+
+Every timing in this file was taken on an M2 Pro with 32 GB unless it says
+otherwise, and image and video default to 512x512. Trust your own machine
+instead: each generation prints its wall time, its peak memory and the
+resolution that produced them, because a number without its configuration
+compares to nothing.
 | `lh code "parse an ISO timestamp"` | code, to stdout |
 | `lh extract --file build.log "which tests failed?"` | ask a question about a file |
 | `lh say "the tests all passed"` | speak it aloud |
@@ -67,8 +73,8 @@ what that turned up:
   of 27 to 24, and icons from 6 out of 9 to 9, at one extra attempt on average
   and no extra download.
 - of two image models, quality came out a statistical tie, so the decision fell
-  to 19 seconds against 43 and 11.4 GiB against 13.7. Knowing it was a tie is
-  the useful part.
+  to 19 seconds against 43 and 11.4 GiB against 13.7, both at 512x512 on an M2
+  Pro. Knowing it was a tie is the useful part.
 - a quality score that looked useless turned out to work. The experiment
   measuring it had compared two things that were never comparable.
 
@@ -115,7 +121,10 @@ Before you invest an afternoon:
   Windows and Linux are each tested on every push, but on a machine with
   neither runtime most candidates are refused for want of an engine rather than
   run slowly. `rocm` is probed and has no implementations behind it yet.
-- **It needs disk.** The models this uses run 4 GB to 31 GB each.
+- **It needs disk.** Measured on 2026-09-12: the two image engines are 15 and
+  31 GiB, the quality scorers 2 to 4 GiB each, and 4-bit text models run from
+  under a gigabyte to about 17. Nothing here is fetched until a lane asks for
+  it, so the bill arrives one model at a time.
 - **Video takes about 40 minutes a generation** on an M2 Pro with 32 GB. It
   works; it is not something you will use casually.
 - **It is a workshop, not a product.** There is no GUI, and some lanes are better
@@ -235,11 +244,16 @@ voice, cloned from a reference clip rather than picked from a table.
 
 That works because Chatterbox clones *across* languages: the reference clip
 speaks French, the output speaks English, and the accent comes along with the
-voice. No accented-English corpus was needed. It costs about 2s a line.
+voice. No accented-English corpus was needed.
+
+It costs roughly 2s of fixed overhead per call plus about 1.5x the length of
+the audio, so a line is the wrong unit: four words took 4.4s for 1.6s of
+speech, twenty-eight took 11.3s for 6.2s. Measured 2026-09-12 on an M2 Pro that
+was already swapping, so read them as an upper bound.
 
 ```bash
-lh say "the tests all passed"                     # cloned, ~2s
-lh say "the tests all passed" --voice bm_george   # Kokoro, sub-second
+lh say "the tests all passed"                     # cloned, 4.4s
+lh say "the tests all passed" --voice bm_george   # Kokoro, 3.5s
 ```
 
 Use `bm_george` when a line needs to come back immediately.
@@ -456,7 +470,8 @@ That exposes `svg`, `web`, `code` and `image` to the assistant. Every tool shell
 out to `lh`, so the CLI, the eval suite and the MCP server run identical
 commands, and what gets measured is what ships.
 
-`image` is queued: it holds 11.4 GiB and the inference server swaps models
+`image` is queued: it holds 11.4 GiB at the default 512x512, against 23.9 at
+1024, and the inference server swaps models
 through a single queue, so it returns a job id and `job_status` carries the queue
 position and the artifact path. Artifacts stay here, in `~/localharness/out/mcp/`.
 

@@ -29,6 +29,12 @@ GIB = 1024 ** 3
 #: Weights above this cannot run here. 32 GB unified, and macOS gives the GPU
 #: roughly 70-75% of it by default, so the honest ceiling is well under 32.
 #: Overridable: the M5 Ultra arriving with 96 GB moves this, nothing else.
+#:
+#: IT IS A WEIGHT CEILING, NOT A JOB CEILING, and the difference bit once. The
+#: default image job peaks at 11.4 GiB at 512x512 and 23.9 at 1024 (M2 Pro,
+#: 2026-09-12), so while the CLI inherited mflux's 1024 the tool's own default
+#: exceeded the gate it screens candidates with. #157 gave the CLI a default of
+#: 512 so both numbers come from the same exam.
 MEMORY_CEILING = 22 * GIB
 
 
