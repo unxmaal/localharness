@@ -1,5 +1,5 @@
 # Entry points. `make check` is what CI would run and what to run before a commit.
-.PHONY: check test test-slow test-network lint smoke services clean
+.PHONY: check test test-slow test-network coverage metrics lint smoke services clean
 
 check: lint test          ## static checks + unit tests (no services needed)
 
@@ -11,6 +11,14 @@ test-slow:                ## the metrics tests: loads multi-GB scorers, minutes
 
 test-network:             ## ask third parties whether what they publish is still there
 	uv run pytest tests/ -q -m network
+
+coverage:                 ## REPORT coverage, never gate on it; then the diff figure
+	uv run pytest tests/ -q --cov=harness --cov=evals \
+	  --cov-report=term:skip-covered --cov-report=json
+	@uv run python -m harness.covdiff || true
+
+metrics:                  ## the four DORA numbers, from git and gh
+	uv run python -m harness.dora
 
 lint:                     ## shellcheck every script, syntax-check every one
 	shellcheck -S warning scripts/*.sh

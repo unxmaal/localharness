@@ -58,6 +58,11 @@ whisper = [
 
 dev = [
     "pytest>=8",
+    # Coverage is REPORTED, never gated: there is no baseline here, so a
+    # threshold would start red, and the number is blind to whether a line that
+    # ran was actually asserted about. `make coverage` prints the repo figure;
+    # `harness.covdiff` prints the one that matters on a change.
+    "pytest-cov>=5",
     "respx>=0.21",
     "fastapi>=0.110",
     "httpx>=0.27",
