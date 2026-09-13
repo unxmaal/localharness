@@ -33,6 +33,13 @@ build-backend = "hatchling.build"
 packages = ["harness", "evals"]
 
 [dependency-groups]
+# The cluster store. A separate group because a laptop running `lh` needs no
+# database driver at all, and #148 requires the single-machine path to keep
+# working with no cluster.
+cluster = [
+    "psycopg[binary]>=3.2",
+]
+
 # Prompt-adherence scoring. A separate group because it is the only torch in an
 # otherwise MLX-only repo, and only an image eval needs it:
 #   uv run --group metrics python -m evals.run --modality image ...
@@ -78,7 +85,7 @@ testpaths = ["tests"]
 # `slow` is deselected by default: these load a 4GB model and take minutes,
 # which is not what `make check` is for. `make check-slow` runs them.
 # -rs: a silently skipped test reports green for something it never checked.
-addopts = "-q --strict-markers -rs -m 'not slow and not network'"
+addopts = "-q --strict-markers -rs -m 'not slow and not network and not postgres'"
 markers = [
     "slow: needs the optional `metrics` group and loads a multi-GB model",
     # Kept apart from `slow` deliberately. They are excluded for opposite
@@ -86,6 +93,9 @@ markers = [
     # depends on somebody else's uptime. A lint that fails when a registry has
     # a bad afternoon teaches people to skip lint.
     "network: asks a third party whether something it publishes is still there",
+    # Needs a database, not a third party. Kept apart from `network` because
+    # they fail for different reasons and are fixed in different places.
+    "postgres: needs a live Postgres; `make test-postgres` starts one",
 ]
 # The repo root, so `from evals...` resolves without a sys.path hack in every
 # test module.
