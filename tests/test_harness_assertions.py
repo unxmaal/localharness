@@ -137,3 +137,55 @@ def test_config_less_is_a_subset_of_the_numbers():
 def test_the_mark_reaches_the_output():
     assert "CONFIG-LESS" in str(claims("# it holds 11.4 GiB")[0])
     assert "CONFIG-LESS" not in str(claims("# 11.4 GiB at 512x512")[0])
+
+
+# ---- a part's cost is not the whole's -------------------------------------
+#
+# THE VIOLATION behind three of the four claims phase 2 refuted: a number true
+# of one component, one phase or one configuration, quoted as if it described
+# what a reader will wait for. "2s a line" was the fixed per-call overhead.
+# "Sub-second" is plausibly true of Kokoro's synthesis and is not true of the
+# command. A number beside a command is read as a promise about that command.
+
+def test_a_cost_beside_a_command_is_marked():
+    got = claims('lh say "the tests all passed"   # 2s a line', "t.md")[0]
+    assert got.user_facing and got.unqualified_cost
+
+
+def test_the_same_cost_with_its_conditions_is_not():
+    got = claims('lh say "x"   # 4.4s for a four-word line, M2 Pro', "t.md")[0]
+    assert got.user_facing and not got.unqualified_cost
+
+
+def test_a_number_away_from_any_command_is_only_config_less():
+    got = claims("# the encoder alone is 2s", "t.py")[0]
+    assert got.config_less and not got.user_facing
+
+
+def test_an_example_inherits_the_sentence_above_its_fence():
+    """A reader does not read a fenced example in isolation. Without this the
+    window stops at the fence, and every properly annotated example in the
+    README reads as config-less."""
+    doc = ("Measured 2026-09-12 on an M2 Pro that was already swapping.\n"
+           "\n"
+           "```bash\n"
+           'lh say "the tests all passed"   # cloned, 4.4s\n'
+           "```\n")
+    got = [c for c in claims(doc, "t.md") if "4.4s" in c.text]
+    assert got and not got[0].unqualified_cost
+
+
+def test_no_unqualified_cost_ships():
+    """THE ONE GATE IN THIS FILE, and it is a gate because it starts green.
+
+    --config-less finds 100+ and is an inventory: a gate that starts red
+    teaches people to pass --no-verify. This class is small, sharp and empty
+    today, so holding it at empty costs nothing and catches the exact mistake
+    that produced F7 and F8 in ASSERTIONS.md.
+    """
+    root = Path(__file__).resolve().parent.parent
+    bad = [str(c) for c in assertions.collect(root) if c.unqualified_cost]
+    assert not bad, (
+        "a cost is quoted beside the command that incurs it with nothing said "
+        "about the conditions; a reader will read it as their own wait:\n"
+        + "\n".join(bad))

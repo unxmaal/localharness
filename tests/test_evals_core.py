@@ -10,6 +10,7 @@ import pytest
 import yaml
 
 from harness.checks import render
+from evals import core
 from evals.core import Case, Result, load_cases, score, summarize
 
 
@@ -1240,3 +1241,68 @@ def test_the_receipt_carries_its_instruments_to_disk():
     from evals.core import Receipt
     r = Receipt("image", ("sign",), 1, {}, "", instruments={"ocr": "vision"})
     assert r.as_dict()["instruments"] == {"ocr": "vision"}
+
+
+# ---- identity by content, because a case id is a name ----------------------
+#
+# THE VIOLATION: comparable() is the machinery built to refuse the exact
+# comparison that produced #141 and #142, and it compared case IDS. A name
+# survives every edit to the thing it names. Rewrite fox-snow.yaml from 512 to
+# 1024 and the id, the count and the receipt are all unchanged while the exam
+# is not.
+
+def _case(**kw):
+    base = dict(id="fox-snow", modality="image", prompt="a red fox",
+                params={"width": 512, "height": 512})
+    base.update(kw)
+    return core.Case(**base)
+
+
+def _receipt(digest, **kw):
+    base = dict(modality="image", case_ids=("fox-snow",), repeat=1,
+                sampling={}, gateway="g", cases_digest=digest)
+    base.update(kw)
+    return core.Receipt(**base)
+
+
+def test_editing_a_case_changes_its_digest():
+    for edit in ({"params": {"width": 1024, "height": 1024}},
+                 {"prompt": "a blue fox"},
+                 {"assertions": {"text": "OPEN"}},
+                 {"context": "forty lines of log"}):
+        assert core.cases_digest([_case()]) != core.cases_digest([_case(**edit)]), \
+            f"{edit} changed the question and not the digest"
+
+
+def test_moving_a_case_file_does_not():
+    """A different path asks the same question. Only the content counts, or
+    every reorganisation invalidates every measurement on disk."""
+    from pathlib import Path
+    assert core.cases_digest([_case(source=Path("a/x.yaml"))]) == \
+        core.cases_digest([_case(source=Path("b/x.yaml"))])
+
+
+def test_the_order_cases_load_in_does_not():
+    a, b = _case(id="a"), _case(id="b")
+    assert core.cases_digest([a, b]) == core.cases_digest([b, a])
+
+
+def test_two_runs_of_edited_cases_are_refused():
+    ok, why = core.comparable(_receipt(core.cases_digest([_case()])),
+                              _receipt(core.cases_digest(
+                                  [_case(params={"width": 1024})])))
+    assert not ok and "edited in place" in why
+
+
+def test_a_receipt_written_before_this_existed_is_not_refused():
+    """Same rule as the empty accelerator: adding an axis must not retroactively
+    invalidate every result on disk, including the ones that are good."""
+    ok, _ = core.comparable(_receipt(""), _receipt(core.cases_digest([_case()])))
+    assert ok
+
+
+def test_the_digest_survives_a_round_trip_through_the_receipt():
+    """It is written to results.json and read back by `compare`. A digest that
+    does not survive that is a field nobody ever compares."""
+    digest = core.cases_digest([_case()])
+    assert _receipt(digest).as_dict()["cases_digest"] == digest

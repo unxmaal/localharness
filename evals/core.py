@@ -9,6 +9,8 @@ mechanical and shared, so two candidates are always judged by the same ruler.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import statistics
 import warnings
@@ -425,13 +427,43 @@ class Receipt:
     #: different OCR engines. Those are two graders by exactly the argument
     #: that already disqualifies PickScore against HPSv2.
     instruments: dict = field(default_factory=dict)
+    #: What the cases SAID, not what they were called. `case_ids` are names,
+    #: and a name survives every edit to the thing it names: change
+    #: fox-snow.yaml from 512 to 1024, or rewrite its prompt, and the id, the
+    #: count and the receipt are all unchanged while the exam is not. That is
+    #: the same defect that produced #141 and #142, sitting inside the
+    #: machinery built to refuse it. Empty for runs written before this
+    #: existed.
+    cases_digest: str = ""
 
     def as_dict(self) -> dict:
         return {"modality": self.modality, "case_ids": list(self.case_ids),
                 "repeat": self.repeat, "sampling": dict(self.sampling),
                 "gateway": self.gateway, "adherence": self.adherence,
                 "tier": self.tier, "accelerator": self.accelerator,
-                "instruments": dict(self.instruments)}
+                "instruments": dict(self.instruments),
+                "cases_digest": self.cases_digest}
+
+
+def cases_digest(cases) -> str:
+    """Identity by content, for the parts of a case that change the question.
+
+    `prompt`, `context` and `params` are what is asked; `assertions` is what
+    counts as a right answer. All four change the exam while leaving the id
+    alone, which is why the id cannot stand in for them.
+
+    `source` and `methods` are excluded: a moved file and a case declared
+    unfair to one method ask the same question of the candidates that do run.
+    """
+    h = hashlib.sha256()
+    for c in sorted(cases, key=lambda c: c.id):
+        for part in (c.id, c.prompt, getattr(c, "context", ""),
+                     json.dumps(dict(c.params), sort_keys=True, default=str),
+                     json.dumps(dict(c.assertions), sort_keys=True,
+                                default=str)):
+            h.update(str(part).encode("utf-8"))
+            h.update(b"\x00")
+    return h.hexdigest()[:16]
 
 
 def comparable(a: Receipt, b: Receipt) -> tuple[bool, str]:
@@ -441,6 +473,9 @@ def comparable(a: Receipt, b: Receipt) -> tuple[bool, str]:
       * `modality` and `case_ids` -- a different exam, or a different number of
         questions on it. The ids and not just the count: nine easy cases and
         nine hard ones are not one lane.
+      * `cases_digest` -- and the ids are not enough either, because a name
+        survives every edit to the thing it names. Nine cases REWRITTEN IN
+        PLACE keep their ids. Compared only where both runs carry one.
       * `sampling` -- adding a repetition penalty changed what the svg lane
         produces, so a run from before it is a different exam from one after.
       * `adherence` -- PickScore and HPSv2 are two graders.
@@ -469,6 +504,10 @@ def comparable(a: Receipt, b: Receipt) -> tuple[bool, str]:
     if tuple(a.case_ids) != tuple(b.case_ids):
         return False, (f"different case set: {len(a.case_ids)} vs "
                        f"{len(b.case_ids)} cases")
+    if a.cases_digest and b.cases_digest and a.cases_digest != b.cases_digest:
+        return False, (f"same case ids, different cases: {a.cases_digest} vs "
+                       f"{b.cases_digest}. A prompt, a param or an assertion "
+                       f"was edited in place")
     if a.repeat != b.repeat:
         return False, f"different repeat: {a.repeat} vs {b.repeat}"
     if dict(a.sampling) != dict(b.sampling):
