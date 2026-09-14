@@ -849,3 +849,30 @@ def test_swap_that_cannot_be_read_is_zero_rather_than_an_exception(monkeypatch):
     monkeypatch.setattr(environment, "capture",
                         lambda: (_ for _ in ()).throw(OSError("no sysctl")))
     assert swap_used_mb() == 0
+
+
+# ---- the run reads its winner from the receipts (#148 phase 5) -----------
+
+def test_from_winners_refuses_when_nothing_measured_the_lane(tmp_path):
+    """THE REFUSAL IS THE POINT. A lane pod that silently falls back to a typed
+    constant when it finds no receipt is the constant again, with a flag on it
+    that makes the claim look checked."""
+    import pytest
+    from evals.run import winner_for
+    with pytest.raises(SystemExit) as caught:
+        winner_for("video", runs=tmp_path)
+    assert "no run receipt" in str(caught.value)
+    assert "--candidates" in str(caught.value), "say the way out"
+
+
+def test_from_winners_names_the_candidate_the_receipts_chose(tmp_path):
+    import json
+    from evals.run import winner_for
+    d = tmp_path / "run"
+    d.mkdir()
+    (d / "results.json").write_text(json.dumps({
+        "receipt": {"modality": "image", "tier": "measure"},
+        "summary": {"mflux/flux2-klein-4b-q8": {"pass_rate": 1.0,
+                                                "median_s": 19.4}}}),
+        encoding="utf-8")
+    assert winner_for("image", runs=tmp_path) == "mflux/flux2-klein-4b-q8"

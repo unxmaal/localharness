@@ -934,22 +934,35 @@ def _report_winners(a) -> int:
         print(json.dumps({"typed": winners.typed(), "measured": best,
                           "disagreements": rows}, indent=2))
         return 0
-    print(f"\n  {'lane':9} {'typed':16} {'measured here':22} run")
+    #: exact agreement needs no mark; the other two each say which they are.
+    MARK = {"exact": " ", "quantised": "~", "": "*"}
+    print(f"\n  {'lane':9} {'typed':34} {'measured here':30} run")
     for lane, name in sorted(winners.typed().items()):
         got = best.get(lane)
         if not got:
-            print(f"  {lane:9} {name:16} {'-- not in any receipt':22}")
+            print(f"  {lane:9} {name:34} {'-- not in any receipt':30}")
         else:
-            mark = " " if got["candidate"] == name else "*"
-            print(f" {mark}{lane:9} {name:16} "
-                  f"{got['candidate'] + ' ' + str(got['pass_rate']):22} "
+            mark = MARK.get(got["match"], "*")
+            print(f" {mark}{lane:9} {name:34} "
+                  f"{got['candidate'] + ' ' + str(got['pass_rate']):30} "
                   f"{got['run']}")
+    print("\n  * beaten in a run it was in   ~ only a quantisation of it ran")
     beaten = [r for r in rows if r["state"] == "beaten"]
+    quantised = [r for r in rows if r["state"] == "under-specified"]
     unmeasured = [r for r in rows if r["state"] == "unmeasured"]
     if beaten:
         print(f"\n  {len(beaten)} default(s) lost a comparison they were in:")
         for r in beaten:
             print(f"    {r['modality']}: {r['measured']} beat {r['typed']} "
+                  f"in {r['run']}")
+    if quantised:
+        # NOT a disagreement about which is better. The constant names an
+        # artifact no run here has produced, because the engine quantises and
+        # the candidate name does not say so.
+        print(f"\n  {len(quantised)} default(s) name something only a "
+              f"quantisation of which has run here:")
+        for r in quantised:
+            print(f"    {r['modality']}: {r['typed']} -> {r['measured']} "
                   f"in {r['run']}")
     if unmeasured:
         # NOT a disagreement. A default that appears in no receipt was never in

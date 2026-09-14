@@ -72,6 +72,14 @@
             "gpu-node",
             "host"
           ]
+        },
+        "lane": {
+          "type": "string",
+          "minLength": 1
+        },
+        "candidate": {
+          "type": "string",
+          "description": "empty reads the winner from the receipts; a value pins one deliberately"
         }
       }
     },
