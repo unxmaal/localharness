@@ -1341,3 +1341,23 @@ def test_the_place_survives_the_round_trip_through_a_receipt():
     from evals.core import Receipt
     assert Receipt("image", ("fox",), 3, {}, "",
                    where="gpu-node").as_dict()["where"] == "gpu-node"
+
+
+def test_the_machines_swap_travels_with_the_numbers():
+    """#142 spent two issues on a 2x wall-clock difference whose most likely
+    explanation is that the machine was at 19.9 GB of swap. Peak memory matched
+    to the decimal; only the timing moved."""
+    from evals.core import Receipt
+    assert Receipt("image", ("fox",), 3, {}, "",
+                   swap_used_mb=4096).as_dict()["swap_used_mb"] == 4096
+
+
+def test_swap_is_recorded_but_is_not_a_comparability_axis():
+    """Timing is already out of comparable() as an output of the run rather
+    than a property of the exam. Refusing across swap would invalidate a
+    quality comparison because the machine was busy, which is the wrong
+    trade."""
+    from evals.core import Receipt, comparable
+    quiet = Receipt("image", ("fox",), 3, {}, "", swap_used_mb=0)
+    busy = Receipt("image", ("fox",), 3, {}, "", swap_used_mb=19_900)
+    assert comparable(quiet, busy)[0]

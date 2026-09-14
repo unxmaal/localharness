@@ -39,15 +39,37 @@ def tree(tmp_path, gateway: str) -> Path:
     return scripts / "services.sh"
 
 
-def run(script: Path, *args) -> subprocess.CompletedProcess:
+#: Ports nothing on this machine serves. `status` asks whether anything is
+#: LISTENING (issue #173), so without pinning these a test of a fake gateway in
+#: a temporary tree reads the real one on :4000 and reports it up. That is the
+#: check working; it is also a test whose answer depends on what the developer
+#: happens to be running.
+TEST_PORTS = {"GATEWAY_PORT": "49221", "LLAMACPP_PORT": "49222",
+              "AUDIO_PORT": "49223"}
+
+
+def run(script: Path, *args, **overrides) -> subprocess.CompletedProcess:
     home = script.parent.parent / "home"
-    env = {**os.environ, "LOCALHARNESS_HOME": str(home)}
+    env = {**os.environ, "LOCALHARNESS_HOME": str(home), **TEST_PORTS,
+           **overrides}
     return subprocess.run([BASH, str(script), *args], capture_output=True,
                           text=True, env=env, timeout=120)
 
 
-#: A launcher that stays up. `exec` so the pid recorded is the thing to kill.
-ALIVE = 'exec sleep 120\n'
+#: A launcher that stays up AND SERVES. It used to be `exec sleep 120`, which
+#: modelled a live process rather than a live service -- and `status` asking
+#: only whether a pid exists is exactly the defect in issue #173. A fake that
+#: cannot be reached would let the fixed status be called broken and the broken
+#: one correct. `exec` so the pid recorded is the thing to kill.
+ALIVE = (
+    'exec python3 -c \''
+    'import os, socket, time\n'
+    's = socket.socket()\n'
+    's.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n'
+    's.bind(("127.0.0.1", int(os.environ["GATEWAY_PORT"])))\n'
+    's.listen(1)\n'
+    'time.sleep(120)\n'
+    '\'\n')
 #: One that dies on its first line, which is the case this file exists for.
 DEAD = 'echo "boom" >&2\nexit 1\n'
 
@@ -168,3 +190,39 @@ def test_without_hf_root_it_falls_back_rather_than_guessing():
     place rather than searching."""
     got = _kokoro_dir({"LOCALHARNESS_HOME": "/artifacts"})
     assert got == "/artifacts/kokoro", got
+
+
+# ---- status answers "is it up", not "did I start it" (issue #173) --------
+
+def test_a_service_nothing_is_listening_on_is_down(tmp_path):
+    got = run(tree(tmp_path, "exit 0\n"), "status")
+    assert got.returncode == 0
+    assert got.stdout.count("down") == 3, got.stdout
+
+
+def test_a_service_this_script_did_not_start_is_still_reported_up(tmp_path):
+    """THE DEFECT. status read its own pidfile, so on the machine supervised by
+    launchd -- the one whose entire job is to serve -- it reported every
+    service down while the gateway was answering requests."""
+    import socket
+    script = tree(tmp_path, "exit 0\n")
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    try:
+        got = run(script, "status", GATEWAY_PORT=str(port))
+    finally:
+        listener.close()
+    assert "gateway" in got.stdout
+    gateway_line = next(l for l in got.stdout.splitlines()
+                        if l.startswith("gateway"))
+    assert "up" in gateway_line, gateway_line
+    # AND IT SAYS SO. `stop` can only stop what it started, and a reader about
+    # to run it should learn that here rather than from it failing.
+    assert "not started by this script" in gateway_line
+
+
+def test_the_port_is_named_so_a_reader_can_check_it_themselves(tmp_path):
+    got = run(tree(tmp_path, "exit 0\n"), "status")
+    assert ":49221" in got.stdout and ":49222" in got.stdout

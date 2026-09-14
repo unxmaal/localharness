@@ -390,6 +390,10 @@ def cmd_discover(a) -> int:
         return _report_judge_store(a)
     if getattr(a, "queue", False):
         return _report_queue(a)
+    if getattr(a, "screen", False):
+        return _report_screen(a)
+    if getattr(a, "winners", False):
+        return _report_winners(a)
     if getattr(a, "neighbors", False):
         return _report_neighbors(a)
     if getattr(a, "control", False):
@@ -911,6 +915,130 @@ def _report_queue(a) -> int:
         print(f"\n  {r['value']:+6.1f}  {r['name']}")
         print(f"          {r['value_why'] or 'nothing known about it'}")
     return 0
+
+
+def _report_winners(a) -> int:
+    """What the receipts say won each lane, against what this file has typed in.
+
+    The four DEFAULT_*_MODEL constants above are a hand copy of a measurement
+    that lives in the run receipts. Both are worth having -- a default that
+    moved because somebody ran an eval last night is a CLI two machines
+    disagree about -- but a hand copy with nothing watching it is this
+    project's most-bitten failure class.
+    """
+    from harness import winners
+
+    best = winners.beaten_in()
+    rows = winners.disagreements()
+    if a.json:
+        print(json.dumps({"typed": winners.typed(), "measured": best,
+                          "disagreements": rows}, indent=2))
+        return 0
+    print(f"\n  {'lane':9} {'typed':16} {'measured here':22} run")
+    for lane, name in sorted(winners.typed().items()):
+        got = best.get(lane)
+        if not got:
+            print(f"  {lane:9} {name:16} {'-- not in any receipt':22}")
+        else:
+            mark = " " if got["candidate"] == name else "*"
+            print(f" {mark}{lane:9} {name:16} "
+                  f"{got['candidate'] + ' ' + str(got['pass_rate']):22} "
+                  f"{got['run']}")
+    beaten = [r for r in rows if r["state"] == "beaten"]
+    unmeasured = [r for r in rows if r["state"] == "unmeasured"]
+    if beaten:
+        print(f"\n  {len(beaten)} default(s) lost a comparison they were in:")
+        for r in beaten:
+            print(f"    {r['modality']}: {r['measured']} beat {r['typed']} "
+                  f"in {r['run']}")
+    if unmeasured:
+        # NOT a disagreement. A default that appears in no receipt was never in
+        # the room, and reporting silence as conflict is how an inventory
+        # becomes noise nobody reads.
+        print(f"\n  {len(unmeasured)} default(s) appear in no receipt here, so "
+              f"nothing on this machine can check them:")
+        for r in unmeasured:
+            print(f"    {r['modality']}: {r['typed']}")
+    return 0
+
+
+def _report_screen(a) -> int:
+    """Run the cheapest real thing, and record whether it ran at all. #53.
+
+    SAYS WHAT IT WOULD DO AND STOPS, unless told otherwise. `--run` is the same
+    convention `lh fetch` uses, and for the same reason: this is the first tier
+    that spends real time and real memory, and one that starts doing so because
+    something ranked well is how a laptop ends up unusable overnight.
+    """
+    import subprocess
+
+    from harness import rank, screen
+    from harness import memory_store as ms
+
+    store = ms.connect()
+    try:
+        rows = ms.judgeable(store, limit=getattr(a, "top", 25) * 4)
+    finally:
+        store.close()
+    ranked = rank.rank(rows, serving=rank.serving(),
+                       measured_lanes=rank.lanes_with_receipts())
+    planned = screen.plan(ranked)[:getattr(a, "top", 5)]
+    if not planned:
+        print("nothing queued to screen")
+        return 0
+    ready = [r for r in planned if r["state"] == screen.READY]
+    if not getattr(a, "run", False):
+        print(f"\n{len(planned)} candidate(s), {len(ready)} ready to screen:")
+        for r in planned:
+            print(f"\n  {r['state']:16} {r['name']}")
+            print(f"    {r['why_not']}")
+            if r["state"] == screen.READY:
+                print(f"    {' '.join(screen.argv(r))}")
+        print("\n  --run to screen the ready ones; nothing is downloaded either "
+              "way")
+        return 0
+    if not ready:
+        return err("nothing is ready to screen: fetch weights first, and note "
+                   "that a screen never downloads")
+
+    store = ms.connect()
+    try:
+        for r in ready[:getattr(a, "limit", 1)]:
+            print(f"\n── {r['name']}", flush=True)
+            proc = subprocess.run(screen.argv(r), capture_output=True,
+                                  text=True)
+            # The RUN's own summary, read from what it wrote rather than parsed
+            # out of its chatter: a tier that infers an outcome from stdout is
+            # a tier that reports success when the format changes.
+            summary = _latest_summary(r["modality"])
+            got, why = screen.outcome(proc.returncode, summary)
+            print(f"   {got.upper()}: {why}")
+            if proc.returncode != 0:
+                err(proc.stderr.strip()[-400:] or "no stderr")
+            ms.decide(store, r["name"], got, tier=ms.SCREEN, detail=why[:200])
+    finally:
+        store.close()
+    return 0
+
+
+def _latest_summary(modality: str) -> dict | None:
+    """The summary of the newest run receipt for this modality."""
+    newest, when = None, 0.0
+    try:
+        receipts = sorted(paths.runs().rglob("results.json"))
+    except OSError:
+        return None
+    for f in receipts:
+        try:
+            stat = f.stat()
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if (data.get("receipt") or {}).get("modality") != modality:
+            continue
+        if stat.st_mtime > when:
+            newest, when = data.get("summary"), stat.st_mtime
+    return newest
 
 
 def _report_judge_store(a) -> int:
@@ -1450,6 +1578,18 @@ def build_parser() -> argparse.ArgumentParser:
                    help="with --inspect, take only this worker's slice of the "
                         "candidates. Kubernetes passes the index of an Indexed "
                         "Job; without it every worker does the same work")
+    d.add_argument("--winners", action="store_true",
+                   help="what the run receipts say won each lane, against the "
+                        "defaults this CLI has typed in")
+    d.add_argument("--screen", action="store_true",
+                   help="run the cheapest real thing on the top of the queue "
+                        "and record whether it ran at all. Says what it would "
+                        "do unless given --run, and NEVER downloads")
+    d.add_argument("--run", action="store_true",
+                   help="with --screen, actually run it")
+    d.add_argument("--limit", type=int, default=1,
+                   help="with --screen --run, how many to screen. One at a "
+                        "time: a screen holds a model in memory")
     d.add_argument("--queue", action="store_true",
                    help="what a screen would teach us, best first, from what "
                         "the store already knows. Arithmetic, not a judge")

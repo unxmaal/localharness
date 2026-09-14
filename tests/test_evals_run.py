@@ -820,3 +820,32 @@ def test_a_text_only_case_is_withheld_from_omnisvg():
              Case(id="gear", modality="svg", prompt="a gear")]
     assert [c.id for c in cases_for("omnisvg:4B", cases)] == ["gear"]
     assert [c.id for c in cases_for("local-large", cases)] == ["chart", "gear"]
+
+
+# ---- a timing taken under memory pressure says so (issue #142) -----------
+
+def test_a_run_on_a_swapping_machine_warns_before_the_numbers():
+    import io
+    from evals.run import warn_if_swapping, SWAP_WARN_MB
+    buf = io.StringIO()
+    warn_if_swapping(SWAP_WARN_MB + 1, out=buf)
+    assert "not comparable" in buf.getvalue()
+    assert "peak memory is unaffected" in buf.getvalue()
+
+
+def test_a_quiet_machine_says_nothing():
+    """A warning that always fires is a warning nobody reads."""
+    import io
+    from evals.run import warn_if_swapping, SWAP_WARN_MB
+    buf = io.StringIO()
+    warn_if_swapping(SWAP_WARN_MB - 1, out=buf)
+    assert buf.getvalue() == ""
+
+
+def test_swap_that_cannot_be_read_is_zero_rather_than_an_exception(monkeypatch):
+    """A receipt must never fail a finished run."""
+    import evals.environment as environment
+    from evals.run import swap_used_mb
+    monkeypatch.setattr(environment, "capture",
+                        lambda: (_ for _ in ()).throw(OSError("no sysctl")))
+    assert swap_used_mb() == 0
