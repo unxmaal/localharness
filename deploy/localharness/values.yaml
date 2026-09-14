@@ -35,6 +35,13 @@ postgres:
     password: "discovery-local-only"
 
 
+jobs:
+  # How long a finished run's Job sticks around. The Jobs are named per release
+  # revision, so they accumulate otherwise -- and the RECORD of what ran lives
+  # in the store, not in the cluster, so there is nothing here to lose. A day
+  # is long enough to read the logs after a failure.
+  ttlSecondsAfterFinished: 86400
+
 sweep:
   enabled: true
   # WEEKLY, and that is not a taste. github.TTL_BY_ENDPOINT_HOURS["/starred"]
@@ -52,10 +59,24 @@ inspect:
   backoffLimit: 2
 
 judge:
-  # A small text model through the gateway. NOT in-cluster on a laptop: the
-  # Docker VM here is 8 GB and a resident judge would take most of it.
+  # A small text model through the gateway. NOT in-cluster on a laptop: an 8 GB
+  # Docker VM would give most of itself to a resident judge, and models belong
+  # outside the scheduler anyway. So the pod holds the tier and a machine
+  # outside the cluster does the arithmetic, which is why this tier reports
+  # `where: host` rather than in-pod.
   enabled: false
+  # REQUIRED when enabled, and the chart refuses to render without it: a pod
+  # pointing at its own localhost finds no gateway there.
   gateway: ""   # http://host.docker.internal:4000 on Docker Desktop
+  backoffLimit: 2
+  # How many candidates one run scores. The judge is a queue of one, so this is
+  # a wall-clock budget rather than a capacity.
+  top: 25
+  # How many times the control runs before anything is scored. The judge
+  # samples and nothing pins a seed, so one run is one draw: the same rubric
+  # and model gave gap +4 and then +2 on identical inputs. The tier refuses to
+  # score at all unless every run separates.
+  controlRuns: 3
 
 measure:
   # WHERE THE WORK EXECUTES, which is three answers and not the GPU boolean

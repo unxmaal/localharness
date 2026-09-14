@@ -8,11 +8,15 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "localharness.name" . }}-measure
+  name: {{ include "localharness.name" . }}-measure-{{ .Release.Revision }}
   labels:
     {{- include "localharness.labels" . | nindent 4 }}
     localharness.io/tier: measure
 spec:
+  # A RUN, NOT A DEPLOYMENT, and the name says so. A Job's pod template is
+  # immutable, so a fixed name makes the second `helm upgrade` that touches it
+  # fail -- the chart installs once and then refuses every change. Issue #174.
+  ttlSecondsAfterFinished: {{ .Values.jobs.ttlSecondsAfterFinished }}
   # A QUEUE OF ONE, by the scheduler rather than by hope. `limits.nvidia.com/gpu`
   # on a single-card node IS the lock built in #137: a second pod will not be
   # placed. That lock still earns its keep, because a person running `lh` on the

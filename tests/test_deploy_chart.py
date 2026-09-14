@@ -452,3 +452,207 @@ def test_the_readme_accounts_for_every_profile_the_chart_ships():
                 assert "RUN" in line or "RENDERED" in line, (
                     f"{name} is listed with no status: say whether anything "
                     f"has ever run it")
+
+
+# ---- the judge tier, which runs on a model outside the cluster -----------
+
+JUDGE = ("--set", "judge.enabled=true",
+         "--set", "judge.gateway=http://host.docker.internal:4000")
+
+
+def _render(*flags):
+    argv = ["helm", "template", "lh", str(CHART), *flags]
+    return subprocess.run(argv, capture_output=True, text=True)
+
+
+def _judge_pod(docs):
+    for w, pod in pods(docs):
+        if tier(w, pod) == "judge":
+            return w, pod
+    raise AssertionError("the chart rendered no judge workload")
+
+
+@_HELM_MISSING
+def test_the_judge_says_its_work_runs_on_a_host_outside_the_cluster():
+    """The pod holds the tier's identity and its queue position; the model
+    doing the scoring runs somewhere else. Calling this in-pod would be the
+    cluster taking credit for somebody else's arithmetic."""
+    out = _render(*JUDGE)
+    assert out.returncode == 0, out.stderr
+    _, pod = _judge_pod([d for d in yaml.safe_load_all(out.stdout) if d])
+    assert _env(pod)["LOCALHARNESS_WHERE"] == "host"
+
+
+@_HELM_MISSING
+def test_the_judge_is_a_queue_of_one():
+    """The text server hot-swaps models through a single queue, so a second
+    judge pod does not double the throughput -- it interleaves, and each switch
+    costs a full model load. The fan-out belongs to the tier with no model."""
+    out = _render(*JUDGE)
+    w, _ = _judge_pod([d for d in yaml.safe_load_all(out.stdout) if d])
+    assert w["spec"]["parallelism"] == 1
+    assert w["spec"]["completions"] == 1
+
+
+@_HELM_MISSING
+def test_the_judge_is_told_where_the_model_is_served():
+    """A pod's localhost is the pod. Without this the tier reaches for a
+    gateway inside its own container and finds nothing."""
+    out = _render(*JUDGE)
+    _, pod = _judge_pod([d for d in yaml.safe_load_all(out.stdout) if d])
+    args = " ".join(pod["containers"][0]["args"])
+    assert "--gateway" in args and "host.docker.internal:4000" in args
+
+
+@_HELM_MISSING
+def test_a_judge_with_nowhere_to_ask_is_refused_rather_than_rendered():
+    """The negative half, and it is a seam: `judge.enabled` and `judge.gateway`
+    are two settings that each look fine alone, and the agreement between them
+    is owned by neither."""
+    out = _render("--set", "judge.enabled=true")
+    assert out.returncode != 0
+    assert "pointing at its own localhost" in out.stderr
+
+
+@_HELM_MISSING
+def test_the_judge_does_not_score_without_running_its_control():
+    """A tier that ranks unattended on a schedule has nobody present to doubt
+    it, so --no-control must never reach a Job."""
+    out = _render(*JUDGE)
+    _, pod = _judge_pod([d for d in yaml.safe_load_all(out.stdout) if d])
+    args = " ".join(pod["containers"][0]["args"])
+    assert "--no-control" not in args
+    assert "--runs" in args
+
+
+@_HELM_MISSING
+def test_the_judge_never_asks_for_a_card():
+    """It calls a gateway and touches no weights. A pod holding a card to read
+    prose starves the only tier that needs one."""
+    out = _render(*JUDGE, "--set", "gpu.enabled=true",
+                  "--set", "postgres.dev.enabled=false")
+    _, pod = _judge_pod([d for d in yaml.safe_load_all(out.stdout) if d])
+    limits = pod["containers"][0].get("resources", {}).get("limits", {})
+    assert "nvidia.com/gpu" not in limits
+
+
+# ---- a tier Job is a run, not a deployment -------------------------------
+
+def test_every_tier_job_is_named_per_release_revision():
+    """A Job's pod template is IMMUTABLE. With a fixed name the second `helm
+    upgrade` that touches image, args, env or resources is refused by the API
+    server, and the chart installs once and then accepts no change. Worse, the
+    refusal is partial: the CronJob in the same release took its new schedule
+    while helm exited non-zero. Issue #174.
+
+    `helm template` always renders revision 1, so this reads the templates: a
+    rendered pair cannot tell a constant name from a revisioned one.
+    """
+    paths = sorted((CHART / "templates").glob("job-*.yaml"))
+    assert paths, "no job template found; a loop over nothing passes"
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        assert ".Release.Revision" in text, (
+            f"{path.name} names a Job without the release revision, so an "
+            f"upgrade will try to edit a frozen pod template")
+        assert "ttlSecondsAfterFinished" in text, (
+            f"{path.name} names a Job per revision and never cleans it up")
+
+
+@_HELM_MISSING
+def test_a_finished_run_cleans_itself_up():
+    """Named per revision, Jobs accumulate one per upgrade forever. The RECORD
+    of what ran lives in the store, so there is nothing in the cluster to
+    keep."""
+    jobs = [d for d in render("values-local.yaml") if d.get("kind") == "Job"]
+    assert jobs, "no Job rendered; a loop over nothing passes"
+    for d in jobs:
+        assert d["spec"]["ttlSecondsAfterFinished"] > 0, d["metadata"]["name"]
+
+
+# ---- the seam: what the chart invokes, and what the CLI accepts ----------
+
+#: The image's ENTRYPOINT is `lh`, so a container either passes its argv
+#: straight through, or wraps it in a shell, or escapes to another program with
+#: `--`. Every container must be one of those three, and the third is named
+#: rather than inferred: a tier that quietly matches none would be skipped by
+#: this scanner, which is how a scanner comes to check nothing.
+_ESCAPE = "--"
+
+
+def _invocations(docs) -> tuple[list[list[str]], list[list[str]]]:
+    """(lh argvs, escapes) over every container the chart renders.
+
+    `${JOB_COMPLETION_INDEX}` is substituted with a plausible value, because
+    the shell does that before the program ever sees it.
+    """
+    import shlex
+    out, escaped = [], []
+    for _, pod in pods(docs):
+        for container in pod["containers"]:
+            argv = [a.replace("${JOB_COMPLETION_INDEX}", "0")
+                    for a in (container.get("args") or [])]
+            if not argv:
+                continue
+            command = container.get("command") or []
+            if command and command[0] in ("sh", "bash"):
+                words = shlex.split(" ".join(argv))
+                if "lh" not in words:
+                    escaped.append(argv)
+                    continue
+                out.append(words[words.index("lh") + 1:])
+            elif argv[0] == _ESCAPE:
+                escaped.append(argv)
+            elif command:
+                escaped.append(argv)     # a container that is not this program
+            else:
+                out.append(argv)         # straight to the ENTRYPOINT
+    return out, escaped
+
+
+@_HELM_MISSING
+def test_every_command_the_chart_runs_is_one_this_program_has():
+    """THE SEAM, and this project has paid for it four times in one afternoon.
+    The chart renders a shell string; the CLI defines flags; each half is
+    checked against its own spec and the agreement between them is owned by
+    neither, so a renamed flag is a green chart, a green test suite, and a pod
+    that dies in a cluster.
+
+    A scanner, not a per-flag assertion: it covers the tiers that exist and the
+    ones nobody has written yet.
+    """
+    from harness import cli
+
+    docs = render("values-local.yaml") + [
+        d for d in yaml.safe_load_all(_render(
+            *JUDGE, "--set", "gpu.enabled=true",
+            "--set", "postgres.dev.enabled=false").stdout) if d]
+    argvs, escaped = _invocations(docs)
+    # NOT A BARE `assert argvs`. The first cut of this scanner matched only the
+    # shell-wrapped form and silently skipped the sweep, which is the tier that
+    # runs most often -- a scanner checking two of four workloads and reporting
+    # green. Count what it saw against what the chart renders.
+    tiers = {tier(w, pod) for w, pod in pods(docs)} - {"store"}
+    assert len(argvs) + len(escaped) >= len(tiers), (
+        f"{len(tiers)} tiers render, {len(argvs)} lh invocations and "
+        f"{len(escaped)} escapes were found: something was skipped")
+    assert argvs, "the chart rendered no lh invocation; this test checks nothing"
+    parser = cli.build_parser()
+    for argv in argvs:
+        try:
+            parser.parse_args(argv)
+        except SystemExit as exc:  # argparse exits rather than raising
+            raise AssertionError(
+                f"the chart runs `lh {' '.join(argv)}`, which this CLI does "
+                f"not accept ({exc})") from None
+
+
+@_HELM_MISSING
+def test_the_scanner_notices_a_flag_the_cli_does_not_have():
+    """Red-proofed. A scanner never observed to fail is not known to work, and
+    this one passes trivially if the extraction quietly finds nothing."""
+    from harness import cli
+
+    parser = cli.build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["discover", "--judge", "--from-a-teapot"])

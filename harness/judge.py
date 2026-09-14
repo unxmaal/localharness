@@ -51,6 +51,31 @@ class Rubric:
         suffix = f"+{'+'.join(self.fragments)}" if self.fragments else ""
         return f"{self.name}@{self.version}{suffix}"
 
+    @property
+    def stamp(self) -> str:
+        """The identity as RECORDED, which carries the content digest.
+
+        Kept apart from `identity` on the same argument that keeps
+        `cases_digest` a field of its own rather than folded into `case_ids`:
+        the readable name is what a person writes and reads, and the digest is
+        what two runs are actually compared on.
+        """
+        return f"{self.identity}#{self.digest}"
+
+    @property
+    def digest(self) -> str:
+        """The prompt itself, hashed, because a version is a name and a name
+        survives every edit to the thing it names.
+
+        Editing what_scores_high in place without touching `version` produces a
+        second exam under the first one's identity. That is the defect
+        evals.core.cases_digest exists to refuse, sitting in the other
+        instrument this project ranks with -- and it matters more now that a
+        pod scores a queue unattended, where nobody sees the rubric change.
+        """
+        import hashlib
+        return hashlib.sha256(self.prompt.encode("utf-8")).hexdigest()[:8]
+
 
 def _machine_sections(machine, directory: Path) -> tuple[dict, tuple[str, ...]]:
     """The rubric fragments for the runtimes this machine has.

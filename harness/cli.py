@@ -386,6 +386,8 @@ def cmd_discover(a) -> int:
     """
     if getattr(a, "inspect", False):
         return _report_inspect(a)
+    if getattr(a, "judge", False) and getattr(a, "from_store", False):
+        return _report_judge_store(a)
     if getattr(a, "neighbors", False):
         return _report_neighbors(a)
     if getattr(a, "control", False):
@@ -488,24 +490,36 @@ def _warn_stale_sources() -> None:
 
 
 def _report_control(a) -> int:
-    """A judge is a metric, and a metric without a control is noise."""
+    """A judge is a metric, and a metric without a control is noise.
+
+    REPEATED, and that is the whole point of this command. The judge samples
+    and nothing pins a seed, so one run gave gap +4 and the next +2 on
+    identical inputs. control_repeated() was built for that, was tested, and
+    nothing called it -- this command went to the single-shot form, so the
+    sentence authorising every score in the project came from one draw.
+    Issue #172.
+    """
     from harness import judge
+    runs = max(1, getattr(a, "runs", 3))
     try:
-        got = judge.control()
+        got = judge.control_repeated(runs=runs,
+                                     gateway=getattr(a, "gateway", "") or "")
     except Exception as exc:  # noqa: BLE001
         return err(f"control failed: {exc}")
     if a.json:
         print(json.dumps(got, indent=2))
         return 0
-    print(f"\nrubric {got['rubric']}, judge {got['model']}")
+    print(f"\nrubric {got['rubric']}, judge {got['model']}, {got['runs']} run(s)")
     for r in got["rows"]:
         print(f"  {r['outcome']:5} {r['score']:2}  {r['name']:20} {r['why'][:52]}")
-    print(f"\n  known-good min {got['won_min']}, known-bad max "
-          f"{got['lost_max']}, gap {got['gap']:+d}")
+    gaps = ", ".join(f"{g:+d}" for g in got["gaps"])
+    print(f"\n  gap per run {gaps}   spread {got['spread']}")
     if got["separates"]:
-        print("  SEPARATES. Scores from this rubric may be used to rank.")
+        print(f"  SEPARATES in all {got['runs']}. Scores from this rubric may "
+              f"be used to rank.")
         return 0
-    print("  DOES NOT SEPARATE. No ranking may be drawn from this rubric.")
+    print(f"  DOES NOT SEPARATE: {got['separated_in']} of {got['runs']} runs. "
+          f"No ranking may be drawn from this rubric.")
     return 1
 
 
@@ -662,7 +676,7 @@ def _report_inspect(a) -> int:
                     registry, card = resolve_registry(repo, client)
                 except ins.Gone as exc:
                     err(f"{repo}: {exc}")
-                    ms.decide(store, repo, "broken", tier="inspect",
+                    ms.decide(store, repo, "broken", tier=ms.INSPECT,
                               detail=str(exc)[:200])
                     continue
                 if not registry:
@@ -678,7 +692,7 @@ def _report_inspect(a) -> int:
                     # recorded as one. An unreachable registry is not.
                     err(f"{repo}: {exc}")
                     try:
-                        ms.decide(store, repo, "broken", tier="inspect",
+                        ms.decide(store, repo, "broken", tier=ms.INSPECT,
                                   detail=str(exc)[:200])
                     except KeyError:
                         pass   # named on the command line, never proposed
@@ -709,7 +723,7 @@ def _report_inspect(a) -> int:
             # never proposed again. "unknown" settles nothing, deliberately.
             outcome = {"fits": "queued", "unknown": ""}.get(fit.verdict, "declined")
             if outcome:
-                ms.decide(store, repo, outcome, tier="inspect",
+                ms.decide(store, repo, outcome, tier=ms.INSPECT,
                           detail=f"{fit.verdict}: {fit.why}"[:200])
             # The WEIGHTS are what a download queue can act on. The repo is
             # something to install and screen, and the two are not the same
@@ -743,7 +757,7 @@ def _report_inspect(a) -> int:
                     resolved=model_id, lane=fit.lanes.get(model_id, ""),
                     why=f"named by {repo}"))
                 ms.link(store, repo, model_id, "needs")
-                ms.decide(store, model_id, "queued", tier="inspect",
+                ms.decide(store, model_id, "queued", tier=ms.INSPECT,
                           detail=f"bytes={size} lane={fit.lanes.get(model_id) or '-'} "
                                  f"named by {repo}")
     finally:
@@ -845,13 +859,95 @@ def _judge_fits(fits, store_path=None) -> int:
                 continue
             print(f"    {score:2d}/10  {f.repo:36.36s} {why[:56]}")
             try:
-                ms.decide(store, f.repo, "queued", tier="judge", score=score,
-                          rubric=rubric.identity, judge=rubric.model,
+                ms.decide(store, f.repo, "queued", tier=ms.JUDGE, score=score,
+                          rubric=rubric.stamp, judge=rubric.model,
                           detail=why[:200])
             except KeyError:
                 pass
     finally:
         store.close()
+    return 0
+
+
+def _report_judge_store(a) -> int:
+    """Score what the inspect tier queued and no judge has read. #148 phase 3.
+
+    THE RUNG ABOVE --inspect --from-store. _judge_fits() can only see the Fit
+    objects produced in its own process, so a judge has never been able to
+    reach the store: after #167 that left real candidates with real verdicts
+    and nothing ranking them.
+
+    THE CONTROL RUNS FIRST AND THE TIER REFUSES WITHOUT IT. A judge is a
+    metric, this one samples, and a tier that scores unattended on a schedule
+    has nobody present to doubt it. `--no-control` exists for a person watching
+    the output, never for a Job.
+    """
+    from harness import judge
+    from harness import memory_store as ms
+
+    gateway = getattr(a, "gateway", "") or ""
+    try:
+        rubric = judge.load()
+    except judge.JudgeError as exc:
+        return err(str(exc))
+
+    # THE WORK FIRST, THEN THE GATE, and in that order for two reasons. The
+    # control costs a model call per control item, so a Job whose queue is
+    # empty would otherwise pay eighteen of them to prove a rubric separates
+    # and then score nothing. And a store that cannot be reached should be
+    # found in the first second rather than after the judging budget is spent:
+    # the first run of this tier in a cluster did exactly that, spending its
+    # control on a gateway and then dying on a Postgres in recovery.
+    store = ms.connect()
+    scored = 0
+    try:
+        rows = ms.judgeable(store, limit=getattr(a, "top", 25))
+        rows = shard(rows, getattr(a, "shard", ""))
+        waiting = ms.judgeable_total(store)
+        if not rows:
+            print("nothing queued by inspect that a judge has not already read")
+            return 0
+
+        if not getattr(a, "no_control", False):
+            runs = max(1, getattr(a, "runs", 3))
+            try:
+                got = judge.control_repeated(runs=runs, gateway=gateway)
+            except Exception as exc:  # noqa: BLE001
+                return err(f"control failed, so nothing was scored: {exc}")
+            gaps = ", ".join(f"{g:+d}" for g in got["gaps"])
+            print(f"control: rubric {got['rubric']}, judge {got['model']}, "
+                  f"gap per run {gaps}, spread {got['spread']}")
+            if not got["separates"]:
+                return err(
+                    f"the rubric separates in only {got['separated_in']} of "
+                    f"{got['runs']} control runs, so nothing was scored. A "
+                    f"score from a rubric that does not discriminate is a "
+                    f"number, not a ranking")
+
+        print(f"\njudging {len(rows)} candidate(s) the sweep found and the "
+              f"source tier answered:")
+        for row in rows:
+            item = judge.describe(
+                row["name"], why=row.get("why") or "",
+                source=row.get("source") or "", times_seen=row.get("times") or 0,
+                relevance=row.get("relevance") or 0,
+                inspected=row.get("inspected") or "")
+            try:
+                score, why = judge.score(item, rubric, gateway=gateway)
+            except Exception as exc:  # noqa: BLE001 - one bad reply is not a run
+                err(f"{row['name']}: {exc}")
+                continue
+            print(f"  {score:2d}/10  {row['name']:40.40s} {why[:48]}")
+            ms.decide(store, row["name"], "queued", tier=ms.JUDGE, score=score,
+                      rubric=rubric.stamp, judge=rubric.model,
+                      detail=why[:200])
+            scored += 1
+    finally:
+        store.close()
+    left = max(0, waiting - scored)
+    print(f"\n{scored} scored, under rubric {rubric.identity} judged by "
+          f"{rubric.model}"
+          + (f"; {left} still waiting" if left else ""))
     return 0
 
 
@@ -959,8 +1055,8 @@ def _judge_neighbors(found, store):
             continue
         print(f"    {score:2d}/10  {n.repo:38.38s} {reason[:60]}")
         try:
-            ms.decide(store, n.repo, "queued", tier="judge", score=score,
-                      rubric=rubric.identity, judge=rubric.model,
+            ms.decide(store, n.repo, "queued", tier=ms.JUDGE, score=score,
+                      rubric=rubric.stamp, judge=rubric.model,
                       detail=reason[:200])
         except KeyError:
             pass
@@ -1073,7 +1169,7 @@ def _judge_proposals(found, store):
         c.note = f"[{score}/10] {why[:90]} | {c.note}"
         try:
             ms.decide(store, c.name, "queued", tier="judge", score=score,
-                      rubric=rubric.identity, judge=rubric.model, detail=why[:200])
+                      rubric=rubric.stamp, judge=rubric.model, detail=why[:200])
         except KeyError:
             pass
     found.sort(key=lambda c: -getattr(c, "relevance", 0))
@@ -1260,6 +1356,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="score items whose outcome is already known, and report "
                         "whether the rubric separates them. Run this before "
                         "trusting any score")
+    d.add_argument("--runs", type=int, default=3,
+                   help="how many times to run the control. The judge samples "
+                        "and nothing pins a seed, so one run is one draw")
+    d.add_argument("--no-control", action="store_true",
+                   help="with --judge --from-store, score without running the "
+                        "control first. For a person watching the output, "
+                        "never for a Job")
+    d.add_argument("--gateway", default=completion.DEFAULT_GATEWAY,
+                   help="where the judge model is served. A pod reaches the "
+                        "host's gateway, not its own localhost")
     d.add_argument("--neighbors", action="store_true",
                    help="repos concentrated in the crowd that builds what "
                         "this machine runs; add --control to check the metric "
@@ -1278,7 +1384,9 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--from-store", action="store_true",
                    help="with --inspect, take candidates the sweep already "
                         "found and nothing has answered, most-corroborated "
-                        "first, instead of rebuilding the crowd")
+                        "first, instead of rebuilding the crowd. With --judge "
+                        "and without --inspect, score what the source tier "
+                        "queued and no judge has read")
     d.add_argument("--shard", default="", metavar="I/N",
                    help="with --inspect, take only this worker's slice of the "
                         "candidates. Kubernetes passes the index of an Indexed "

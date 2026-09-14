@@ -2,11 +2,15 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "localharness.name" . }}-inspect
+  name: {{ include "localharness.name" . }}-inspect-{{ .Release.Revision }}
   labels:
     {{- include "localharness.labels" . | nindent 4 }}
     localharness.io/tier: inspect
 spec:
+  # A RUN, NOT A DEPLOYMENT, and the name says so. A Job's pod template is
+  # immutable, so a fixed name makes the second `helm upgrade` that touches it
+  # fail -- the chart installs once and then refuses every change. Issue #174.
+  ttlSecondsAfterFinished: {{ .Values.jobs.ttlSecondsAfterFinished }}
   # THE FAN-OUT, and the reason this issue targets discovery before lanes.
   # harness/inspect.py imports no model and calls no gateway: it clones source,
   # reads it, and asks the registry for weight sizes. Embarrassingly parallel,
