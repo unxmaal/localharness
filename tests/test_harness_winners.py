@@ -4,6 +4,18 @@ import json
 from harness import winners
 
 
+def pin(monkeypatch, **defaults):
+    """Pin the typed defaults this test is about.
+
+    THE SPEECH DEFAULTS ARE CHOSEN BY PLATFORM -- parakeet on a Mac,
+    faster-whisper on Windows -- so a test that inherits them is partly a test
+    about which operating system ran it. Two of these failed on check-windows
+    for exactly that, the same shape as the verdict test that inherited the
+    runner's mlx runtime.
+    """
+    monkeypatch.setattr(winners, "typed", lambda: dict(defaults))
+
+
 def receipt(tmp_path, name, modality, summary, tier="measure"):
     d = tmp_path / name
     d.mkdir(parents=True)
@@ -107,11 +119,12 @@ def test_every_typed_default_declares_which_family_it_belongs_to():
 
 # --- the lane's own metric decides, not a statistic blind to it -----------
 
-def test_the_lanes_metric_beats_pass_rate_and_latency(tmp_path):
+def test_the_lanes_metric_beats_pass_rate_and_latency(tmp_path, monkeypatch):
     """NOT HYPOTHETICAL. Ranking on pass rate and then latency reported that
     parakeet-ctc had beaten parakeet-tdt-v2: both passed 300 of 300 and ctc has
     the faster median, so on those two statistics ctc wins and on WER -- the
     one the lane is about -- it loses."""
+    pin(monkeypatch, stt="mlx-community/parakeet-tdt-0.6b-v2")
     receipt(tmp_path, "stt", "stt", {
         "parakeet-tdt-0.6b-v2": {"pass_rate": 1.0, "median_s": 0.135,
                                  "total": 300, "metrics": {"wer": 0.0162}},
@@ -141,9 +154,11 @@ def test_a_neutral_metric_is_never_ranked_on(tmp_path):
     assert winners.beaten_in(tmp_path)["svg"]["candidate"] == "local-large"
 
 
-def test_passing_less_often_loses_whatever_the_metric_says(tmp_path):
+def test_passing_less_often_loses_whatever_the_metric_says(tmp_path,
+                                                          monkeypatch):
     """A model that fails half the cases and scores well on the rest scored on
     a different, easier subset."""
+    pin(monkeypatch, stt="mlx-community/parakeet-tdt-0.6b-v2")
     # A receipt key is a model, or a model and the voice it used -- never the
     # org-prefixed id the default carries.
     receipt(tmp_path, "stt", "stt", {
@@ -153,3 +168,15 @@ def test_passing_less_often_loses_whatever_the_metric_says(tmp_path):
                   "metrics": {"wer": 0.001}}})
     got = winners.beaten_in(tmp_path)["stt"]
     assert got["candidate"] == "parakeet-tdt-0.6b-v2"
+
+
+def test_a_speech_default_is_whichever_this_platform_would_actually_use():
+    """The branch is deliberate and belongs in ONE test rather than being
+    assumed by several: comparing a Mac's receipts against a Windows constant
+    would be the accelerator mistake in another costume."""
+    import sys
+    from harness import audio
+    assert winners.typed()["stt"] == audio.DEFAULT_STT_MODEL
+    assert winners.typed()["tts"] == audio.DEFAULT_TTS_MODEL
+    if sys.platform != "win32":
+        assert "parakeet" in winners.typed()["stt"]
