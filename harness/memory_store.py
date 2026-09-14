@@ -32,6 +32,15 @@ TERMINAL = ("measured", "declined", "broken", "ignored")
 GITHUB, HUGGINGFACE = "github", "huggingface"
 REGISTRIES = (GITHUB, HUGGINGFACE)
 
+#: WHICH TIER ANSWERED. Named here because these strings are a vocabulary
+#: shared by writers and readers in different modules: the CLI writes
+#: tier='inspect', judgeable() reads it back, and fetching.queued() filters on
+#: it. Spelled as literals in three files, a rename in one would leave the
+#: others silently returning nothing -- the same class as a list forked into
+#: two configs. VERDICTS already had this treatment; the tiers did not.
+INSPECT, JUDGE, SCREEN, MEASURE = "inspect", "judge", "screen", "measure"
+TIERS = (INSPECT, JUDGE, SCREEN, MEASURE)
+
 _DDL = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 
@@ -386,6 +395,63 @@ def by_registry(conn) -> dict[str, int]:
             f"({','.join('?' * len(TERMINAL))})) GROUP BY p.registry", TERMINAL):
         out[r["registry"]] = r["n"]
     return out
+
+
+def judgeable(conn, limit: int = 50) -> list[dict]:
+    """What the inspect tier queued and no judge has scored, best-corroborated
+    first, with everything judge.describe() is shown.
+
+    THE SAME MISSING RUNG ONE TIER ALONG. _judge_fits() scores the Fit objects
+    sitting in memory from the inspect run that produced them, so a judge can
+    only ever see candidates inspected in the same process. Everything the
+    store already holds is unreachable, and after #167 that is a queue of real
+    candidates with real verdicts that nothing ranks.
+
+    A proposal already scored by a judge is not returned. Re-scoring it would
+    cost a model call to learn what is already recorded, and the rubric and
+    judge model are recorded beside the score, so a run under a NEW rubric is
+    told apart by that rather than by scoring everything again.
+    """
+    q = """
+        SELECT p.name, p.lane, p.registry, p.kind,
+               COUNT(s.id) AS times, MAX(s.relevance) AS relevance,
+               MAX(s.seen_at) AS last_seen,
+               MIN(s.source) AS source, MIN(s.why) AS why,
+               (SELECT v.detail FROM verdicts v
+                 WHERE v.proposal_id = p.id AND v.tier = ?
+                 ORDER BY v.id DESC LIMIT 1) AS inspected
+        FROM proposals p JOIN sightings s ON s.proposal_id = p.id
+        WHERE p.id IN (
+            SELECT proposal_id FROM verdicts
+            WHERE tier = ? AND outcome = 'queued'
+        ) AND p.id NOT IN (
+            SELECT proposal_id FROM verdicts WHERE tier = ?
+        )
+        GROUP BY p.id
+        ORDER BY times DESC, last_seen DESC
+        LIMIT ?
+    """
+    return [dict(r) for r in conn.execute(q, (INSPECT, INSPECT, JUDGE, limit))]
+
+
+def judgeable_total(conn) -> int:
+    """How many candidates are waiting, whatever one run's budget is. A tier
+    that takes the top 25 of a backlog and says nothing about the rest reads as
+    finished."""
+    return len(judgeable(conn, limit=1_000_000))
+
+
+def ranked(conn, limit: int = 50) -> list[dict]:
+    """Everything a judge has scored, best first. What the tier is FOR."""
+    q = """
+        SELECT p.name, p.lane, v.score, v.rubric, v.judge, v.detail,
+               v.decided_at
+        FROM proposals p JOIN verdicts v ON v.proposal_id = p.id
+        WHERE v.tier = ? AND v.score IS NOT NULL
+        ORDER BY v.score DESC, v.id DESC
+        LIMIT ?
+    """
+    return [dict(r) for r in conn.execute(q, (JUDGE, limit))]
 
 
 def recurrence(conn: sqlite3.Connection, minimum: int = 2) -> list[dict]:

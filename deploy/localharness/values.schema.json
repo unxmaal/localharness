@@ -74,6 +74,26 @@
           ]
         }
       }
+    },
+    "judge": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "gateway": {
+          "type": "string"
+        },
+        "top": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "controlRuns": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "one run is one draw from a sampling judge; the published verdict must not come from it"
+        }
+      }
     }
   }
 }

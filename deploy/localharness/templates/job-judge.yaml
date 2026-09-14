@@ -1,0 +1,54 @@
+{{- if .Values.judge.enabled }}
+{{- if not .Values.judge.gateway }}
+{{- fail "judge.enabled needs judge.gateway: the model is served outside the cluster, and a pod left pointing at its own localhost finds nothing there. On Docker Desktop that is http://host.docker.internal:4000" }}
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "localharness.name" . }}-judge-{{ .Release.Revision }}
+  labels:
+    {{- include "localharness.labels" . | nindent 4 }}
+    localharness.io/tier: judge
+spec:
+  # A RUN, NOT A DEPLOYMENT, and the name says so. A Job's pod template is
+  # immutable, so a fixed name makes the second `helm upgrade` that touches it
+  # fail -- the chart installs once and then refuses every change. Issue #174.
+  ttlSecondsAfterFinished: {{ .Values.jobs.ttlSecondsAfterFinished }}
+  # A QUEUE OF ONE, and not for want of work. The text server hot-swaps models
+  # per request through a single queue, so a second judge pod asking for the
+  # same model does not double the throughput -- it interleaves with the first
+  # and each switch costs a full model load. The fan-out belongs to the tier
+  # that touches no model.
+  parallelism: 1
+  completions: 1
+  backoffLimit: {{ .Values.judge.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "localharness.labels" . | nindent 8 }}
+        localharness.io/tier: judge
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: judge
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["sh", "-c"]
+          args:
+            - >-
+              exec lh discover --judge --from-store
+              --gateway {{ .Values.judge.gateway | quote }}
+              --runs {{ .Values.judge.controlRuns }}
+              --top {{ .Values.judge.top }}
+          env:
+            {{- include "localharness.storeEnv" . | nindent 12 }}
+            {{/*
+              HOST, not in-pod. The pod holds the tier's identity and its queue
+              position; the model that does the scoring runs on a machine
+              outside the cluster. Calling this in-pod would be the cluster
+              taking credit for somebody else's arithmetic.
+            */}}
+            {{- include "localharness.whereEnv" (list . "host") | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources.cheap | nindent 12 }}
+{{- end }}

@@ -766,6 +766,22 @@ Rendered is not a synonym for working. Every assertion in
 forgets to ask for a GPU and cannot catch anything about a cluster nobody here
 has.
 
+### The tiers, and what each one costs
+
+The ladder is sweep, inspect, judge, screen, measure, cheapest first. Three of
+those run in the cluster today:
+
+| tier | what it does | where |
+|---|---|---|
+| sweep | reads the feeds, writes proposals | `in-pod`, on a CronJob |
+| inspect | reads a candidate's source or its model card, with nothing downloaded | `in-pod`, sharded across an Indexed Job |
+| judge | scores what inspect queued, against a rubric | the pod asks, a model outside the cluster answers |
+
+The judge refuses to score at all unless its control separates known-good from
+known-bad on every run. A rubric that does not discriminate produces numbers
+rather than a ranking, and a tier scoring a queue unattended has nobody present
+to doubt it.
+
 ### Where a lane's work executes
 
 Not a GPU toggle, because there are three answers rather than two:
