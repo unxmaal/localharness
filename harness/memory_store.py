@@ -17,7 +17,7 @@ from pathlib import Path
 
 from harness import paths, store
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 #: Outcomes a proposal can reach. TERMINAL ones suppress re-proposal.
 VERDICTS = ("measured", "declined", "broken", "queued", "ignored", "screened")
@@ -50,6 +50,11 @@ CREATE TABLE IF NOT EXISTS proposals (
     kind        TEXT NOT NULL DEFAULT 'candidate',
     -- Which registry answers for this name. See REGISTRIES.
     registry    TEXT NOT NULL DEFAULT '',
+    -- WHAT THE THING IS, as its registry describes it. A sighting's `why` is
+    -- what one source said about it on one day; this is the card. The judge
+    -- scores a description, and with only a name to read it floored six
+    -- models with known opposite outcomes at the same number. Issue #175.
+    description TEXT NOT NULL DEFAULT '',
     lane        TEXT NOT NULL DEFAULT '',
     resolved    TEXT NOT NULL DEFAULT '',
     -- What it consumes and produces, so valid compositions can be found
@@ -174,6 +179,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE proposals "
                          "ADD COLUMN registry TEXT NOT NULL DEFAULT ''")
         _backfill_registry(conn)
+    if have and have < 4 and "description" not in _columns(conn, "proposals"):
+        conn.execute("ALTER TABLE proposals "
+                     "ADD COLUMN description TEXT NOT NULL DEFAULT ''")
     conn.execute("INSERT OR REPLACE INTO meta VALUES ('schema', ?)",
                  (str(SCHEMA_VERSION),))
     conn.commit()
@@ -239,6 +247,9 @@ class Seen:
     resolved: str = ""
     #: One of REGISTRIES, or empty when the caller genuinely cannot say.
     registry: str = ""
+    #: What the registry says this IS, as opposed to what one source said
+    #: about it. Only filled by a tier that read the registry.
+    description: str = ""
 
 
 def record(conn: sqlite3.Connection, seen: Seen, at: float | None = None) -> int:
@@ -257,15 +268,17 @@ def record(conn: sqlite3.Connection, seen: Seen, at: float | None = None) -> int
             "UPDATE proposals SET last_seen = ?, "
             "  resolved = CASE WHEN ?<>'' THEN ? ELSE resolved END, "
             "  lane = CASE WHEN lane='' THEN ? ELSE lane END, "
-            "  registry = CASE WHEN registry='' THEN ? ELSE registry END "
+            "  registry = CASE WHEN registry='' THEN ? ELSE registry END, "
+            "  description = CASE WHEN ?<>'' THEN ? ELSE description END "
             "WHERE id = ?",
-            (now, seen.resolved, seen.resolved, seen.lane, seen.registry, pid))
+            (now, seen.resolved, seen.resolved, seen.lane, seen.registry,
+             seen.description, seen.description, pid))
     else:
         pid = conn.execute(
             "INSERT INTO proposals (name, kind, registry, lane, resolved, "
-            "first_seen, last_seen) VALUES (?,?,?,?,?,?,?)",
+            "description, first_seen, last_seen) VALUES (?,?,?,?,?,?,?,?)",
             (seen.name, seen.kind, seen.registry, seen.lane, seen.resolved,
-             now, now)).lastrowid
+             seen.description, now, now)).lastrowid
     conn.execute(
         "INSERT OR IGNORE INTO sightings (proposal_id, source, url, why, "
         "relevance, seen_at) VALUES (?,?,?,?,?,?)",
@@ -413,7 +426,7 @@ def judgeable(conn, limit: int = 50) -> list[dict]:
     told apart by that rather than by scoring everything again.
     """
     q = """
-        SELECT p.name, p.lane, p.registry, p.kind,
+        SELECT p.name, p.lane, p.registry, p.kind, p.description,
                COUNT(s.id) AS times, MAX(s.relevance) AS relevance,
                MAX(s.seen_at) AS last_seen,
                MIN(s.source) AS source, MIN(s.why) AS why,

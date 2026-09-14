@@ -89,7 +89,8 @@ def test_nothing_is_scored_when_the_rubric_does_not_separate(tmp_path,
     scored = []
     monkeypatch.setattr(judge, "control_repeated", lambda **kw: {
         "runs": 3, "gaps": [2, -1, 3], "spread": 4, "separates": False,
-        "separated_in": 2, "rubric": "novelty@5", "model": "q3-4b", "rows": []})
+        "separated_in": 2, "shape": "carded", "rubric": "novelty@5",
+        "model": "q3-4b", "rows": []})
     monkeypatch.setattr(judge, "score",
                         lambda *a, **kw: scored.append(a) or (7, "why"))
 
@@ -110,7 +111,8 @@ def test_a_separating_control_lets_the_scores_through(tmp_path, monkeypatch):
 
     monkeypatch.setattr(judge, "control_repeated", lambda **kw: {
         "runs": 3, "gaps": [2, 2, 2], "spread": 0, "separates": True,
-        "separated_in": 3, "rubric": "novelty@5", "model": "q3-4b", "rows": []})
+        "separated_in": 3, "shape": "carded", "rubric": "novelty@5",
+        "model": "q3-4b", "rows": []})
     monkeypatch.setattr(judge, "score", lambda *a, **kw: (8, "it composes"))
 
     assert cli._report_judge_store(_args()) == 0
@@ -138,7 +140,8 @@ def test_the_judge_is_shown_what_the_source_tier_found(tmp_path, monkeypatch):
     seen = []
     monkeypatch.setattr(judge, "control_repeated", lambda **kw: {
         "runs": 1, "gaps": [2], "spread": 0, "separates": True,
-        "separated_in": 1, "rubric": "r", "model": "m", "rows": []})
+        "separated_in": 1, "shape": "carded", "rubric": "r", "model": "m",
+        "rows": []})
     monkeypatch.setattr(judge, "score",
                         lambda item, *a, **kw: (seen.append(item), (5, "ok"))[1])
     cli._report_judge_store(_args())
@@ -154,7 +157,8 @@ def test_the_control_command_runs_the_repeated_form(monkeypatch):
     called = []
     monkeypatch.setattr(judge, "control_repeated", lambda **kw: called.append(kw) or {
         "runs": kw.get("runs", 0), "gaps": [2], "spread": 0, "separates": True,
-        "separated_in": 1, "rubric": "r", "model": "m", "rows": []})
+        "separated_in": 1, "shape": kw.get("shape"), "rubric": "r",
+        "model": "m", "rows": []})
     monkeypatch.setattr(judge, "control", lambda *a, **kw: pytest.fail(
         "the single-run control must not be what a published verdict rests on"))
     assert cli._report_control(_args(control=True, runs=4, json=False)) == 0
@@ -216,3 +220,47 @@ def test_an_empty_queue_costs_no_model_calls(tmp_path, monkeypatch):
     monkeypatch.setattr(judge, "score", lambda *a, **kw: pytest.fail(
         "it scored with nothing to judge"))
     assert cli._report_judge_store(_args()) == 0
+
+
+# --- the control must be shaped like the data the tier feeds the judge -----
+
+def test_a_tier_reading_the_store_gates_on_the_shape_it_will_judge(
+        tmp_path, monkeypatch):
+    """#175. The described control separated at +7 while every real candidate
+    came back 3/10, because it is made of hand-written project prose and the
+    store holds registry cards. A gate answering a question about different
+    data is not a gate."""
+    from harness import paths
+    monkeypatch.setattr(paths, "home", lambda: tmp_path)
+    conn = ms.connect()
+    queued(conn, "org/model")
+    conn.close()
+
+    asked = []
+    monkeypatch.setattr(judge, "control_repeated",
+                        lambda **kw: asked.append(kw.get("shape")) or {
+                            "runs": 1, "gaps": [2], "spread": 0,
+                            "separates": True, "separated_in": 1,
+                            "shape": kw.get("shape"), "rubric": "r",
+                            "model": "m", "rows": []})
+    monkeypatch.setattr(judge, "score", lambda *a, **kw: (5, "ok"))
+    cli._report_judge_store(_args())
+    assert asked == ["carded"], "it gated on prose it will never be shown"
+
+
+def test_every_control_shape_is_a_set_the_judge_can_actually_be_given():
+    """A shape that names nothing is a gate that raises at 4am in a pod."""
+    for name, items in judge.SHAPES.items():
+        assert items, name
+        for item in items:
+            assert len(item) in (2, 3), (name, item)
+            assert item[-1] in ("won", "lost"), (name, item)
+        outcomes = {item[-1] for item in items}
+        assert outcomes == {"won", "lost"}, (
+            f"{name} has only {outcomes}; a control with one class cannot "
+            f"separate anything")
+
+
+def test_an_unknown_shape_is_refused_rather_than_silently_defaulted():
+    with pytest.raises(judge.JudgeError):
+        judge.control(shape="whatever", complete=lambda *a, **kw: "5")

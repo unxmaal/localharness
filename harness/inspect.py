@@ -396,6 +396,52 @@ def hf_model(model_id: str, fetch=None) -> dict:
         raise InspectError(f"{model_id}: {detail[:160]}") from exc
 
 
+#: Tags that say nothing about whether a model is worth measuring. Licences,
+#: regions and file formats are facts about paperwork and packaging.
+_NOISE_TAGS = re.compile(
+    r"^(license|licence|region|arxiv|doi|dataset|language|base_model:quantized|"
+    r"autotrain|endpoints_compatible|text-generation-inference|"
+    r"safetensors|gguf|pytorch|transformers|diffusers|onnx|tensorboard|"
+    r"has_space|model[-_]index|conversational|en|zh|multilingual)")
+
+
+def card_description(data: dict) -> str:
+    """What a model card says that bears on whether to measure this.
+
+    THE JUDGE SCORES A DESCRIPTION, and with only a name to read it gave six
+    models with known opposite outcomes the same score. Issue #175.
+
+    Deliberately NOT downloads or likes. Popularity is anti-correlated with
+    novelty -- the thing worth finding is by definition under-discussed at the
+    moment it matters -- and a rubric handed a download count will rank the
+    most-downloaded re-upload above anything new.
+
+    WHAT IS KEPT is what a person would read to decide: the task, the runtime,
+    what it was built from, and how big it is. `base_model:` lineage in
+    particular separates a genuine model from a requantised copy of one, which
+    is most of what a sweep finds.
+    """
+    tags = [str(t).strip() for t in (data.get("tags") or []) if str(t).strip()]
+    lineage = [t for t in tags if t.lower().startswith("base_model")]
+    plain = [t for t in tags
+             if not _NOISE_TAGS.match(t.lower()) and t not in lineage]
+    bits = []
+    if data.get("pipeline_tag"):
+        bits.append(f"task {data['pipeline_tag']}")
+    if data.get("library_name"):
+        bits.append(f"served by {data['library_name']}")
+    if plain:
+        bits.append("tagged " + ", ".join(plain[:6]))
+    if lineage:
+        # Only the ids, not the "base_model:finetune:" prefixes.
+        parents = sorted({t.split(":")[-1] for t in lineage})
+        bits.append("built from " + ", ".join(parents[:3]))
+    total = sum(s.get("size") or 0 for s in (data.get("siblings") or []))
+    if total > 0:
+        bits.append(f"{total / GIB:.1f} GiB of weights")
+    return "; ".join(bits)[:300]
+
+
 def inspect_model(model_id: str, *, data: dict | None = None, fetch=None,
                   ceiling: int | None = None, dead_days: int = DEAD_DAYS,
                   machine=None) -> Fit:
@@ -427,8 +473,7 @@ def inspect_model(model_id: str, *, data: dict | None = None, fetch=None,
     tags = [str(t).lower() for t in (data.get("tags") or [])]
     fit.mlx = (data.get("library_name") or "").lower() == "mlx" or "mlx" in tags
     fit.last_commit = (data.get("lastModified") or "").strip()
-    fit.description = ", ".join(
-        [t for t in [data.get("pipeline_tag") or ""] + tags[:6] if t])[:200]
+    fit.description = card_description(data)
     return decide(fit, ceiling=ceiling, dead_days=dead_days, machine=machine)
 
 

@@ -388,6 +388,8 @@ def cmd_discover(a) -> int:
         return _report_inspect(a)
     if getattr(a, "judge", False) and getattr(a, "from_store", False):
         return _report_judge_store(a)
+    if getattr(a, "queue", False):
+        return _report_queue(a)
     if getattr(a, "neighbors", False):
         return _report_neighbors(a)
     if getattr(a, "control", False):
@@ -502,14 +504,16 @@ def _report_control(a) -> int:
     from harness import judge
     runs = max(1, getattr(a, "runs", 3))
     try:
-        got = judge.control_repeated(runs=runs,
+        got = judge.control_repeated(runs=runs, shape=getattr(a, "shape", "")
+                                     or "described",
                                      gateway=getattr(a, "gateway", "") or "")
     except Exception as exc:  # noqa: BLE001
         return err(f"control failed: {exc}")
     if a.json:
         print(json.dumps(got, indent=2))
         return 0
-    print(f"\nrubric {got['rubric']}, judge {got['model']}, {got['runs']} run(s)")
+    print(f"\nrubric {got['rubric']}, judge {got['model']}, "
+          f"shape {got['shape']}, {got['runs']} run(s)")
     for r in got["rows"]:
         print(f"  {r['outcome']:5} {r['score']:2}  {r['name']:20} {r['why'][:52]}")
     gaps = ", ".join(f"{g:+d}" for g in got["gaps"])
@@ -718,7 +722,10 @@ def _report_inspect(a) -> int:
                 url=(f"https://huggingface.co/{repo}"
                      if registry == ms.HUGGINGFACE
                      else f"https://github.com/{repo}"),
-                resolved=repo, lane=fit.lanes.get(repo, ""), why=fit.why))
+                resolved=repo, lane=fit.lanes.get(repo, ""), why=fit.why,
+                # WHAT IT IS, beside what the verdict said about it. The judge
+                # reads this; with only a name it cannot rank at all (#175).
+                description=fit.description))
             # A thing that cannot run here is ANSWERED, so it is terminal and
             # never proposed again. "unknown" settles nothing, deliberately.
             outcome = {"fits": "queued", "unknown": ""}.get(fit.verdict, "declined")
@@ -869,6 +876,43 @@ def _judge_fits(fits, store_path=None) -> int:
     return 0
 
 
+def _report_queue(a) -> int:
+    """What a screen would teach us, best first. Issue #175.
+
+    NOT A PREDICTION OF WHO WINS. The judge tier tried that and could not: two
+    controls shaped like this data both failed to separate six models with known
+    opposite outcomes, because the fact that separated them was produced by
+    RUNNING them and a registry card has never held it.
+
+    Arithmetic over what the store already knows, so it is deterministic and
+    needs no gateway -- which is worth as much as the ordering, given the
+    instrument it stands in for had to be run three times to be believed.
+    """
+    from harness import rank
+    from harness import memory_store as ms
+
+    store = ms.connect()
+    try:
+        rows = ms.judgeable(store, limit=getattr(a, "top", 25) * 4)
+        waiting = ms.judgeable_total(store)
+    finally:
+        store.close()
+    if not rows:
+        print("nothing queued that a screen has not answered")
+        return 0
+    ranked = rank.rank(rows, serving=rank.serving(),
+                       measured_lanes=rank.lanes_with_receipts(),
+                       ceiling_gib=22.0)[:getattr(a, "top", 25)]
+    if a.json:
+        print(json.dumps({"queue": ranked, "waiting": waiting}, indent=2))
+        return 0
+    print(f"\n{len(ranked)} of {waiting} waiting, by what a screen would teach:")
+    for r in ranked:
+        print(f"\n  {r['value']:+6.1f}  {r['name']}")
+        print(f"          {r['value_why'] or 'nothing known about it'}")
+    return 0
+
+
 def _report_judge_store(a) -> int:
     """Score what the inspect tier queued and no judge has read. #148 phase 3.
 
@@ -910,13 +954,20 @@ def _report_judge_store(a) -> int:
 
         if not getattr(a, "no_control", False):
             runs = max(1, getattr(a, "runs", 3))
+            # THE SHAPE OF ITS OWN INPUT. This tier feeds the judge store
+            # rows, so a control made of hand-written project descriptions
+            # answers a question about different data -- it separated at +7
+            # while every real candidate came back 3/10 (#175).
+            shape = getattr(a, "shape", "") or "carded"
             try:
-                got = judge.control_repeated(runs=runs, gateway=gateway)
+                got = judge.control_repeated(runs=runs, gateway=gateway,
+                                             shape=shape)
             except Exception as exc:  # noqa: BLE001
                 return err(f"control failed, so nothing was scored: {exc}")
             gaps = ", ".join(f"{g:+d}" for g in got["gaps"])
             print(f"control: rubric {got['rubric']}, judge {got['model']}, "
-                  f"gap per run {gaps}, spread {got['spread']}")
+                  f"shape {got['shape']}, gap per run {gaps}, "
+                  f"spread {got['spread']}")
             if not got["separates"]:
                 return err(
                     f"the rubric separates in only {got['separated_in']} of "
@@ -928,7 +979,9 @@ def _report_judge_store(a) -> int:
               f"source tier answered:")
         for row in rows:
             item = judge.describe(
-                row["name"], why=row.get("why") or "",
+                # The card first: a sighting's `why` is what one source said
+                # on one day, and for a prose-swept id it is usually empty.
+                row["name"], why=row.get("description") or row.get("why") or "",
                 source=row.get("source") or "", times_seen=row.get("times") or 0,
                 relevance=row.get("relevance") or 0,
                 inspected=row.get("inspected") or "")
@@ -1356,6 +1409,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="score items whose outcome is already known, and report "
                         "whether the rubric separates them. Run this before "
                         "trusting any score")
+    d.add_argument("--shape", default="", choices=["", "described", "bare",
+                                                   "carded"],
+                   help="which known set the control scores. A tier must gate "
+                        "on the shape of its own input: `described` is "
+                        "hand-written project prose, `carded` is what a "
+                        "registry says, `bare` is a name and nothing else")
     d.add_argument("--runs", type=int, default=3,
                    help="how many times to run the control. The judge samples "
                         "and nothing pins a seed, so one run is one draw")
@@ -1391,6 +1450,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="with --inspect, take only this worker's slice of the "
                         "candidates. Kubernetes passes the index of an Indexed "
                         "Job; without it every worker does the same work")
+    d.add_argument("--queue", action="store_true",
+                   help="what a screen would teach us, best first, from what "
+                        "the store already knows. Arithmetic, not a judge")
     d.add_argument("--recurrence", action="store_true",
                    help="what keeps coming back, from the discovery store")
     d.add_argument("--comments", type=int, default=0, metavar="N",
