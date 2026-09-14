@@ -513,6 +513,7 @@ def main(argv: list[str] | None = None) -> int:
             tier="screen" if getattr(args, "screen", False) else "measure",
             accelerator=accelerator_id(),
             instruments=instruments(),
+            where=where_id(),
             cases_digest=cases_digest(cases))
         (outdir / "results.json").write_text(json.dumps(
             {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -544,6 +545,17 @@ def instruments() -> dict:
     except Exception:  # noqa: BLE001
         pass
     return {k: v for k, v in found.items() if v}
+
+
+def where_id() -> str:
+    """The receipt's `where` field, empty if it cannot be told. Same rule as
+    accelerator_id: a receipt must not fail a finished run, and an unknown
+    place is read as unknown rather than as a mismatch."""
+    try:
+        from harness import machine
+        return machine.where()
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def accelerator_id() -> str:
@@ -592,6 +604,7 @@ def compare_runs(files: list[str]) -> int:
                                   tier=raw.get("tier", "measure"),
                                   accelerator=raw.get("accelerator", ""),
                                   instruments=raw.get("instruments") or {},
+                                  where=raw.get("where", ""),
                                   cases_digest=raw.get("cases_digest", "")),
                        data.get("summary") or {}))
 

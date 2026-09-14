@@ -57,6 +57,25 @@ judge:
   enabled: false
   gateway: ""   # http://host.docker.internal:4000 on Docker Desktop
 
+measure:
+  # WHERE THE WORK EXECUTES, which is three answers and not the GPU boolean
+  # below. `gpu.enabled` asks whether this pod has a card; this asks who does
+  # the work, and the third answer is the one a boolean cannot hold.
+  #
+  #   in-pod    the container itself
+  #   gpu-node  a node with a card the scheduler can see
+  #   host      a machine outside the cluster entirely, which is every Metal
+  #             lane: Metal is a macOS userspace API, and the Linux VM behind
+  #             Docker Desktop has no /dev/dri and no nvidia device to pass
+  #             through. A pod can hold such a lane's identity and ask `lh` on
+  #             the host to do the work; the dispatch half of that is not
+  #             built, and the chart refuses to render it rather than
+  #             pretending. Issue #170.
+  #
+  # It reaches the receipt as LOCALHARNESS_WHERE, and comparable() refuses to
+  # rank two runs across it.
+  where: gpu-node
+
 gpu:
   # OFF by default. On a machine with no card, a GPU workload is not slow, it
   # is unschedulable and silently Pending.

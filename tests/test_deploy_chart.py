@@ -368,3 +368,87 @@ def test_every_workload_that_reaches_github_carries_a_token():
         names = {e["name"] for e in c.get("env", [])}
         assert "GH_TOKEN" in names, (
             f"{w['metadata']['name']} runs discover and cannot authenticate")
+
+
+# ---- where the work executes, which is three answers ---------------------
+
+def _env(pod: dict) -> dict:
+    return {e["name"]: e.get("value", "")
+            for e in pod["containers"][0].get("env", [])}
+
+
+@_HELM_MISSING
+def test_every_workload_says_where_its_work_executes():
+    """A receipt that cannot name the place reads as "the cluster measured it"
+    whether the cluster measured it or asked somebody else to."""
+    for w, pod in pods(render("values-gpu-host.yaml")):
+        if tier(w, pod) == "store":
+            continue
+        got = _env(pod).get("LOCALHARNESS_WHERE", "")
+        assert got, f"{w['metadata']['name']} names no place"
+        assert got in ("in-pod", "gpu-node", "host"), got
+
+
+@_HELM_MISSING
+def test_the_cheap_tiers_say_in_pod_and_the_gpu_tier_does_not():
+    """The two are not the same exam: one has a card in view and one does
+    not, and comparable() refuses to rank across them."""
+    where = {tier(w, pod): _env(pod).get("LOCALHARNESS_WHERE")
+             for w, pod in pods(render("values-gpu-host.yaml"))}
+    assert where["sweep"] == "in-pod"
+    assert where["inspect"] == "in-pod"
+    assert where["measure"] == "gpu-node"
+
+
+@_HELM_MISSING
+def test_a_place_the_chart_cannot_deliver_is_refused_rather_than_rendered():
+    """`host` means a pod holding a lane's identity while `lh` outside the
+    cluster does the work. The receipt half exists and the dispatch half does
+    not, so rendering it would produce a pod that measures the pod and labels
+    it the host -- a part's cost reported as the whole's."""
+    argv = ["helm", "template", "lh", str(CHART),
+            "-f", str(CHART / "values-gpu-host.yaml"), "--set", "measure.where=host"]
+    proc = subprocess.run(argv, capture_output=True, text=True)
+    assert proc.returncode != 0
+    assert "dispatch half is not" in proc.stderr
+
+
+@_HELM_MISSING
+def test_a_gpu_job_that_claims_to_run_in_a_pod_is_refused():
+    """The negative half: the guard must fire on the contradiction too, or it
+    only catches the case its author was thinking about."""
+    argv = ["helm", "template", "lh", str(CHART),
+            "-f", str(CHART / "values-gpu-host.yaml"),
+            "--set", "measure.where=in-pod"]
+    proc = subprocess.run(argv, capture_output=True, text=True)
+    assert proc.returncode != 0
+    assert "no card in view" in proc.stderr
+
+
+@_HELM_MISSING
+def test_a_place_nothing_recognises_is_refused_by_the_schema():
+    argv = ["helm", "template", "lh", str(CHART), "--set", "measure.where=laptop"]
+    proc = subprocess.run(argv, capture_output=True, text=True)
+    assert proc.returncode != 0
+    assert "must be one of" in proc.stderr
+
+
+def test_the_readme_accounts_for_every_profile_the_chart_ships():
+    """A profile added without a row reads as one nobody thought about, and a
+    row left behind after a profile goes reads as a cluster somebody tried.
+    No helm needed: this is a question about two files."""
+    readme = (REPO / "README.md").read_text(encoding="utf-8")
+    shipped = {p.name for p in CHART.glob("values-*.yaml")}
+    assert shipped == set(PROFILES), (
+        f"the chart ships {sorted(shipped)} and this suite tests "
+        f"{sorted(PROFILES)}")
+    for name in shipped:
+        assert name in readme, f"{name} is shipped and the README never says so"
+    # AND EACH ONE SAYS WHICH IT IS. "rendered" is not a synonym for "works",
+    # and the whole point of the table is that a reader can tell them apart.
+    for line in readme.splitlines():
+        for name in shipped:
+            if f"`{name}`" in line:
+                assert "RUN" in line or "RENDERED" in line, (
+                    f"{name} is listed with no status: say whether anything "
+                    f"has ever run it")

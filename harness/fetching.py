@@ -104,7 +104,7 @@ def queued(conn, tiers=FETCHABLE_TIERS, kind: str = FETCHABLE_KIND,
     unmeasurable by construction. Issue #81.
     """
     rows = conn.execute("""
-        SELECT p.name, p.resolved, p.kind, p.lane,
+        SELECT p.name, p.resolved, p.kind, p.lane, p.registry,
                (SELECT v.outcome FROM verdicts v WHERE v.proposal_id = p.id
                  ORDER BY v.id DESC LIMIT 1) AS outcome,
                (SELECT v.tier FROM verdicts v WHERE v.proposal_id = p.id
@@ -126,6 +126,12 @@ def queued(conn, tiers=FETCHABLE_TIERS, kind: str = FETCHABLE_KIND,
     out = [dict(r) for r in rows
            if r["outcome"] == "queued" and r["tier"] in tiers
            and (not kind or r["kind"] == kind)
+           # snapshot_download wants a HuggingFace id, and this queue once held
+           # GitHub repo names: every one of them 401'd. `kind` was the only
+           # thing standing between the two, and the store now says outright
+           # which registry a name belongs to. An empty registry is a row from
+           # before that column, so `kind` still answers for it.
+           and r["registry"] != ms.GITHUB
            and not have(r["resolved"] or r["name"])]
     return sorted(out, key=lambda r: -(r["score"] or 0))
 

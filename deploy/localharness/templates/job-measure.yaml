@@ -1,4 +1,10 @@
 {{- if .Values.gpu.enabled }}
+{{- if eq .Values.measure.where "host" }}
+{{- fail "measure.where=host means a pod holding a lane's identity while `lh` on a machine outside the cluster does the work. The receipt half of that is built and the dispatch half is not, so this would render a pod that measures the pod and labels it the host" }}
+{{- end }}
+{{- if eq .Values.measure.where "in-pod" }}
+{{- fail "measure.where=in-pod beside gpu.enabled says the work runs in a container with no card in view. Pick gpu-node, or turn the GPU off" }}
+{{- end }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -36,6 +42,7 @@ spec:
           args: ["--", "python", "-m", "evals.run", "--modality", "image"]
           env:
             {{- include "localharness.storeEnv" . | nindent 12 }}
+            {{- include "localharness.whereEnv" (list . .Values.measure.where) | nindent 12 }}
           resources:
             limits:
               nvidia.com/gpu: {{ .Values.gpu.count }}

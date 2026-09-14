@@ -145,3 +145,47 @@ def test_every_store_function_works_against_a_real_postgres():
     memory_store.link(conn, "t/live", "t/live", "self", "")
     conn.commit()
     memory_store.traverse(conn, "t/live", depth=2)
+
+
+@pytest.mark.postgres
+def test_the_registry_column_and_its_migration_run_on_a_real_postgres():
+    """Issue #167 added a column to a table the DDL only knows how to CREATE,
+    so the migration has to ALTER -- and asking which columns exist is the one
+    thing the two backends genuinely cannot share (PRAGMA vs information_schema).
+    A migration exercised only on SQLite is a migration untested where it runs.
+
+        make test-postgres
+    """
+    import os
+    if os.environ.get(store.BACKEND_ENV) != store.POSTGRES:
+        pytest.skip("set LOCALHARNESS_STORE=postgres and point PG* at a database")
+    conn = memory_store.connect()
+    # Verified by COLUMN EXISTENCE rather than by the version stamp: the stamp
+    # says what the code believes, the column says what the database has.
+    assert "registry" in memory_store._columns(conn, "proposals")
+    memory_store.record(conn, memory_store.Seen(
+        name="t/model", source="feed", resolved="t/model",
+        url="https://huggingface.co/t/model",
+        registry=memory_store.HUGGINGFACE))
+    memory_store.record(conn, memory_store.Seen(
+        name="t/tool", source="feed", resolved="t/tool",
+        url="https://github.com/t/tool", registry=memory_store.GITHUB))
+    conn.commit()
+    assert "t/model" in memory_store.pending(conn, registry=memory_store.HUGGINGFACE)
+    assert "t/model" not in memory_store.pending(conn, registry=memory_store.GITHUB)
+    assert memory_store.by_registry(conn)[memory_store.HUGGINGFACE] >= 1
+    # rowcount through the Postgres cursor wrapper, which SQLite gave for free.
+    assert memory_store._backfill_registry(conn) >= 0
+
+    # AND THE ALTER ITSELF, which a fresh database never reaches: the DDL
+    # creates the column, so only a store that predates it takes this path.
+    # Put the database back into that state and migrate it forward.
+    conn.execute("ALTER TABLE proposals DROP COLUMN registry")
+    conn.execute("UPDATE meta SET value = '2' WHERE key = 'schema'")
+    conn.commit()
+    assert "registry" not in memory_store._columns(conn, "proposals")
+    memory_store._migrate(conn)
+    assert "registry" in memory_store._columns(conn, "proposals")
+    got = conn.execute("SELECT registry FROM proposals WHERE name = 't/tool'"
+                       ).fetchone()["registry"]
+    assert got == memory_store.GITHUB, "the sighting's URL says which registry"

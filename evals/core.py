@@ -427,6 +427,13 @@ class Receipt:
     #: different OCR engines. Those are two graders by exactly the argument
     #: that already disqualifies PickScore against HPSv2.
     instruments: dict = field(default_factory=dict)
+    #: WHERE THE WORK EXECUTED: in-pod, gpu-node, or a host outside the cluster
+    #: (harness.machine.WHERE). A pod that dispatches to a host is a different
+    #: exam from a pod that runs the work, and without this a result reads as
+    #: "the cluster measured it" when the cluster only asked -- this project's
+    #: own part's-cost-reported-as-the-whole's. Empty for runs written before
+    #: this existed. Issue #170.
+    where: str = ""
     #: What the cases SAID, not what they were called. `case_ids` are names,
     #: and a name survives every edit to the thing it names: change
     #: fox-snow.yaml from 512 to 1024, or rewrite its prompt, and the id, the
@@ -442,6 +449,7 @@ class Receipt:
                 "gateway": self.gateway, "adherence": self.adherence,
                 "tier": self.tier, "accelerator": self.accelerator,
                 "instruments": dict(self.instruments),
+                "where": self.where,
                 "cases_digest": self.cases_digest}
 
 
@@ -481,6 +489,10 @@ def comparable(a: Receipt, b: Receipt) -> tuple[bool, str]:
       * `adherence` -- PickScore and HPSv2 are two graders.
       * `instruments` -- so is an OCR engine, and so is a peak-memory method.
         Compared only where both runs name the same instrument.
+      * `where` -- a pod that dispatches to a host measured a host, and a pod
+        that ran the work measured a pod. Same argument as the accelerator,
+        one level out: the scheduler, the memory ceiling and the queue are all
+        different, and only one of the two has a card it can see.
 
     OUT, each for a stated reason:
       * TIMING AND MEMORY. They are outputs of the run, not properties of the
@@ -528,6 +540,9 @@ def comparable(a: Receipt, b: Receipt) -> tuple[bool, str]:
         return False, (f"different accelerator: {a.accelerator} vs "
                        f"{b.accelerator}. Two machines, and each lane has its "
                        f"own tool on each")
+    if a.where and b.where and a.where != b.where:
+        return False, (f"different place: {a.where} vs {b.where}. One of these "
+                       f"ran the work and the other asked somebody else to")
     # ONLY THE INSTRUMENTS BOTH RUNS NAME. A run that recorded no OCR engine is
     # not thereby different from one that did, and adding a fourth instrument
     # later must not retroactively invalidate every result on disk. Same rule

@@ -89,6 +89,47 @@ class Machine:
                 f"[{', '.join(sorted(self.runtimes))}]")
 
 
+#: WHERE A LANE'S WORK EXECUTES, which is three answers rather than the GPU
+#: boolean the chart started with. Issue #170.
+#:
+#:   in-pod    the container itself: sweep, inspect, the judge's caller
+#:   gpu-node  a node carrying a card the scheduler can see
+#:   host      a machine outside the cluster entirely, which is every Metal
+#:             lane -- Metal is a macOS userspace API, the Linux VM behind
+#:             Docker Desktop has no /dev/dri and no nvidia device, and there
+#:             is no passthrough to add. A pod can hold such a lane's identity
+#:             and ask `lh` on the host to do the work, which is the pattern
+#:             the judge tier already uses.
+IN_POD, GPU_NODE, HOST = "in-pod", "gpu-node", "host"
+WHERE = (IN_POD, GPU_NODE, HOST)
+WHERE_ENV = "LOCALHARNESS_WHERE"
+
+
+def where(environ=None, machine=None) -> str:
+    """Where this process's work runs. Declared if the environment says so.
+
+    A POD THAT DISPATCHES TO A HOST IS A DIFFERENT EXAM FROM A POD THAT RUNS
+    THE WORK, so the declaration has to win: nothing about the container can
+    tell you that the Metal work happened on somebody's desk. Inference only
+    covers the case where nobody said.
+    """
+    import os
+    e = os.environ if environ is None else environ
+    declared = (e.get(WHERE_ENV) or "").strip().lower()
+    if declared:
+        if declared not in WHERE:
+            raise ValueError(
+                f"{WHERE_ENV}={declared!r} is not one of {', '.join(WHERE)}. "
+                f"A receipt that names a place nothing recognises is worse "
+                f"than one that names none.")
+        return declared
+    # No service account, no scheduler: this is somebody's machine.
+    if not e.get("KUBERNETES_SERVICE_HOST"):
+        return HOST
+    acc = (machine if machine is not None else detect()).accelerator
+    return GPU_NODE if acc.kind == "discrete" else IN_POD
+
+
 @lru_cache(maxsize=1)
 def detect() -> Machine:
     """This machine. Cached: the probes shell out, and the answer does not

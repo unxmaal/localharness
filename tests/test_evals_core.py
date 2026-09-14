@@ -1306,3 +1306,38 @@ def test_the_digest_survives_a_round_trip_through_the_receipt():
     does not survive that is a field nobody ever compares."""
     digest = core.cases_digest([_case()])
     assert _receipt(digest).as_dict()["cases_digest"] == digest
+
+
+# ---- where the work executed, which the accelerator cannot say -------------
+
+def test_a_pod_that_ran_the_work_and_a_pod_that_asked_are_not_one_table():
+    """Issue #170. A pod dispatching to a host measured a host; a pod running
+    the work measured a pod. Without this a result reads as "the cluster
+    measured it" when the cluster only asked."""
+    from evals.core import Receipt, comparable
+    pod = Receipt("image", ("fox",), 3, {}, "", where="in-pod")
+    host = Receipt("image", ("fox",), 3, {}, "", where="host")
+    ok, why = comparable(pod, host)
+    assert not ok
+    assert "in-pod" in why and "host" in why
+
+
+def test_the_same_place_is_one_table():
+    from evals.core import Receipt, comparable
+    a = Receipt("image", ("fox",), 3, {}, "", where="gpu-node")
+    assert comparable(a, a)[0]
+
+
+def test_a_run_that_names_no_place_is_still_comparable():
+    """Same rule as the accelerator: every receipt written before this field
+    existed carries none, and refusing those invalidates the whole record."""
+    from evals.core import Receipt, comparable
+    placed = Receipt("image", ("fox",), 3, {}, "", where="host")
+    old = Receipt("image", ("fox",), 3, {}, "")
+    assert comparable(placed, old)[0]
+
+
+def test_the_place_survives_the_round_trip_through_a_receipt():
+    from evals.core import Receipt
+    assert Receipt("image", ("fox",), 3, {}, "",
+                   where="gpu-node").as_dict()["where"] == "gpu-node"

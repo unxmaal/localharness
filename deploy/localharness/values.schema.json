@@ -61,6 +61,19 @@
           "type": "boolean"
         }
       }
+    },
+    "measure": {
+      "type": "object",
+      "properties": {
+        "where": {
+          "description": "where the work executes; the receipt carries it and comparable() refuses across it",
+          "enum": [
+            "in-pod",
+            "gpu-node",
+            "host"
+          ]
+        }
+      }
     }
   }
 }

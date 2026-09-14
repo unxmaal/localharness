@@ -25,6 +25,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from harness import memory_store as ms
+
 GIB = 1024 ** 3
 #: Weights above this cannot run here. 32 GB unified, and macOS gives the GPU
 #: roughly 70-75% of it by default, so the honest ceiling is well under 32.
@@ -159,9 +161,20 @@ class InspectError(RuntimeError):
     """The candidate could not be read. Never a verdict about the candidate."""
 
 
+class Gone(InspectError):
+    """The registry says this id does not exist, as opposed to could not be
+    reached. The two need opposite handling: a 404 settles a candidate, an
+    unreachable registry must settle nothing, or one bad afternoon marks a
+    sweep's worth of real models as broken."""
+
+
 @dataclass
 class Fit:
     repo: str
+    #: Which registry answered for this name, as memory_store spells it. A
+    #: source clone and a model card are two different readings and the verdict
+    #: rules differ between them, so the Fit says which one it is.
+    registry: str = "github"
     verdict: str = "unknown"
     why: str = ""
     weights: dict[str, int] = field(default_factory=dict)
@@ -355,6 +368,70 @@ def hf_size(model_id: str, fetch=None, cache: dict | None = None) -> int:
     return hf_facts(model_id, fetch=fetch, cache=cache)["size"]
 
 
+#: What the registry is asked for one model. `blobs=true` is what carries the
+#: per-file sizes; without it `siblings` is a list of names and nothing can be
+#: weighed.
+MODEL_URL = "https://huggingface.co/api/models/{model_id}?blobs=true"
+
+
+def hf_model(model_id: str, fetch=None) -> dict:
+    """One model's registry record, or a raised reason it has none.
+
+    Gone and InspectError are kept apart on purpose: `gh api` taught this the
+    same lesson (github.NotFound), and the cost of confusing them is a sweep
+    that empties itself during an outage.
+    """
+    from harness import feeds
+    if fetch is None:
+        def fetch(url):
+            return feeds.fetch(url, retries=SIZE_RETRIES, delay=SIZE_DELAY)
+    try:
+        return json.loads(fetch(MODEL_URL.format(model_id=model_id)))
+    except Exception as exc:  # noqa: BLE001 - classified, then re-raised
+        detail = str(exc)
+        if "HTTP 404" in detail:
+            raise Gone(f"{model_id}: the registry has no model by that name")
+        # 401 is a GATED model, which exists. Settling it as missing would
+        # throw away exactly the candidates that need a licence click.
+        raise InspectError(f"{model_id}: {detail[:160]}") from exc
+
+
+def inspect_model(model_id: str, *, data: dict | None = None, fetch=None,
+                  ceiling: int | None = None, dead_days: int = DEAD_DAYS,
+                  machine=None) -> Fit:
+    """Read a HuggingFace model card and say whether it can run here.
+
+    THE OTHER HALF OF THE TIER. `inspect()` clones a source tree from GitHub,
+    which is the only thing it can do, and the sweep proposes HuggingFace ids
+    exclusively -- so 227 of 235 candidates came back 404 from an API that was
+    never going to have heard of them. Issue #167.
+
+    Nothing is cloned and nothing is downloaded: one registry call, the same
+    one hf_facts() already makes, read for size, lane and recency.
+    """
+    data = hf_model(model_id, fetch=fetch) if data is None else data
+    fit = Fit(repo=model_id, registry=ms.HUGGINGFACE)
+    sizes = [s.get("size") or 0 for s in (data.get("siblings") or [])]
+    total = sum(sizes)
+    if total > 0:
+        fit.weights[model_id] = total
+        fit.largest = fit.smallest = total
+    else:
+        # Not zero. A card that lists no blob sizes is unmeasured, and an
+        # unknown size reported as zero reads as "small enough".
+        fit.unsized.append(model_id)
+    fit.headline = [model_id]
+    lane = lane_for(data)
+    if lane:
+        fit.lanes[model_id] = lane
+    tags = [str(t).lower() for t in (data.get("tags") or [])]
+    fit.mlx = (data.get("library_name") or "").lower() == "mlx" or "mlx" in tags
+    fit.last_commit = (data.get("lastModified") or "").strip()
+    fit.description = ", ".join(
+        [t for t in [data.get("pipeline_tag") or ""] + tags[:6] if t])[:200]
+    return decide(fit, ceiling=ceiling, dead_days=dead_days, machine=machine)
+
+
 def decide(fit: Fit, ceiling: int | None = None, dead_days: int = DEAD_DAYS,
            now: float | None = None, machine=None) -> Fit:
     """Turn what was read into one verdict and the reason for it.
@@ -445,7 +522,10 @@ def decide(fit: Fit, ceiling: int | None = None, dead_days: int = DEAD_DAYS,
                 return fit
         except ValueError:
             pass
-    if not fit.entry_points:
+    # A WEIGHTS REPO HAS NOTHING TO CALL BY CONSTRUCTION, so this rule belongs
+    # to source trees only. Applying it to a model card refuses every model in
+    # the registry for not being a program.
+    if not fit.entry_points and fit.registry != ms.HUGGINGFACE:
         fit.verdict, fit.why = "no-entry-point", "nothing here to call"
         return fit
     if fit.unsized and not fit.weights:
