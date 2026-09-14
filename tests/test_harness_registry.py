@@ -357,3 +357,53 @@ def test_the_same_card_reads_differently_on_a_machine_without_the_runtime():
     does not. Both are correct answers to different questions."""
     assert _fit(runtimes=("mlx", "cpu")).verdict == "fits"
     assert _fit(runtimes=("cuda", "cpu")).verdict == "needs-mlx"
+
+
+# --- what the registry says the thing IS (issue #175) ---------------------
+
+def test_a_card_description_says_what_bears_on_measuring_it():
+    got = ins.card_description({
+        "pipeline_tag": "text-to-image", "library_name": "mflux",
+        "tags": ["mlx", "license:apache-2.0", "en", "safetensors",
+                 "base_model:quantized:black-forest-labs/FLUX.2-klein-9B"],
+        "siblings": [{"size": 3 * 1024 ** 3}]})
+    assert "task text-to-image" in got
+    assert "served by mflux" in got
+    assert "built from black-forest-labs/FLUX.2-klein-9B" in got
+    assert "3.0 GiB" in got
+    # LICENCES, REGIONS AND FILE FORMATS are facts about paperwork and
+    # packaging, and a rubric handed them ranks on noise.
+    assert "license" not in got and "safetensors" not in got
+
+
+def test_popularity_is_not_carried_into_the_description():
+    """A genuine innovation is by definition under-discussed at the moment it
+    matters most, so a rubric handed a download count ranks the most-downloaded
+    re-upload above anything new."""
+    got = ins.card_description({"pipeline_tag": "text-generation",
+                                "downloads": 9_000_000, "likes": 4_200,
+                                "tags": [], "siblings": []})
+    assert "9" not in got and "likes" not in got and "downloads" not in got
+
+
+def test_the_description_reaches_the_store_and_the_judge_can_read_it(db):
+    """It is a property of the THING, not of one sighting: a sighting's `why`
+    is what one source said on one day, and for a prose-swept id it is empty."""
+    see(db, "org/model", registry=ms.HUGGINGFACE, resolved="org/model",
+        description="task text-to-image; 3.0 GiB of weights")
+    ms.decide(db, "org/model", "queued", tier=ms.INSPECT, detail="fits")
+    assert ms.judgeable(db)[0]["description"].startswith("task text-to-image")
+
+
+def test_a_store_written_before_descriptions_existed_still_opens(tmp_path):
+    """Schema 4 adds a column to a table the DDL only knows how to create."""
+    path = tmp_path / "old.db"
+    old = _v2_store(path)
+    _insert(old, "org/model", "repo", "https://huggingface.co/org/model")
+    old.close()
+    conn = ms.connect(path)
+    cols = ms._columns(conn, "proposals")
+    row = conn.execute("SELECT description FROM proposals").fetchone()
+    conn.close()
+    assert "description" in cols
+    assert row["description"] == ""

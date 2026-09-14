@@ -706,7 +706,13 @@ def from_feeds(sources=None, reader=None, verify=True,
                     registry=ms.HUGGINGFACE,
                     # `repo` is the linked id, or the id a prose name resolved
                     # to. Either way it is the verified thing, so keep it.
-                    lane=src.lane, resolved=repo))
+                    #
+                    # A SOURCE'S `all` IS ITS COVERAGE, NOT THE CANDIDATE'S
+                    # LANE. Recording it as one made 243 of 323 proposals claim
+                    # membership of a lane that does not exist, and since a
+                    # recorded lane is never overwritten, the real one that the
+                    # source tier reads off a model card could never land.
+                    lane="" if src.lane == "all" else src.lane, resolved=repo))
             if repo in settled:
                 suppressed += 1
                 drop("settled", repo)

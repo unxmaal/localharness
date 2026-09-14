@@ -778,9 +778,23 @@ those run in the cluster today:
 | judge | scores what inspect queued, against a rubric | the pod asks, a model outside the cluster answers |
 
 The judge refuses to score at all unless its control separates known-good from
-known-bad on every run. A rubric that does not discriminate produces numbers
+known-bad on every run, and the control has to be shaped like the data that
+tier will actually judge. A rubric that does not discriminate produces numbers
 rather than a ranking, and a tier scoring a queue unattended has nobody present
 to doubt it.
+
+That refusal fires today. Asked to rank model candidates the judge floors every
+one of them, because the rubric rewards a measured claim and a registry card
+has never carried one. So the queue is ordered by arithmetic instead:
+
+```bash
+lh discover --queue        # what a screen would teach us, best first
+```
+
+It ranks by the value of what a screen would find out, not by a guess at which
+candidate wins: a lane with no run receipt, a thing seen repeatedly, something
+that is not a requantised copy of a model already being served, small enough to
+try cheaply. Which candidate is better is what the tiers below it are for.
 
 ### Where a lane's work executes
 

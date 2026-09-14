@@ -288,7 +288,8 @@ CONTROL = [
 
 
 def control_repeated(rubric: Rubric | None = None, *, runs: int = 3,
-                     gateway: str = "", complete=None) -> dict:
+                     gateway: str = "", complete=None,
+                     shape: str = "described") -> dict:
     """Run the control several times and report the SPREAD, not one gap.
 
     The judge samples and nothing pins a seed, so a single control run is one
@@ -300,30 +301,105 @@ def control_repeated(rubric: Rubric | None = None, *, runs: int = 3,
 
     Separates only if EVERY run separates. One pass out of three is not a pass.
     """
-    got = [control(rubric, gateway=gateway, complete=complete)
+    got = [control(rubric, gateway=gateway, complete=complete, shape=shape)
            for _ in range(max(1, runs))]
     gaps = [g["gap"] for g in got]
     return {"runs": len(got), "gaps": gaps, "gap_min": min(gaps),
             "gap_max": max(gaps), "spread": max(gaps) - min(gaps),
             "separates": all(g["separates"] for g in got),
             "separated_in": sum(1 for g in got if g["separates"]),
+            "shape": shape,
             "rubric": got[0]["rubric"], "model": got[0]["model"],
             "rows": got[0]["rows"]}
 
 
+#: THE SAME QUESTION ASKED OF THE DATA THE STORE ACTUALLY HOLDS: a bare
+#: `org/name` with no description, which is what a sweep proposes and what the
+#: source tier queues. Outcomes are this project's own measurements.
+#:
+#: The descriptions above are what the rubric was built against, and a control
+#: made only of them cannot see a collapse that happens on bare ids -- which is
+#: exactly what #175 found, twenty-five candidates at 3/10 behind a control
+#: separating at +7. See RULE #211: a control must be shaped like the data the
+#: judge will meet.
+CONTROL_BARE = [
+    # The engine the STT lane measured and chose, on WER and latency (#57).
+    ("mlx-community/parakeet-tdt-0.6b-v2", "won"),
+    # What the TTS lane serves.
+    ("mlx-community/Kokoro-82M-bf16", "won"),
+    # The text model that won the svg three-way at 8/9.
+    ("mlx-community/Qwen2.5-7B-Instruct-4bit", "won"),
+    # Measured against parakeet in the same lane and lost it.
+    ("mlx-community/whisper-large-v3-mlx", "lost"),
+    # local-small: 0/9, never closed a tag.
+    ("mlx-community/Qwen2.5-0.5B-Instruct-4bit", "lost"),
+    # Refused on the working set: 16 GB of weights against a 24 GB ceiling (#12).
+    ("mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit", "lost"),
+]
+
+#: THE SAME SIX MODELS, described the way the store now describes them: from
+#: their own registry card, via inspect.card_description(). Frozen here rather
+#: than fetched so a gate never depends on somebody else's afternoon; they were
+#: read from the registry on 2026-09-14.
+#:
+#: This is the shape a tier reading the store must gate on, because it is the
+#: shape that tier feeds the judge.
+CONTROL_CARDED = [
+    ("mlx-community/parakeet-tdt-0.6b-v2",
+     "task automatic-speech-recognition; served by mlx; tagged mlx, "
+     "automatic-speech-recognition, speech, audio, FastConformer, Conformer; "
+     "built from nvidia/parakeet-tdt-0.6b-v2; 2.3 GiB of weights", "won"),
+    ("mlx-community/Kokoro-82M-bf16",
+     "task text-to-speech; served by mlx; tagged mlx, text-to-speech; "
+     "built from yl4579/StyleTTS2-LJSpeech; 0.4 GiB of weights", "won"),
+    ("mlx-community/Qwen2.5-7B-Instruct-4bit",
+     "task text-generation; served by mlx; tagged mlx, qwen2, chat, "
+     "text-generation; built from Qwen/Qwen2.5-7B; 4.0 GiB of weights", "won"),
+    ("mlx-community/whisper-large-v3-mlx",
+     "task automatic-speech-recognition; served by mlx; tagged mlx, whisper, "
+     "automatic-speech-recognition; 2.9 GiB of weights", "lost"),
+    ("mlx-community/Qwen2.5-0.5B-Instruct-4bit",
+     "task text-generation; served by mlx; tagged mlx, qwen2, chat, "
+     "text-generation; built from Qwen/Qwen2.5-0.5B; 0.3 GiB of weights",
+     "lost"),
+    ("mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit",
+     "task text-generation; served by mlx; tagged mlx, qwen3_moe, "
+     "text-generation, 4-bit; built from Qwen/Qwen3-30B-A3B-Instruct-2507; "
+     "16.0 GiB of weights", "lost"),
+]
+
+#: Which control shape a caller means. A tier must gate on the shape of ITS OWN
+#: input: the store holds bare ids, so a tier reading the store that gates on
+#: the described control is answering a question about different data.
+SHAPES = {"described": CONTROL, "bare": CONTROL_BARE,
+          "carded": CONTROL_CARDED}
+
+
 def control(rubric: Rubric | None = None, *, gateway: str = "",
-            complete=None) -> dict:
+            complete=None, shape: str = "described") -> dict:
     """Score known-good against known-bad and report whether they separate.
 
     Run this BEFORE quoting any figure from this judge. If the classes overlap,
     the rubric does not discriminate on this data and no ranking may be drawn
     from it, however sensible the scores look individually.
+
+    `shape` picks WHICH known set, and it is not a detail: the two differ only
+    in how much the judge is shown, which is the axis the instrument actually
+    fails on.
     """
     rubric = rubric or load()
+    if shape not in SHAPES:
+        raise JudgeError(f"unknown control shape {shape!r}; "
+                         f"one of {', '.join(sorted(SHAPES))}")
     rows = []
-    for name, why, outcome in CONTROL:
-        s, reason = score(describe(name, why, inspected=CONTROL_INSPECTED,
-                                   platform="MLX-native"),
+    for item in SHAPES[shape]:
+        name, why, outcome = item if len(item) == 3 else (item[0], "", item[1])
+        # THE SAME FIELDS A STORE ROW PRODUCES, so the only thing that varies
+        # between the two shapes is the description. A control that also
+        # changed the provenance fields would be measuring two things at once.
+        s, reason = score(describe(name, why, source="recap", times_seen=1,
+                                   inspected=CONTROL_INSPECTED,
+                                   platform="MLX-native" if why else ""),
                           rubric, gateway=gateway, complete=complete)
         rows.append({"name": name, "outcome": outcome, "score": s,
                      "why": reason})
