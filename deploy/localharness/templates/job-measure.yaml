@@ -43,7 +43,29 @@ spec:
         - name: measure
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          args: ["--", "python", "-m", "evals.run", "--modality", "image"]
+          args:
+            - "--"
+            - "python"
+            - "-m"
+            - "evals.run"
+            - "--modality"
+            - {{ .Values.measure.lane | quote }}
+            {{- if .Values.measure.candidate }}
+            - "--candidates"
+            - {{ .Values.measure.candidate | quote }}
+            {{- else }}
+            {{/*
+              BUILT AROUND THE CURRENT WINNER, and it reads it rather than
+              being told it. A candidate baked into this chart would be a
+              third copy of an answer that already lives in the run receipts
+              and in cli.py's constants -- and the whole point of #148 phase 5
+              is that a pod built around a transcribed constant is built
+              around whatever was true the last time somebody edited a source
+              file. Resolution happens where the run happens; with no receipt
+              the run refuses rather than guessing.
+            */}}
+            - "--from-winners"
+            {{- end }}
           env:
             {{- include "localharness.storeEnv" . | nindent 12 }}
             {{- include "localharness.whereEnv" (list . .Values.measure.where) | nindent 12 }}

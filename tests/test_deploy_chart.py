@@ -656,3 +656,44 @@ def test_the_scanner_notices_a_flag_the_cli_does_not_have():
     parser = cli.build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args(["discover", "--judge", "--from-a-teapot"])
+
+
+# ---- a lane pod reads its winner rather than being told it (#148 phase 5) --
+
+GPU = ("--set", "gpu.enabled=true", "--set", "postgres.dev.enabled=false")
+
+
+@_HELM_MISSING
+def test_the_measure_job_reads_the_winner_rather_than_naming_one():
+    """A candidate baked into the chart would be a THIRD copy of an answer that
+    already lives in the receipts and in cli.py's constants -- and a pod built
+    around a transcribed constant is built around whatever was true the last
+    time somebody edited a source file."""
+    out = _render(*GPU)
+    assert out.returncode == 0, out.stderr
+    docs = [d for d in yaml.safe_load_all(out.stdout) if d]
+    measure = [a for a in _invocations(docs)[1] if "evals.run" in a]
+    assert measure, "the measure job rendered no run"
+    assert "--from-winners" in measure[0]
+    assert "--candidates" not in measure[0]
+
+
+@_HELM_MISSING
+def test_a_pinned_candidate_is_possible_and_deliberate():
+    """Reading the winner is the default, not the only option: pinning one is
+    a decision somebody can make, and then the chart says so explicitly rather
+    than both."""
+    out = _render(*GPU, "--set", "measure.candidate=mflux:flux2-klein-4b")
+    docs = [d for d in yaml.safe_load_all(out.stdout) if d]
+    measure = [a for a in _invocations(docs)[1] if "evals.run" in a][0]
+    assert "--candidates" in measure
+    assert "mflux:flux2-klein-4b" in measure
+    assert "--from-winners" not in measure
+
+
+@_HELM_MISSING
+def test_the_lane_the_measure_job_runs_is_a_value_not_a_literal():
+    out = _render(*GPU, "--set", "measure.lane=video")
+    docs = [d for d in yaml.safe_load_all(out.stdout) if d]
+    measure = [a for a in _invocations(docs)[1] if "evals.run" in a][0]
+    assert measure[measure.index("--modality") + 1] == "video"

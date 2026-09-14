@@ -420,6 +420,11 @@ def main(argv: list[str] | None = None) -> int:
                     help=f"one of {', '.join(ALL_MODALITIES)}, or 'all'")
     ap.add_argument("--candidates", required=False,
                     help="comma-separated gateway aliases and/or engine specs")
+    ap.add_argument("--from-winners", action="store_true",
+                    help="take the candidate from what the run receipts say "
+                         "won this lane, rather than from a constant. A "
+                         "deployment built around 'the current winner' must "
+                         "read it rather than be told it")
     ap.add_argument("--gateway", default="http://127.0.0.1:4000")
     ap.add_argument("--cases", default=str(ROOT / "cases"))
     ap.add_argument("--out", default=None,
@@ -463,6 +468,12 @@ def main(argv: list[str] | None = None) -> int:
     # An engine spec contains commas, which are also the candidate separator.
     # Split on commas that start a new candidate, i.e. those followed by a
     # known engine prefix or by something with no '=' in it.
+    if getattr(args, "from_winners", False):
+        if args.candidates:
+            raise SystemExit("--from-winners and --candidates say two "
+                             "different things about what to run; pass one")
+        args.candidates = winner_for(args.modality)
+        print(f"── winner for {args.modality}: {args.candidates}", flush=True)
     candidates = split_candidates(args.candidates)
     outdir = resolve_outdir(args.out, args.modality)
     if outdir:
@@ -563,6 +574,28 @@ def swap_used_mb() -> int:
         return int(capture().get("swap_used_mb") or 0)
     except Exception:  # noqa: BLE001 - a receipt must not fail a finished run
         return 0
+
+
+def winner_for(modality: str, runs=None) -> str:
+    """The candidate the receipts say won this lane. #148 phase 5.
+
+    RAISES WHEN NOTHING MEASURED IT, and that refusal is the point. A lane pod
+    is supposed to be built around the current winner; one that silently falls
+    back to a typed constant when it cannot find a receipt is the constant
+    again, with a flag on it that makes the claim look checked.
+
+    Resolved where the RUN happens rather than templated into a chart, because
+    a value baked into a deployment is a third copy of the same answer.
+    """
+    from harness import winners
+    best = winners.beaten_in(runs) or winners.from_receipts(runs)
+    got = best.get((modality or "").strip().lower())
+    if not got:
+        raise SystemExit(
+            f"--from-winners: no run receipt names a winner for {modality!r} "
+            f"on this machine, so there is nothing to build a run around. "
+            f"Measure the lane first, or pass --candidates explicitly.")
+    return got["candidate"]
 
 
 def warn_if_swapping(swap: int | None = None, out=None) -> int:

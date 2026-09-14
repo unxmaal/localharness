@@ -31,12 +31,67 @@ def is_plain_model(candidate: str) -> bool:
     return not any(mark in candidate for mark in _COMPOSITE)
 
 
+#: HOW EACH FAMILY OF DEFAULT IS SPELLED, because the constant and the receipt
+#: key are not the same string and pretending otherwise is the identity-by-name
+#: defect this project has already paid for.
+#:
+#:   gateway alias   local-large                      -> local-large
+#:   engine spec     mflux:flux2-klein-4b             -> mflux/flux2-klein-4b-q8
+#:   speech model    mlx-community/Kokoro-82M-bf16    -> Kokoro-82M-bf16/af_sky
+#:
+#: Two of those differences are SPELLING and one is not. `:` and `/` are the
+#: same separator in two notations, and the receipt drops the org prefix a
+#: HuggingFace id carries -- both are safe to normalise. A `-q8` suffix is NOT:
+#: `flux2-klein-4b` and `flux2-klein-4b-q8` are different artifacts, and the
+#: constant naming the first while every run measured the second is a finding
+#: rather than a mismatch to smooth over.
+FAMILIES = {
+    "svg": "alias", "web": "alias", "code": "alias", "extract": "alias",
+    "image": "engine", "video": "engine",
+    "tts": "speech", "stt": "speech",
+}
+
+
+def _normal(name: str, family: str) -> str:
+    """The comparable form of a name, per family. Lowercased, because the
+    receipt and the constant disagree on case in places too."""
+    got = name.strip().lower()
+    if family == "engine":
+        got = got.replace(":", "/")
+    return got
+
+
+def matches(typed_name: str, candidate: str, family: str) -> str:
+    """"" if these are different things, else "exact" or "quantised".
+
+    `quantised` is reported rather than hidden: it means the receipts only ever
+    measured a quantisation of the thing the constant names, so the default is
+    under-specified rather than wrong. mflux hardcodes quantize=8 and the
+    candidate name does not carry it, which is how a lane default came to name
+    an artifact no run here has ever produced.
+    """
+    want = _normal(typed_name, family)
+    got = _normal(candidate, family)
+    if family == "speech":
+        # THE TWO ARE TRIMMED FROM OPPOSITE ENDS, which is the whole reason
+        # this needs saying out loud. A default is a HuggingFace id carrying an
+        # org prefix; a receipt key is a model and, for tts, the voice it used.
+        #   mlx-community/Kokoro-82M-bf16  ->  Kokoro-82M-bf16   (drop prefix)
+        #   Kokoro-82M-bf16/af_sky         ->  Kokoro-82M-bf16   (drop voice)
+        want = want.split("/")[-1]
+        got = got.split("/")[0]
+    if got == want:
+        return "exact"
+    import re as _re
+    if _re.fullmatch(_re.escape(want) + r"-q\d+", got):
+        return "quantised"
+    return ""
+
+
 def from_receipts(runs=None, plain_only: bool = True) -> dict[str, dict]:
     """The best candidate per modality, read from every run receipt on disk.
 
-    Best is the highest pass rate, ties broken by the faster median -- the same
-    order the lane table in cli.py was chosen with, so the two are comparable
-    rather than merely both being opinions.
+    Best is the lane's own metric first. See order_key().
     """
     from harness import paths
     try:
@@ -60,23 +115,68 @@ def from_receipts(runs=None, plain_only: bool = True) -> dict[str, dict]:
         for candidate, row in (data.get("summary") or {}).items():
             if plain_only and not is_plain_model(candidate):
                 continue
-            rate = float(row.get("pass_rate") or 0.0)
-            median = float(row.get("median_s") or 0.0)
-            got = {"candidate": candidate, "pass_rate": rate,
-                   "median_s": median, "total": int(row.get("total") or 0),
-                   "run": f.parent.name}
+            got = {"candidate": candidate, "key": order_key(row),
+                   "pass_rate": float(row.get("pass_rate") or 0.0),
+                   "median_s": float(row.get("median_s") or 0.0),
+                   "total": int(row.get("total") or 0), "run": f.parent.name}
             held = best.get(modality)
-            if held is None or (rate, -median) > (held["pass_rate"],
-                                                  -held["median_s"]):
+            if held is None or got["key"] > held["key"]:
                 best[modality] = got
     return best
 
 
+def order_key(row: dict) -> tuple:
+    """How good a summary row is, best LAST so `max` picks the winner.
+
+    THE LANE'S OWN METRIC COMES FIRST, and getting that wrong is not
+    hypothetical: ranking on pass rate and then latency reported that
+    parakeet-ctc had beaten parakeet-tdt-v2 in the stt lane. Both passed 300 of
+    300, and ctc has the faster median -- so on those two statistics ctc wins,
+    and on the one the lane is actually about it loses:
+
+        parakeet-tdt-0.6b-v2   wer 0.0162   median 0.135   <- adopted
+        parakeet-ctc-0.6b      wer 0.0225   median 0.116
+
+    A statistic blind to the effect under test reports a null, or worse an
+    inversion, with no visible symptom. METRIC_DIRECTION exists for exactly
+    this and says which way each metric runs; `neutral` ones are reported and
+    never ranked on.
+    """
+    from evals.core import direction_of
+
+    metrics = row.get("metrics") or {}
+    ranked = []
+    for name in sorted(metrics):
+        if direction_of(name) == "neutral":
+            continue
+        value = float(metrics[name] or 0.0)
+        ranked.append(value if direction_of(name) == "higher" else -value)
+    rate = float(row.get("pass_rate") or 0.0)
+    median = float(row.get("median_s") or 0.0)
+    # A candidate that passed less often is worse whatever its metric says: a
+    # model that fails half the cases and scores well on the rest is scoring on
+    # a different, easier subset.
+    return (rate, tuple(ranked), -median)
+
+
 def typed() -> dict[str, str]:
-    """What the CLI has written down, by the modality each default serves."""
-    from harness import cli
+    """What the code has written down, by the modality each default serves.
+
+    ALL OF THEM, not the four that happened to be in one file. The image engine
+    is the one #148 phase 5 names by hand and the one #141 and #142 are both
+    about, and it lived two modules away from the others.
+
+    The speech defaults are chosen by platform, so this reports the one THIS
+    machine would use: comparing a Mac's receipts against a Windows constant
+    would be the accelerator mistake in another costume.
+    """
+    from harness import audio, cli
     return {"svg": cli.DEFAULT_SVG_MODEL, "web": cli.DEFAULT_WEB_MODEL,
-            "code": cli.DEFAULT_CODE_MODEL, "extract": cli.DEFAULT_EXTRACT_MODEL}
+            "code": cli.DEFAULT_CODE_MODEL,
+            "extract": cli.DEFAULT_EXTRACT_MODEL,
+            "image": cli.DEFAULT_IMAGE_ENGINE,
+            "video": cli.DEFAULT_VIDEO_ENGINE,
+            "tts": audio.DEFAULT_TTS_MODEL, "stt": audio.DEFAULT_STT_MODEL}
 
 
 def beaten_in(runs=None) -> dict[str, dict]:
@@ -108,21 +208,35 @@ def beaten_in(runs=None) -> dict[str, dict]:
         receipt = data.get("receipt") or {}
         modality = (receipt.get("modality") or "").strip().lower()
         summary = data.get("summary") or {}
-        if modality not in wanted or wanted[modality] not in summary:
+        if modality not in wanted:
             continue
         if (receipt.get("tier") or "measure") != "measure":
             continue
+        family = FAMILIES.get(modality, "alias")
+        # WAS THE TYPED DEFAULT IN THIS RUN AT ALL? Spelled per family, because
+        # the constant and the receipt key are different notations for the same
+        # thing in two of the three families.
+        how = {c: matches(wanted[modality], c, family) for c in summary}
+        if not any(how.values()):
+            continue
         for candidate, row in summary.items():
-            if not is_plain_model(candidate):
+            # A composition can win a lane on merit and still not be something
+            # a --model default can be set to. An engine spec is not composite
+            # in that sense: `mflux/flux2-klein-4b-q8` IS the engine default.
+            if family != "engine" and not is_plain_model(candidate) \
+                    and not how.get(candidate):
                 continue
-            rate = float(row.get("pass_rate") or 0.0)
-            median = float(row.get("median_s") or 0.0)
+            key = order_key(row)
             held = best.get(modality)
-            if held is None or (rate, -median) > (held["pass_rate"],
-                                                  -held["median_s"]):
-                best[modality] = {"candidate": candidate, "pass_rate": rate,
-                                  "median_s": median, "run": f.parent.name,
-                                  "total": int(row.get("total") or 0)}
+            if held is None or key > held["key"]:
+                best[modality] = {
+                    "candidate": candidate, "key": key,
+                    "pass_rate": float(row.get("pass_rate") or 0.0),
+                    "median_s": float(row.get("median_s") or 0.0),
+                    "metrics": dict(row.get("metrics") or {}),
+                    "run": f.parent.name,
+                    "total": int(row.get("total") or 0),
+                    "match": how.get(candidate, ""), "family": family}
     return best
 
 
@@ -141,7 +255,16 @@ def disagreements(runs=None) -> list[dict]:
         if not got:
             out.append({"modality": modality, "typed": name,
                         "state": "unmeasured", "measured": "", "run": ""})
-        elif got["candidate"] != name:
+        elif got["match"] == "quantised":
+            # NOT a disagreement about which candidate is better. The constant
+            # names an artifact no run here has produced, because the engine
+            # quantises and the candidate name does not say so.
+            out.append({"modality": modality, "typed": name,
+                        "state": "under-specified",
+                        "measured": got["candidate"],
+                        "pass_rate": got["pass_rate"],
+                        "median_s": got["median_s"], "run": got["run"]})
+        elif not got["match"]:
             out.append({"modality": modality, "typed": name, "state": "beaten",
                         "measured": got["candidate"],
                         "pass_rate": got["pass_rate"],

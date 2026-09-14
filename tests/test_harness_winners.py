@@ -68,7 +68,88 @@ def test_the_faster_of_two_equals_wins(tmp_path):
     assert winners.beaten_in(tmp_path)["svg"]["candidate"] == "q3-4b"
 
 
-def test_this_repo_has_a_typed_default_for_every_lane_it_ships():
-    typed = winners.typed()
-    assert set(typed) == {"svg", "web", "code", "extract"}
-    assert all(typed.values())
+# --- the constant and the receipt key are different notations -------------
+
+def test_an_engine_spec_and_its_receipt_key_are_the_same_thing():
+    """`:` and `/` are one separator in two notations."""
+    assert winners.matches("mflux:flux2-klein-4b", "mflux/flux2-klein-4b",
+                           "engine") == "exact"
+
+
+def test_a_quantisation_is_reported_rather_than_smoothed_over():
+    """`flux2-klein-4b` and `flux2-klein-4b-q8` are different artifacts. The
+    engine hardcodes quantize=8 and the candidate name does not carry it, so
+    the constant names something no run here has produced."""
+    assert winners.matches("mflux:flux2-klein-4b", "mflux/flux2-klein-4b-q8",
+                           "engine") == "quantised"
+
+
+def test_a_speech_default_and_its_receipt_key_are_trimmed_from_opposite_ends():
+    """A default is a HuggingFace id carrying an org prefix; a tts receipt key
+    is a model and the voice it used."""
+    assert winners.matches("mlx-community/Kokoro-82M-bf16",
+                           "Kokoro-82M-bf16/af_sky", "speech") == "exact"
+    assert winners.matches("mlx-community/parakeet-tdt-0.6b-v2",
+                           "parakeet-tdt-0.6b-v2", "speech") == "exact"
+
+
+def test_a_different_version_is_not_the_same_model():
+    """v2 and v3 are two candidates, and the newer one measured worse here."""
+    assert winners.matches("mlx-community/parakeet-tdt-0.6b-v2",
+                           "parakeet-tdt-0.6b-v3", "speech") == ""
+
+
+def test_every_typed_default_declares_which_family_it_belongs_to():
+    assert set(winners.typed()) <= set(winners.FAMILIES)
+    assert set(winners.typed()) == {"svg", "web", "code", "extract", "image",
+                                    "video", "tts", "stt"}
+
+
+# --- the lane's own metric decides, not a statistic blind to it -----------
+
+def test_the_lanes_metric_beats_pass_rate_and_latency(tmp_path):
+    """NOT HYPOTHETICAL. Ranking on pass rate and then latency reported that
+    parakeet-ctc had beaten parakeet-tdt-v2: both passed 300 of 300 and ctc has
+    the faster median, so on those two statistics ctc wins and on WER -- the
+    one the lane is about -- it loses."""
+    receipt(tmp_path, "stt", "stt", {
+        "parakeet-tdt-0.6b-v2": {"pass_rate": 1.0, "median_s": 0.135,
+                                 "total": 300, "metrics": {"wer": 0.0162}},
+        "parakeet-ctc-0.6b": {"pass_rate": 1.0, "median_s": 0.116,
+                              "total": 300, "metrics": {"wer": 0.0225}}})
+    got = winners.beaten_in(tmp_path)["stt"]
+    assert got["candidate"] == "parakeet-tdt-0.6b-v2"
+
+
+def test_a_higher_is_better_metric_runs_the_other_way(tmp_path):
+    receipt(tmp_path, "img", "image", {
+        "mflux/a": {"pass_rate": 1.0, "median_s": 1.0,
+                    "metrics": {"adherence": 0.9}},
+        "mflux:flux2-klein-4b": {"pass_rate": 1.0, "median_s": 1.0,
+                                 "metrics": {"adherence": 0.4}}})
+    assert winners.beaten_in(tmp_path)["image"]["candidate"] == "mflux/a"
+
+
+def test_a_neutral_metric_is_never_ranked_on(tmp_path):
+    """`ink` as higher-is-better once crowned the worst candidate in the svg
+    lane, because one big filled blob marks 85% of a canvas."""
+    receipt(tmp_path, "svg", "svg", {
+        "local-large": {"pass_rate": 1.0, "median_s": 1.0,
+                        "metrics": {"ink": 0.02}},
+        "q3-4b": {"pass_rate": 1.0, "median_s": 2.0,
+                  "metrics": {"ink": 0.85}}})
+    assert winners.beaten_in(tmp_path)["svg"]["candidate"] == "local-large"
+
+
+def test_passing_less_often_loses_whatever_the_metric_says(tmp_path):
+    """A model that fails half the cases and scores well on the rest scored on
+    a different, easier subset."""
+    # A receipt key is a model, or a model and the voice it used -- never the
+    # org-prefixed id the default carries.
+    receipt(tmp_path, "stt", "stt", {
+        "parakeet-tdt-0.6b-v2": {"pass_rate": 1.0, "median_s": 1.0,
+                                 "metrics": {"wer": 0.05}},
+        "other": {"pass_rate": 0.5, "median_s": 1.0,
+                  "metrics": {"wer": 0.001}}})
+    got = winners.beaten_in(tmp_path)["stt"]
+    assert got["candidate"] == "parakeet-tdt-0.6b-v2"

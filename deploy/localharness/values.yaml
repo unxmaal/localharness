@@ -96,6 +96,12 @@ measure:
   # It reaches the receipt as LOCALHARNESS_WHERE, and comparable() refuses to
   # rank two runs across it.
   where: gpu-node
+  # Which lane this Job measures.
+  lane: image
+  # Empty means READ THE WINNER FROM THE RECEIPTS at run time (#148 phase 5).
+  # Set it only to pin a specific candidate deliberately -- a value here is a
+  # third copy of an answer that already lives in the receipts and in cli.py.
+  candidate: ""
 
 gpu:
   # OFF by default. On a machine with no card, a GPU workload is not slow, it

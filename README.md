@@ -777,6 +777,19 @@ those run in the cluster today:
 | inspect | reads a candidate's source or its model card, with nothing downloaded | `in-pod`, sharded across an Indexed Job |
 | judge | scores what inspect queued, against a rubric | the pod asks, a model outside the cluster answers |
 
+A lane's winner is read rather than typed:
+
+```bash
+lh discover --winners                     # the receipts against the constants
+python -m evals.run --modality image --from-winners
+```
+
+A deployment built around "the current winner" has to read it, or it is built
+around whatever was true the last time somebody edited a source file. With no
+receipt for that lane the run refuses instead of falling back to a constant,
+because a silent fallback is the constant again with a flag on it that makes
+the claim look checked.
+
 The judge refuses to score at all unless its control separates known-good from
 known-bad on every run, and the control has to be shaped like the data that
 tier will actually judge. A rubric that does not discriminate produces numbers
