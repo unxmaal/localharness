@@ -105,8 +105,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             shellcheck librsvg2-bin ffmpeg zsh fonts-dejavu-core time
+          # helm renders the chart in tests/test_deploy_chart.py. Installed
+          # explicitly rather than relied on from the runner image: those
+          # assertions are the whole of #148 phase 0, and without helm they
+          # SKIP, which reports green for something that never ran.
+          if ! command -v helm >/dev/null 2>&1; then
+            curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 \
+              | DESIRED_VERSION=v3.16.3 bash
+          fi
           missing=""
-          for tool in shellcheck rsvg-convert ffmpeg zsh /usr/bin/time; do
+          for tool in shellcheck rsvg-convert ffmpeg zsh /usr/bin/time helm; do
             command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
           done
           if [ -n "$missing" ]; then

@@ -19,11 +19,21 @@ postgres:
   host: ""            # empty means the in-chart service
   database: discovery
   user: discovery
-  existingSecret: ""  # a Secret with `password`; created if empty and dev is on
+  # Empty means "the conventional name", which the templates COMPUTE from the
+  # chart name. It was briefly a literal `localharness-postgres` here, and a
+  # literal does not follow nameOverride: `--set nameOverride=other` left the
+  # gh-token reference tracking the new name while this one stayed frozen, so
+  # the pods asked for a Secret nobody would create.
+  existingSecret: ""
   dev:
     # An in-chart Postgres for a laptop cluster. Never for a real one.
     enabled: false
     storage: 2Gi
+    # Only ever read when dev is on, and the chart refuses to render dev beside
+    # a GPU profile. A real cluster sets postgres.existingSecret instead, and
+    # then no Secret is rendered from here at all.
+    password: "discovery-local-only"
+
 
 sweep:
   enabled: true
