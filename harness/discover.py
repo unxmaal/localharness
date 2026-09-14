@@ -697,6 +697,13 @@ def from_feeds(sources=None, reader=None, verify=True,
                 ms.record(store, ms.Seen(
                     name=repo, source=p.source or src.name, url=p.url or src.url,
                     why=p.why[:160], relevance=p.relevance, kind=p.kind,
+                    # EVERY proposal that reaches here is a HuggingFace id: a
+                    # `tool` returned above, and everything else was either
+                    # linked from huggingface.co or resolved through
+                    # _hf_exists. `kind` cannot say so -- the crowd tier writes
+                    # kind='repo' for a GitHub repo -- and the tier that read
+                    # this asked GitHub about all of them. Issue #167.
+                    registry=ms.HUGGINGFACE,
                     # `repo` is the linked id, or the id a prose name resolved
                     # to. Either way it is the verified thing, so keep it.
                     lane=src.lane, resolved=repo))

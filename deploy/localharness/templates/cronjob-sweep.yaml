@@ -32,6 +32,7 @@ spec:
               env:
                 {{- include "localharness.storeEnv" . | nindent 16 }}
                 {{- include "localharness.githubEnv" . | nindent 16 }}
+                {{- include "localharness.whereEnv" (list . "in-pod") | nindent 16 }}
               resources:
                 {{- toYaml .Values.resources.cheap | nindent 16 }}
 {{- end }}

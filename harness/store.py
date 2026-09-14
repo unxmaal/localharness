@@ -155,6 +155,10 @@ class Cursor:
         self._cur = cur
         self.lastrowid = lastrowid
 
+    @property
+    def rowcount(self):
+        return self._cur.rowcount
+
     def fetchone(self):
         return self._cur.fetchone()
 

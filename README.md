@@ -739,6 +739,55 @@ there is no TCC: the equivalent trap on Windows is a path, not a permission --
 Git Bash reports `/d/a/...` where native Python needs `D:\a\...`, and
 `env.sh` converts before exporting `HF_HOME` for exactly that reason.
 
+## Running it in a cluster
+
+`deploy/localharness` is a Helm chart for the discovery tiers: the weekly
+sweep as a CronJob, inspect as an Indexed Job whose workers each take a slice
+of the candidates, and a measure Job that asks for a card. The store becomes
+Postgres, because several pods write to it and SQLite's locking is only as good
+as the filesystem under it. `lh` on a laptop keeps its SQLite file and needs no
+cluster at all.
+
+```bash
+make image                                   # build, and import it where the kubelet looks
+helm install lh deploy/localharness -f deploy/localharness/values-local.yaml
+```
+
+Three profiles, and what has actually happened to each:
+
+| profile | what it is | status |
+|---|---|---|
+| `values-local.yaml` | Docker Desktop's Kubernetes, no card, the in-chart Postgres | RUN: a real sweep, three sharded inspect workers, verdicts written back |
+| `values-gpu-host.yaml` | a node whose card is driven by its host | RENDERED, never run |
+| `values-eks.yaml` | a managed node pool, GPU Operator driving the card | RENDERED, never run |
+
+Rendered is not a synonym for working. Every assertion in
+`tests/test_deploy_chart.py` reads the rendered YAML, which catches a job that
+forgets to ask for a GPU and cannot catch anything about a cluster nobody here
+has.
+
+### Where a lane's work executes
+
+Not a GPU toggle, because there are three answers rather than two:
+
+| `where` | what runs it |
+|---|---|
+| `in-pod` | the container itself: sweep, inspect, the judge's caller |
+| `gpu-node` | a node with a card the scheduler can see |
+| `host` | a machine outside the cluster entirely |
+
+The third is not an exotic case. Metal is a macOS userspace API and MLX links
+against it directly, so every MLX lane belongs there: the Linux VM behind
+Docker Desktop has no `/dev/dri` and no nvidia device, and there is no flag
+that adds one. A pod can still hold such a lane's identity and ask `lh` on the
+host to do the work, which is how the judge tier already reaches the gateway.
+
+It reaches the receipt as `LOCALHARNESS_WHERE` and `evals.core.comparable()`
+refuses to rank two runs across it, because a pod that dispatched to a host
+measured a host. The dispatch half is not built, and the chart refuses to
+render `measure.where=host` rather than shipping a pod that measures itself and
+labels the result someone else's machine.
+
 ## Where things land
 
 One root, `~/localharness`, overridable with `$LOCALHARNESS_HOME`:

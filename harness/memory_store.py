@@ -17,11 +17,20 @@ from pathlib import Path
 
 from harness import paths, store
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 #: Outcomes a proposal can reach. TERMINAL ones suppress re-proposal.
 VERDICTS = ("measured", "declined", "broken", "queued", "ignored", "screened")
 TERMINAL = ("measured", "declined", "broken", "ignored")
+
+#: Where a name can be resolved. A proposal is `org/name` in both registries
+#: and the two namespaces overlap, so the string alone cannot say which one
+#: holds it: `openai/whisper-small` is a model, `openai/openai-python` a repo.
+#: Issue #167. Empty means nothing recorded it, which is not the same as
+#: neither -- an old row is unknown, and asking the wrong registry about it is
+#: how 227 of 235 candidates 404ed.
+GITHUB, HUGGINGFACE = "github", "huggingface"
+REGISTRIES = (GITHUB, HUGGINGFACE)
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -30,6 +39,8 @@ CREATE TABLE IF NOT EXISTS proposals (
     id          INTEGER PRIMARY KEY,
     name        TEXT NOT NULL UNIQUE,
     kind        TEXT NOT NULL DEFAULT 'candidate',
+    -- Which registry answers for this name. See REGISTRIES.
+    registry    TEXT NOT NULL DEFAULT '',
     lane        TEXT NOT NULL DEFAULT '',
     resolved    TEXT NOT NULL DEFAULT '',
     -- What it consumes and produces, so valid compositions can be found
@@ -145,12 +156,65 @@ def _migrate(conn: sqlite3.Connection) -> None:
         raise RuntimeError(
             f"discovery.db is schema {have}, this code speaks {SCHEMA_VERSION}. "
             f"Refusing to touch a newer store.")
-    # Future migrations land here, keyed on `have`. The DDL above is
-    # CREATE IF NOT EXISTS, so v0 -> v1 and v1 -> v2 (which only adds the
-    # extractions table) need nothing beyond the stamp.
+    # The DDL above is CREATE IF NOT EXISTS, so v0 -> v1 and v1 -> v2 (which
+    # only adds the extractions table) need nothing beyond the stamp. v3 adds
+    # a column to a table that already exists, which CREATE IF NOT EXISTS
+    # cannot do.
+    if have < 3:
+        if "registry" not in _columns(conn, "proposals"):
+            conn.execute("ALTER TABLE proposals "
+                         "ADD COLUMN registry TEXT NOT NULL DEFAULT ''")
+        _backfill_registry(conn)
     conn.execute("INSERT OR REPLACE INTO meta VALUES ('schema', ?)",
                  (str(SCHEMA_VERSION),))
     conn.commit()
+
+
+def _columns(conn, table: str) -> set[str]:
+    """Column names of one table, asked of whichever backend this is."""
+    if store.backend() == store.POSTGRES:
+        rows = conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = ?", (table,))
+        return {r["column_name"] for r in rows}
+    return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
+#: Evidence a v2 store already holds about where a name came from, strongest
+#: first. Each rule only fills rows still empty, so a URL beats a kind: the
+#: inspect tier wrote kind='repo' for a GitHub repo while from_feeds wrote the
+#: same kind for a HuggingFace one, and the URL it recorded alongside says
+#: which is which.
+_BACKFILL = (
+    ("url", "https://huggingface.co/%", HUGGINGFACE),
+    ("url", "https://github.com/%", GITHUB),
+    ("kind", "weights", HUGGINGFACE),
+    ("kind", "tool", GITHUB),
+    ("kind", "repo", HUGGINGFACE),
+)
+
+
+def _backfill_registry(conn) -> int:
+    """Fill `registry` from what the store already recorded. Returns the count.
+
+    A row with no evidence keeps the empty string. Guessing one for it would
+    turn "nobody knows" into a wrong answer that nothing ever revisits, which
+    is the failure this column exists to end.
+    """
+    filled = 0
+    for field, value, registry in _BACKFILL:
+        if field == "url":
+            cur = conn.execute(
+                "UPDATE proposals SET registry = ? WHERE registry = '' "
+                "AND id IN (SELECT proposal_id FROM sightings WHERE url LIKE ?)",
+                (registry, value))
+        else:
+            cur = conn.execute(
+                "UPDATE proposals SET registry = ? WHERE registry = '' "
+                "AND kind = ?", (registry, value))
+        filled += cur.rowcount or 0
+    conn.commit()
+    return filled
 
 
 @dataclass
@@ -164,6 +228,8 @@ class Seen:
     kind: str = "candidate"
     lane: str = ""
     resolved: str = ""
+    #: One of REGISTRIES, or empty when the caller genuinely cannot say.
+    registry: str = ""
 
 
 def record(conn: sqlite3.Connection, seen: Seen, at: float | None = None) -> int:
@@ -181,14 +247,16 @@ def record(conn: sqlite3.Connection, seen: Seen, at: float | None = None) -> int
         conn.execute(
             "UPDATE proposals SET last_seen = ?, "
             "  resolved = CASE WHEN ?<>'' THEN ? ELSE resolved END, "
-            "  lane = CASE WHEN lane='' THEN ? ELSE lane END "
+            "  lane = CASE WHEN lane='' THEN ? ELSE lane END, "
+            "  registry = CASE WHEN registry='' THEN ? ELSE registry END "
             "WHERE id = ?",
-            (now, seen.resolved, seen.resolved, seen.lane, pid))
+            (now, seen.resolved, seen.resolved, seen.lane, seen.registry, pid))
     else:
         pid = conn.execute(
-            "INSERT INTO proposals (name, kind, lane, resolved, first_seen, "
-            "last_seen) VALUES (?,?,?,?,?,?)",
-            (seen.name, seen.kind, seen.lane, seen.resolved, now, now)).lastrowid
+            "INSERT INTO proposals (name, kind, registry, lane, resolved, "
+            "first_seen, last_seen) VALUES (?,?,?,?,?,?,?)",
+            (seen.name, seen.kind, seen.registry, seen.lane, seen.resolved,
+             now, now)).lastrowid
     conn.execute(
         "INSERT OR IGNORE INTO sightings (proposal_id, source, url, why, "
         "relevance, seen_at) VALUES (?,?,?,?,?,?)",
@@ -246,7 +314,7 @@ def settled(conn: sqlite3.Connection) -> set[str]:
     return {r["name"] for r in conn.execute(q, TERMINAL)}
 
 
-def pending(conn, limit: int = 50) -> list[str]:
+def pending(conn, limit: int = 50, registry: str | None = None) -> list[str]:
     """Proposals nothing has answered yet, most-corroborated first.
 
     THE MISSING RUNG. The sweep writes proposals and every later tier read a
@@ -262,11 +330,22 @@ def pending(conn, limit: int = 50) -> list[str]:
 
     A terminal verdict removes a name for good; `queued` and `screened` do not,
     because those are waypoints rather than answers.
+
+    `registry` narrows to names one registry can answer for, and a caller that
+    resolves names SHOULD pass it: the tier that clones from GitHub asked
+    GitHub about HuggingFace model ids and 227 of 235 came back 404 (#167).
+
+    None means every registry INCLUDING the unknown ones, which is right for a
+    report and wrong for resolving. The EMPTY STRING asks for the unknown ones
+    on their own -- names the store cannot route, which is work waiting on one
+    question rather than work nobody can do.
     """
+    where = "" if registry is None else "AND p.registry = ?"
+    args = (() if registry is None else (registry,)) + TERMINAL + (limit,)
     q = f"""
         SELECT p.name, COUNT(s.id) AS times, MAX(s.seen_at) AS last_seen
         FROM proposals p JOIN sightings s ON s.proposal_id = p.id
-        WHERE p.resolved <> '' AND p.name NOT IN (
+        WHERE p.resolved <> '' {where} AND p.name NOT IN (
             SELECT DISTINCT p2.name FROM proposals p2
             JOIN verdicts v ON v.proposal_id = p2.id
             WHERE v.outcome IN ({','.join('?' * len(TERMINAL))})
@@ -275,7 +354,38 @@ def pending(conn, limit: int = 50) -> list[str]:
         ORDER BY times DESC, last_seen DESC
         LIMIT ?
     """
-    return [r["name"] for r in conn.execute(q, (*TERMINAL, limit))]
+    return [r["name"] for r in conn.execute(q, args)]
+
+
+def set_registry(conn, name: str, registry: str) -> None:
+    """Record which registry answered for a name, once something has asked.
+
+    The migration fills what the store already proves and stops there, so a
+    name that arrived as prose keeps an empty registry: the sweep resolved it
+    against a registry and did not write down which one. This is how that
+    answer gets back in -- found by asking, not by guessing from the shape of
+    the string.
+    """
+    if registry not in REGISTRIES:
+        raise ValueError(f"{registry!r} is not one of {', '.join(REGISTRIES)}")
+    conn.execute("UPDATE proposals SET registry = ? WHERE name = ?",
+                 (registry, name))
+    conn.commit()
+
+
+def by_registry(conn) -> dict[str, int]:
+    """How many unanswered proposals each registry owns, "" being the ones
+    nothing can resolve. Reported rather than hidden: a name with no registry
+    is work nobody can do, and it should be visible as that rather than as a
+    404 from whichever tier guessed."""
+    out = {}
+    for r in conn.execute(
+            "SELECT p.registry AS registry, COUNT(*) AS n FROM proposals p "
+            "WHERE p.resolved <> '' AND p.id NOT IN "
+            f"(SELECT proposal_id FROM verdicts WHERE outcome IN "
+            f"({','.join('?' * len(TERMINAL))})) GROUP BY p.registry", TERMINAL):
+        out[r["registry"]] = r["n"]
+    return out
 
 
 def recurrence(conn: sqlite3.Connection, minimum: int = 2) -> list[dict]:

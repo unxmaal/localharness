@@ -41,3 +41,17 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
       key: token
       optional: true
 {{- end -}}
+
+{{- define "localharness.whereEnv" -}}
+{{/*
+  WHERE THE WORK EXECUTES, declared rather than inferred. The pod can tell it
+  is a pod; it cannot tell that the Metal half of a lane happened on somebody's
+  desk because the container only asked. The receipt carries this and
+  evals.core.comparable() refuses across it, so a result cannot read as "the
+  cluster measured it" when the cluster only asked.
+
+  Takes a list: the root context, then the value.
+*/}}
+- name: LOCALHARNESS_WHERE
+  value: {{ index . 1 | quote }}
+{{- end -}}

@@ -553,7 +553,7 @@ def _report_recurrence(a) -> int:
     return 0
 
 
-def shard(names: list[str], spec: str) -> list[str]:
+def shard(names: list, spec: str) -> list:
     """The slice of the work this worker owns, as `i/n`.
 
     WITHOUT THIS A FAN-OUT IS FICTION. `parallelism: 4` on a Job whose pods all
@@ -580,6 +580,46 @@ def shard(names: list[str], spec: str) -> list[str]:
     return names[i::n]
 
 
+def resolve_registry(name: str, client, model=None) -> tuple[str, dict | None]:
+    """Which registry answers for a name nothing wrote a registry down for.
+
+    THE MIGRATION CANNOT ANSWER THIS. A name lifted from prose was resolved
+    against HuggingFace by the sweep and the store kept the reddit permalink,
+    so 223 of 235 rows carry no evidence either way (#167). Guessing from the
+    shape of the string would be free and wrong: an `org/name` is a valid id in
+    both namespaces, and a definite 404 is now terminal, so a wrong guess
+    settles a real model as missing for good.
+
+    HuggingFace first, on the same argument feeds.candidates() already makes in
+    its two passes: where both answer, the model is the thing the eval can run.
+
+    Returns the registry and whatever the answering registry already handed
+    over, so the caller does not ask a second time: both of these rate-limit,
+    and a repeated question is a request spent on nothing. Raises Gone only
+    when BOTH say no; an empty registry means nothing could be told, which
+    settles nothing.
+    """
+    from harness import github, inspect as ins
+    from harness import memory_store as ms
+
+    model = model or ins.hf_model
+    reachable = False
+    try:
+        return ms.HUGGINGFACE, model(name)
+    except ins.Gone:
+        reachable = True
+    except ins.InspectError:
+        pass
+    try:
+        return ms.GITHUB, client.repo(name)
+    except github.NotFound:
+        if reachable:
+            raise ins.Gone(f"{name}: neither registry has anything by that name")
+    except github.GitHubError:
+        pass
+    return "", None
+
+
 def _report_inspect(a) -> int:
     """Read a candidate's source before anyone downloads its weights. #61."""
     from harness import github, inspect as ins
@@ -591,33 +631,80 @@ def _report_inspect(a) -> int:
     store = ms.connect()
     try:
         if a.repos:
-            names = list(a.repos)
+            # The flag says repos, so they are read as repos.
+            work_items = [(n, ms.GITHUB) for n in a.repos]
         elif getattr(a, "from_store", False):
             # The rung the ladder was missing: what the sweep found, rather
             # than the crowd. Without this the two tiers read different
             # sources and nothing consumes a swept proposal.
-            names = ms.pending(store, limit=getattr(a, "top", 10) * 5)
+            #
+            # ASKED OF EACH REGISTRY SEPARATELY. One list handed to one API is
+            # how 227 of 235 swept candidates 404ed: every name the sweep
+            # writes is a HuggingFace id and this tier only knew how to clone
+            # from GitHub. Issue #167.
+            limit = getattr(a, "top", 10) * 5
+            work_items = [(n, r) for r in ms.REGISTRIES
+                          for n in ms.pending(store, limit=limit, registry=r)]
+            # And the ones the store cannot route, which it resolves rather
+            # than guesses at. See resolve_registry().
+            work_items += [(n, "") for n in
+                           ms.pending(store, limit=limit, registry="")]
         else:
-            names = [n.repo for n in
-                     __import__("harness.neighbors", fromlist=["x"])
-                     .neighbors(client=client, top=getattr(a, "top", 10))]
-        names = shard(names, getattr(a, "shard", ""))
+            work_items = [(n.repo, ms.GITHUB) for n in
+                          __import__("harness.neighbors", fromlist=["x"])
+                          .neighbors(client=client, top=getattr(a, "top", 10))]
+        work_items = shard(work_items, getattr(a, "shard", ""))
         out = []
-        for repo in names:
-            try:
-                meta = client.repo(repo)
-            except github.GitHubError as exc:
-                err(f"{repo}: {exc}")
-                continue
-            try:
-                fit = ins.inspect(repo, work, meta=meta)
-            except ins.InspectError as exc:
-                err(f"{repo}: {exc}")
-                continue
+        for repo, registry in work_items:
+            card = None
+            if not registry:
+                try:
+                    registry, card = resolve_registry(repo, client)
+                except ins.Gone as exc:
+                    err(f"{repo}: {exc}")
+                    ms.decide(store, repo, "broken", tier="inspect",
+                              detail=str(exc)[:200])
+                    continue
+                if not registry:
+                    err(f"{repo}: neither registry could be reached, so it "
+                        f"stays unanswered")
+                    continue
+                ms.set_registry(store, repo, registry)
+            if registry == ms.HUGGINGFACE:
+                try:
+                    fit = ins.inspect_model(repo, data=card)
+                except ins.Gone as exc:
+                    # A definite 404 is an answer about the candidate, so it is
+                    # recorded as one. An unreachable registry is not.
+                    err(f"{repo}: {exc}")
+                    try:
+                        ms.decide(store, repo, "broken", tier="inspect",
+                                  detail=str(exc)[:200])
+                    except KeyError:
+                        pass   # named on the command line, never proposed
+                    continue
+                except ins.InspectError as exc:
+                    err(f"{repo}: {exc}")
+                    continue
+            else:
+                try:
+                    meta = client.repo(repo) if card is None else card
+                except github.GitHubError as exc:
+                    err(f"{repo}: {exc}")
+                    continue
+                try:
+                    fit = ins.inspect(repo, work, meta=meta)
+                except ins.InspectError as exc:
+                    err(f"{repo}: {exc}")
+                    continue
             out.append(fit)
-            ms.record(store, ms.Seen(name=repo, source="inspect", kind="repo",
-                                     url=f"https://github.com/{repo}",
-                                     resolved=repo, why=fit.why))
+            ms.record(store, ms.Seen(
+                name=repo, source="inspect", registry=registry,
+                kind="weights" if registry == ms.HUGGINGFACE else "repo",
+                url=(f"https://huggingface.co/{repo}"
+                     if registry == ms.HUGGINGFACE
+                     else f"https://github.com/{repo}"),
+                resolved=repo, lane=fit.lanes.get(repo, ""), why=fit.why))
             # A thing that cannot run here is ANSWERED, so it is terminal and
             # never proposed again. "unknown" settles nothing, deliberately.
             outcome = {"fits": "queued", "unknown": ""}.get(fit.verdict, "declined")
@@ -629,6 +716,11 @@ def _report_inspect(a) -> int:
             # queue: queueing the repo sent GitHub names to snapshot_download,
             # which wants a HuggingFace id, and every one of them 401'd.
             if fit.verdict != "fits":
+                continue
+            if registry == ms.HUGGINGFACE:
+                # A model IS the weight, so there is no second queue to fill
+                # and nothing to retire: what `queued` means here is already
+                # recorded above.
                 continue
             # In HEADLINE order, not smallest-first: the smallest named
             # weight is almost always a tokenizer or a helper, and the first
@@ -646,6 +738,7 @@ def _report_inspect(a) -> int:
                     continue
                 ms.record(store, ms.Seen(
                     name=model_id, source="inspect", kind="weights",
+                    registry=ms.HUGGINGFACE,
                     url=f"https://huggingface.co/{model_id}",
                     resolved=model_id, lane=fit.lanes.get(model_id, ""),
                     why=f"named by {repo}"))
@@ -814,10 +907,12 @@ def _report_neighbors(a) -> int:
         feeds.record_fetch("github-crowd")
         for seed in nb.DEFAULT_SEEDS:
             ms.record(store, ms.Seen(name=seed, source="installed", kind="repo",
+                                     registry=ms.GITHUB,
                                      url=f"https://github.com/{seed}",
                                      resolved=seed))
         for n in found:
             ms.record(store, ms.Seen(name=n.repo, source="github-crowd",
+                                     registry=ms.GITHUB,
                                      url=f"https://github.com/{n.repo}",
                                      why=n.description, kind="repo",
                                      relevance=feeds.relevance(

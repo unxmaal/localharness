@@ -78,3 +78,47 @@ def test_every_machine_can_name_itself_for_a_result_sheet(m):
     different ones do not."""
     assert m.describe()
     assert m.accelerator.name in m.describe()
+
+
+# ---- where the work executes (issue #170) ---------------------------------
+
+def test_a_machine_outside_a_cluster_is_a_host():
+    from harness import machine
+    assert machine.where({}) == machine.HOST
+
+
+def test_a_pod_with_no_card_is_in_pod():
+    from harness import machine
+    assert machine.where({"KUBERNETES_SERVICE_HOST": "kubernetes.default.svc"},
+                         machine=_fake("unified")) == machine.IN_POD
+
+
+def test_a_pod_the_scheduler_gave_a_card_is_a_gpu_node():
+    from harness import machine
+    assert machine.where({"KUBERNETES_SERVICE_HOST": "kubernetes.default.svc"},
+                         machine=_fake("discrete")) == machine.GPU_NODE
+
+
+def test_a_declaration_beats_what_the_container_can_see():
+    """THE WHOLE POINT. A pod dispatching to a host is still a pod; nothing
+    about the container can tell you the Metal work happened on a desk."""
+    from harness import machine
+    assert machine.where({"KUBERNETES_SERVICE_HOST": "kubernetes.default.svc",
+                          "LOCALHARNESS_WHERE": "host"},
+                         machine=_fake("discrete")) == machine.HOST
+
+
+def test_a_place_nothing_recognises_raises_rather_than_reaching_a_receipt():
+    """A receipt naming a place nothing recognises is worse than one naming
+    none: comparable() would treat it as a real distinction forever."""
+    import pytest
+    from harness import machine
+    with pytest.raises(ValueError):
+        machine.where({"LOCALHARNESS_WHERE": "the basement"})
+
+
+def _fake(kind):
+    from harness.machine import Machine
+    from harness.memory import Accelerator
+    return Machine(runtimes=frozenset({"cpu"}),
+                   accelerator=Accelerator(kind, "x", 8.0, 8.0))

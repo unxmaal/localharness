@@ -44,6 +44,7 @@ spec:
                   fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
             {{- include "localharness.storeEnv" . | nindent 12 }}
             {{- include "localharness.githubEnv" . | nindent 12 }}
+            {{- include "localharness.whereEnv" (list . "in-pod") | nindent 12 }}
           resources:
             {{- toYaml .Values.resources.cheap | nindent 12 }}
 {{- end }}
