@@ -468,6 +468,7 @@ def main(argv: list[str] | None = None) -> int:
     if outdir:
         outdir.mkdir(parents=True, exist_ok=True)
 
+    warn_if_swapping()
     skipped = unrun_summary(cases, candidates)
     if skipped:
         print(f"\nnot run, no candidate for them -- {skipped}", file=sys.stderr)
@@ -514,6 +515,7 @@ def main(argv: list[str] | None = None) -> int:
             accelerator=accelerator_id(),
             instruments=instruments(),
             where=where_id(),
+            swap_used_mb=swap_used_mb(),
             cases_digest=cases_digest(cases))
         (outdir / "results.json").write_text(json.dumps(
             {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -545,6 +547,40 @@ def instruments() -> dict:
     except Exception:  # noqa: BLE001
         pass
     return {k: v for k, v in found.items() if v}
+
+
+#: Swap above this and a wall-clock number from the run is not comparable with
+#: one taken on a quiet machine. Not a hard limit: the run is still worth
+#: having, and a refusal here would stop somebody measuring quality because the
+#: machine was busy.
+SWAP_WARN_MB = 2048
+
+
+def swap_used_mb() -> int:
+    """Swap in use right now, or 0 if it cannot be told."""
+    try:
+        from evals.environment import capture
+        return int(capture().get("swap_used_mb") or 0)
+    except Exception:  # noqa: BLE001 - a receipt must not fail a finished run
+        return 0
+
+
+def warn_if_swapping(swap: int | None = None, out=None) -> int:
+    """Say so BEFORE the numbers appear, not in a footnote afterwards.
+
+    #142 is two issues and a week spent on a 2x wall-clock difference whose
+    most likely explanation is that the machine was at 19.9 GB of swap. The
+    peak memory matched to the decimal; only the timing moved, which is exactly
+    the shape memory pressure makes.
+    """
+    import sys
+    swap = swap_used_mb() if swap is None else swap
+    if swap >= SWAP_WARN_MB:
+        print(f"\nWARNING: {swap} MB of swap in use. Wall-clock numbers from "
+              f"this run are not comparable with ones taken on a quiet "
+              f"machine; peak memory is unaffected.",
+              file=out or sys.stderr, flush=True)
+    return swap
 
 
 def where_id() -> str:
@@ -605,6 +641,7 @@ def compare_runs(files: list[str]) -> int:
                                   accelerator=raw.get("accelerator", ""),
                                   instruments=raw.get("instruments") or {},
                                   where=raw.get("where", ""),
+                                  swap_used_mb=raw.get("swap_used_mb", 0),
                                   cases_digest=raw.get("cases_digest", "")),
                        data.get("summary") or {}))
 

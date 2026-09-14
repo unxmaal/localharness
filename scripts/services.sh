@@ -54,6 +54,34 @@ usage() {
 
 pidfile() { printf '%s\n' "$RUN/$1.pid"; }
 
+# The port each service answers on. Read from the same variables the launchers
+# read, so the two cannot disagree about where a service lives.
+port_for() {
+  case "$1" in
+    gateway)  printf '%s\n' "${GATEWAY_PORT:-4000}" ;;
+    llamacpp) printf '%s\n' "${LLAMACPP_PORT:-8081}" ;;
+    audio)    printf '%s\n' "${AUDIO_PORT:-8890}" ;;
+    *)        return 1 ;;
+  esac
+}
+
+# Is anything listening there? THE QUESTION EVERY CALLER IS ACTUALLY ASKING.
+# A pidfile answers "did this script start it", which differs from "is it up"
+# exactly when another supervisor is in play -- and on the machine whose whole
+# job is to serve, launchd IS the supervisor, so `status` reported every
+# service down while the gateway was answering requests. Issue #173.
+listening() {
+  local port="$1"
+  if command -v nc >/dev/null 2>&1; then
+    nc -z 127.0.0.1 "$port" >/dev/null 2>&1 && return 0
+    return 1
+  fi
+  # No nc on a minimal image or on Git Bash. /dev/tcp is a bash builtin and
+  # needs no package, but it is bash-only, which is why nc is tried first.
+  (exec 3<>"/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1 && return 0
+  return 1
+}
+
 # PowerShell cannot take a POSIX path for a working directory or a redirect,
 # and Git Bash reports every path that way. Passing $PWD straight through made
 # Start-Process fail before it launched anything, which arrived as an empty
@@ -177,13 +205,25 @@ stop_one() {
 }
 
 status() {
-  local name pid
+  local name pid port
   for name in "${ALL[@]}"; do
     pid="$(cat "$(pidfile "$name")" 2>/dev/null || true)"
-    if alive "$pid"; then
-      printf '%-9s up    pid %s\n' "$name" "$pid"
+    port="$(port_for "$name")"
+    if listening "$port"; then
+      if alive "$pid"; then
+        printf '%-9s up    :%-5s pid %s\n' "$name" "$port" "$pid"
+      else
+        # Up, and not by this script. Say so rather than claiming it: `stop`
+        # can only stop what it started, and a reader about to run it should
+        # know that before being surprised.
+        printf '%-9s up    :%-5s (not started by this script)\n' "$name" "$port"
+      fi
+    elif alive "$pid"; then
+      # A live process that answers on no port is starting, wedged, or dying.
+      # Three states, and none of them is "up".
+      printf '%-9s ?     :%-5s pid %s, not answering yet\n' "$name" "$port" "$pid"
     else
-      printf '%-9s down\n' "$name"
+      printf '%-9s down  :%s\n' "$name" "$port"
     fi
   done
   # The question before starting a game is what the card is holding, which is

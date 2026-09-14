@@ -796,6 +796,20 @@ candidate wins: a lane with no run receipt, a thing seen repeatedly, something
 that is not a requantised copy of a model already being served, small enough to
 try cheaply. Which candidate is better is what the tiers below it are for.
 
+The screen is the tier that answers it:
+
+```bash
+lh discover --screen         # what it would run, and what is in the way
+lh discover --screen --run   # actually run one
+```
+
+It asks one question -- did it run, did it emit anything -- and writes the
+answer back, because that is how things have actually failed here rather than
+by scoring slightly worse. **It never downloads.** Fetching is its own step with
+its own disk budget, and a tier that pulls gigabytes because something ranked
+well is how a laptop fills up overnight; a candidate whose weights are absent
+is reported as waiting, not screened and not failed.
+
 ### Where a lane's work executes
 
 Not a GPU toggle, because there are three answers rather than two:

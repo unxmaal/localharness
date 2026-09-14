@@ -434,6 +434,13 @@ class Receipt:
     #: own part's-cost-reported-as-the-whole's. Empty for runs written before
     #: this existed. Issue #170.
     where: str = ""
+    #: SWAP IN USE WHEN THE RUN STARTED, in MB. Not a comparability axis --
+    #: timing is already excluded from comparable() as an output of the run
+    #: rather than a property of the exam -- but a timing taken on a machine at
+    #: 19.9 GB of swap is not the same number as one taken on a quiet machine,
+    #: and #142 spent two issues finding that out. Recorded so a figure cannot
+    #: be quoted without the condition that produced it.
+    swap_used_mb: int = 0
     #: What the cases SAID, not what they were called. `case_ids` are names,
     #: and a name survives every edit to the thing it names: change
     #: fox-snow.yaml from 512 to 1024, or rewrite its prompt, and the id, the
@@ -450,6 +457,7 @@ class Receipt:
                 "tier": self.tier, "accelerator": self.accelerator,
                 "instruments": dict(self.instruments),
                 "where": self.where,
+                "swap_used_mb": self.swap_used_mb,
                 "cases_digest": self.cases_digest}
 
 
