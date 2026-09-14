@@ -1,5 +1,12 @@
+#: The node container that runs the cluster. `desktop-control-plane` is Docker
+#: Desktop's; a kind cluster is `<name>-control-plane`. Overridable because the
+#: name is the one thing that differs between the two.
+CLUSTER_NODE ?= desktop-control-plane
+IMAGE_TAG ?= 0.1.0
+NAMESPACE ?= lh
+
 # Entry points. `make check` is what CI would run and what to run before a commit.
-.PHONY: check test test-slow test-network test-postgres coverage metrics lint smoke services clean
+.PHONY: check test test-slow test-network test-postgres coverage image secret-gh metrics lint smoke services clean
 
 check: lint test          ## static checks + unit tests (no services needed)
 
@@ -16,6 +23,29 @@ coverage:                 ## REPORT coverage, never gate on it; then the diff fi
 	uv run pytest tests/ -q --cov=harness --cov=evals \
 	  --cov-report=term:skip-covered --cov-report=json
 	@uv run python -m harness.covdiff || true
+
+secret-gh:                ## put a GitHub token in the cluster, with no trailing newline
+	@# `gh auth token` ends in a newline and `--from-file` keeps it, so the
+	@# header becomes "Bearer ghp_xxx\n" and every API call dies with
+	@# `invalid header field value for "Authorization"`. tr -d is the fix, and
+	@# the token never appears in output, in a manifest, or in git.
+	@gh auth token | tr -d '\r\n' | kubectl create secret generic localharness-gh \
+	  -n $(NAMESPACE) --from-file=token=/dev/stdin --dry-run=client -o yaml \
+	  | kubectl apply -f - >/dev/null
+	@echo "localharness-gh updated in namespace $(NAMESPACE)"
+
+image:                    ## build the discovery image and load it INTO the cluster
+	docker build -t localharness:$(IMAGE_TAG) .
+	@# Docker Desktop's Kubernetes does NOT share the docker image store: the
+	@# kubelet's containerd uses the k8s.io namespace and a `docker build` is
+	@# invisible to it, so a pod goes to docker.io for a name that only exists
+	@# here. This is the same step `kind load docker-image` performs.
+	docker save localharness:$(IMAGE_TAG) \
+	  | docker exec -i $(CLUSTER_NODE) ctr -n k8s.io images import -
+	@docker exec $(CLUSTER_NODE) ctr -n k8s.io images ls \
+	  | grep -q "localharness:$(IMAGE_TAG)" \
+	  && echo "loaded: localharness:$(IMAGE_TAG)" \
+	  || { echo "NOT loaded; the pod will try docker.io" >&2; exit 1; }
 
 metrics:                  ## the four DORA numbers, from git and gh
 	uv run python -m harness.dora

@@ -280,3 +280,70 @@ def test_something_already_settled_is_not_retired_again(db):
 def test_parents_names_who_pointed_at_a_thing(db):
     _queued_weight(db, "org/tool", "org/w")
     assert ms.parents(db, "org/w") == ["org/tool"]
+
+
+# ---- the rung between the sweep and everything after it ------------------
+
+def test_pending_returns_what_nothing_has_answered(tmp_path):
+    """The sweep wrote 233 proposals into a cluster store and every later tier
+    read a different source, so nothing consumed one. This is the first arrow
+    in sweep -> inspect -> judge."""
+    conn = ms.connect(tmp_path / "d.db")
+    ms.record(conn, Seen(
+        name="org/fresh", kind="proposal", lane="image", source="feed",
+        url="https://a", why="", relevance=1, resolved="org/fresh"))
+    assert ms.pending(conn) == ["org/fresh"]
+
+
+def test_a_terminal_verdict_removes_it_for_good(tmp_path):
+    conn = ms.connect(tmp_path / "d.db")
+    ms.record(conn, Seen(
+        name="org/done", kind="proposal", lane="image", source="feed",
+        url="https://a", why="", relevance=1, resolved="org/done"))
+    ms.decide(conn, "org/done", "measured")
+    assert ms.pending(conn) == []
+
+
+def test_a_waypoint_verdict_does_not(tmp_path):
+    """`queued` and `screened` say work is under way, not that it is answered.
+    Treating them as terminal would drop a candidate mid-ladder."""
+    conn = ms.connect(tmp_path / "d.db")
+    ms.record(conn, Seen(
+        name="org/mid", kind="proposal", lane="image", source="feed",
+        url="https://a", why="", relevance=1, resolved="org/mid"))
+    ms.decide(conn, "org/mid", "queued")
+    assert ms.pending(conn) == ["org/mid"]
+
+
+def test_an_unresolved_name_is_not_offered_as_work(tmp_path):
+    """A proposal whose name never resolved to a real repo cannot be cloned,
+    so handing it to inspect spends an API call to learn what extraction
+    already knew."""
+    conn = ms.connect(tmp_path / "d.db")
+    ms.record(conn, Seen(
+        name="a phrase from prose", kind="proposal", lane="", source="feed",
+        url="https://a", why="", relevance=0, resolved=""))
+    assert ms.pending(conn) == []
+
+
+def test_the_most_corroborated_comes_first(tmp_path):
+    """The project's own answer to a feed measuring popularity: a thing that
+    keeps coming back is a different signal from a thing that trended once."""
+    conn = ms.connect(tmp_path / "d.db")
+    for src in ("feed-a", "feed-b", "feed-c"):
+        ms.record(conn, Seen(
+            name="org/often", kind="proposal", lane="image", source=src,
+            url=f"https://{src}", why="", relevance=1, resolved="org/often"))
+    ms.record(conn, Seen(
+        name="org/once", kind="proposal", lane="image", source="feed-a",
+        url="https://x", why="", relevance=1, resolved="org/once"))
+    assert ms.pending(conn)[0] == "org/often"
+
+
+def test_the_limit_is_honoured(tmp_path):
+    conn = ms.connect(tmp_path / "d.db")
+    for i in range(5):
+        ms.record(conn, Seen(
+            name=f"org/r{i}", kind="proposal", lane="image", source="feed",
+            url=f"https://{i}", why="", relevance=1, resolved=f"org/r{i}"))
+    assert len(ms.pending(conn, limit=2)) == 2

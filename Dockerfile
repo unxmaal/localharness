@@ -14,9 +14,24 @@ FROM python:3.12-slim AS base
 # project has already paid for (RULE #142).
 COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
 
+# RUNTIME tools, not build ones. The code shells out to both by bare name:
+#   git  inspect clones every candidate it reads
+#   gh   github.py drives the API through it, and its absence failed every
+#        candidate in the first real fan-out with `[Errno 2] ... 'gh'`
+# tests/test_dockerfile.py asserts this list against what the source invokes,
+# so the next tool added to the code fails here rather than in a pod.
+ARG GH_VERSION=2.63.2
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+ && apt-get install -y --no-install-recommends git ca-certificates curl \
+ && arch="$(dpkg --print-architecture)" \
+ && curl -fsSL -o /tmp/gh.tgz \
+      "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${arch}.tar.gz" \
+ && tar -xzf /tmp/gh.tgz -C /tmp \
+ && install -m 0755 "/tmp/gh_${GH_VERSION}_linux_${arch}/bin/gh" /usr/local/bin/gh \
+ && rm -rf /tmp/gh.tgz "/tmp/gh_${GH_VERSION}_linux_${arch}" \
+ && apt-get purge -y curl && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/* \
+ && git --version && gh --version
 
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 \

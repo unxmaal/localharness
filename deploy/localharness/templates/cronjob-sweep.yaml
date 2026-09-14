@@ -31,12 +31,7 @@ spec:
               args: ["discover", "--feeds", "--json"]
               env:
                 {{- include "localharness.storeEnv" . | nindent 16 }}
-                - name: GH_TOKEN
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ include "localharness.name" . }}-gh
-                      key: token
-                      optional: true
+                {{- include "localharness.githubEnv" . | nindent 16 }}
               resources:
                 {{- toYaml .Values.resources.cheap | nindent 16 }}
 {{- end }}
