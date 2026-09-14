@@ -212,6 +212,41 @@ def cmd_image(a) -> int:
     return _generate(a.model, a.prompt, a.output, params)
 
 
+def cmd_prompt(a) -> int:
+    """Write a prompt for whatever this machine actually runs. Issue #138.
+
+    The caller says what they want a picture of. What engine serves that, and
+    how to command it, is this command's problem.
+    """
+    from harness import authoring, completion
+
+    try:
+        engine = authoring.resolved_for(a.lane)
+        guide = authoring.for_lane(a.lane)
+    except authoring.NoGuide as exc:
+        return err(str(exc))
+    if not a.about:
+        # The guide alone is useful: it is the only place this knowledge is
+        # readable by a person as well as by a model.
+        print(f"\n{a.lane} runs {engine.name}\n")
+        print(authoring.instructions(guide))
+        return 0
+    ask = (f"{authoring.instructions(guide)}\n\n"
+           f"Write ONE prompt for this engine. The caller asked for:\n"
+           f"{a.about}\n\n"
+           f"Reply with the prompt and nothing else.")
+    try:
+        got = completion.complete(ask, model=a.model, gateway=a.gateway,
+                                  modality="extract")
+    except Exception as exc:  # noqa: BLE001
+        return err(f"{exc}")
+    print(got.strip())
+    if not a.quiet:
+        # The provenance goes to stderr so the prompt itself can be piped.
+        err(f"[{engine.name}, guide {guide['identity']}, written by {a.model}]")
+    return 0
+
+
 def cmd_video(a) -> int:
     params = {k: getattr(a, k) for k in
               ("width", "height", "frames", "seconds", "steps", "seed")}
@@ -394,6 +429,8 @@ def cmd_discover(a) -> int:
         return _report_screen(a)
     if getattr(a, "winners", False):
         return _report_winners(a)
+    if getattr(a, "coverage", False):
+        return _report_coverage(a)
     if getattr(a, "neighbors", False):
         return _report_neighbors(a)
     if getattr(a, "control", False):
@@ -914,6 +951,52 @@ def _report_queue(a) -> int:
     for r in ranked:
         print(f"\n  {r['value']:+6.1f}  {r['name']}")
         print(f"          {r['value_why'] or 'nothing known about it'}")
+    return 0
+
+
+def _report_coverage(a) -> int:
+    """What discovery never saw. Issue #99.
+
+    Extraction precision measures the quality of what is CAUGHT. This measures
+    reach: of the things this project actually adopted, which did a configured
+    source ever surface. A source list is not a measurement of coverage.
+    """
+    from harness import coverage
+    from harness import memory_store as ms
+
+    store = ms.connect()
+    try:
+        got = coverage.report(store)
+    finally:
+        store.close()
+    if a.json:
+        print(json.dumps(got, indent=2))
+        return 0
+    print(f"\n{got['adopted']} things this machine runs or measured:")
+    print(f"  {len(got['found']):3d} surfaced by a discovery source first")
+    print(f"  {len(got['late']):3d} surfaced only after they were already run")
+    print(f"  {len(got['holes']):3d} never surfaced by any source")
+    if got["by_source"]:
+        print("\n  credited with a find:")
+        for source, n in got["by_source"].items():
+            print(f"    {source:24} {n}")
+    if got["proposed"]:
+        # A source producing plenty that nobody has run is a different problem
+        # from one producing nothing, and they want opposite fixes.
+        print("\n  proposals produced (adopted or not):")
+        for source, n in got["proposed"].items():
+            print(f"    {source:24} {n}")
+    holes = [h for h in got["holes"] if "why" not in h]
+    ours = [h for h in got["holes"] if "why" in h]
+    if ours:
+        print(f"\n  {len(ours)} in the store only because one of our own tiers "
+              f"put it there:")
+        for h in ours[:12]:
+            print(f"    {h['name']}")
+    if holes:
+        print(f"\n  {len(holes)} no configured source ever produced:")
+        for h in holes[:20]:
+            print(f"    {h['name']:44} {'/'.join(h['how'])}")
     return 0
 
 
@@ -1498,6 +1581,20 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--height", type=int, default=512)
             p.add_argument("--seed", type=int)
 
+    pr = sub.add_parser("prompt",
+                        help="write a prompt for whatever engine this machine "
+                             "runs in a lane")
+    pr.add_argument("lane", choices=["image", "video"],
+                    help="which generating lane the prompt is for")
+    pr.add_argument("about", nargs="?", default="",
+                    help="what the caller wants. Without it, print the guide")
+    pr.add_argument("-m", "--model", default=DEFAULT_EXTRACT_MODEL,
+                    help="gateway alias that writes the prompt")
+    pr.add_argument("--gateway", default=completion.DEFAULT_GATEWAY)
+    pr.add_argument("--quiet", action="store_true",
+                    help="omit the engine and guide line from stderr")
+    pr.set_defaults(func=cmd_prompt)
+
     c = sub.add_parser("code", help="generate code")
     c.add_argument("prompt")
     c.add_argument("-o", "--output", help="write to a file instead of stdout")
@@ -1591,6 +1688,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="with --inspect, take only this worker's slice of the "
                         "candidates. Kubernetes passes the index of an Indexed "
                         "Job; without it every worker does the same work")
+    d.add_argument("--coverage", action="store_true",
+                   help="of the things this machine runs, which a configured "
+                        "source ever surfaced. Precision measures what is "
+                        "caught; this measures reach")
     d.add_argument("--winners", action="store_true",
                    help="what the run receipts say won each lane, against the "
                         "defaults this CLI has typed in")

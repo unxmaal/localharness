@@ -823,6 +823,34 @@ its own disk budget, and a tier that pulls gigabytes because something ranked
 well is how a laptop fills up overnight; a candidate whose weights are absent
 is reported as waiting, not screened and not failed.
 
+### What discovery never saw
+
+Extraction precision measures the quality of what gets caught. Reach is a
+different number and nothing measured it:
+
+```bash
+lh discover --coverage
+```
+
+It takes what this machine actually runs -- the gateway's upstream ids, the
+candidates in run receipts, the typed lane defaults -- and asks which
+configured source ever surfaced each. Anything adopted that no source produced
+is a coverage hole with a name, and the names are the useful part.
+
+### Writing a prompt for whatever is installed
+
+```bash
+lh prompt image "a fox in falling snow"   # writes one
+lh prompt video                            # or just shows the engine's guide
+```
+
+A caller should not have to know which engine serves a lane. This asks the same
+resolver the generating command asks, so the two cannot disagree, and the
+per-engine knowledge lives in `harness/prompting/` as versioned assets rather
+than in prose somewhere. Where nothing has been established about an engine the
+guide says so, because a prompt guide that invents a confident tone is worse
+than none.
+
 ### Where a lane's work executes
 
 Not a GPU toggle, because there are three answers rather than two:

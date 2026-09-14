@@ -128,6 +128,22 @@ def _text_tool(verb: str, prompt: str, model: str = "") -> str:
 # The cheap lane: a few seconds, straight through the gateway, no queue needed.
 # ---------------------------------------------------------------------------
 
+@SERVER.tool(description=(
+    "Write a prompt for whatever engine this machine runs in a lane "
+    "(image or video). The caller says what they want; which engine serves it, "
+    "and how to command it, is this tool's problem. With no `about`, returns "
+    "the engine's prompting guide."))
+def prompt(lane: str, about: str = "", model: str = "") -> str:
+    """Shells out like every other tool here, so the CLI and the MCP cannot
+    disagree about which engine a lane runs."""
+    argv = [LH, "prompt", lane, "--quiet"]
+    if about:
+        argv.append(about)
+    if model:
+        argv += ["-m", model]
+    return run_lh(argv).strip()
+
+
 @SERVER.tool(description="Generate an SVG document. Returns the markup.")
 def svg(prompt: str, model: str = "") -> str:
     return _text_tool("svg", prompt, model)
