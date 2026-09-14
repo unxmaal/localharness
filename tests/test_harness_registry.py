@@ -135,9 +135,27 @@ CARD = {"siblings": [{"size": 1_000_000}, {"size": 2_000_000}],
         "tags": ["mlx", "diffusion"],
         "lastModified": "2026-09-01T00:00:00.000Z"}
 
+GIB = 1024 ** 3
+
+
+def _machine(*runtimes):
+    """A PINNED machine. A verdict is a statement about a candidate AND the
+    machine asking, so a test that pins one without the other is asserting
+    whatever runner it happens to run on: this card says mlx, and `fits` on a
+    Mac is `needs-mlx` everywhere else."""
+    from harness.machine import Machine
+    from harness.memory import Accelerator
+    return Machine(runtimes=frozenset(runtimes),
+                   accelerator=Accelerator("unified", "test", 32.0, 32.0))
+
+
+def _fit(card=None, runtimes=("mlx", "cpu")):
+    return ins.inspect_model("org/model", data=CARD if card is None else card,
+                             machine=_machine(*runtimes), ceiling=22 * GIB)
+
 
 def test_a_model_card_yields_a_verdict_with_nothing_cloned():
-    fit = ins.inspect_model("org/model", data=CARD)
+    fit = _fit()
     assert fit.verdict == "fits"
     assert fit.registry == ms.HUGGINGFACE
     assert fit.weights["org/model"] == 3_000_000
@@ -149,19 +167,20 @@ def test_a_model_is_not_refused_for_having_no_entry_point():
     """The rule that asks what there is to call belongs to source trees. A
     weights repo has nothing to call by construction, and applying it here
     refuses every model in the registry for not being a program."""
-    fit = ins.inspect_model("org/model", data=CARD)
+    fit = _fit()
     assert fit.entry_points == []
     assert fit.verdict != "no-entry-point"
 
 
 def test_a_source_tree_with_no_entry_point_is_still_refused():
     """The negative half: the rule must still fire where it belongs."""
-    fit = ins.decide(ins.Fit(repo="org/tool", registry=ms.GITHUB))
+    fit = ins.decide(ins.Fit(repo="org/tool", registry=ms.GITHUB),
+                     machine=_machine("cpu"), ceiling=22 * GIB)
     assert fit.verdict == "no-entry-point"
 
 
 def test_a_card_listing_no_blob_sizes_is_unsized_rather_than_zero():
-    fit = ins.inspect_model("org/model", data={"siblings": [], "tags": []})
+    fit = _fit({"siblings": [], "tags": []})
     assert fit.unsized == ["org/model"]
     assert fit.verdict == "unknown"
 
@@ -330,3 +349,11 @@ def test_an_unreachable_registry_settles_nothing():
     # And a HuggingFace outage beside a GitHub 404 is not "neither" either.
     got, _ = resolve_registry("org/thing", _Repos(), model=_registry_down)
     assert got == ""
+
+
+def test_the_same_card_reads_differently_on_a_machine_without_the_runtime():
+    """The other half of pinning the machine, and the reason it matters: this
+    card is MLX-native, so it FITS where mlx exists and is needs-mlx where it
+    does not. Both are correct answers to different questions."""
+    assert _fit(runtimes=("mlx", "cpu")).verdict == "fits"
+    assert _fit(runtimes=("cuda", "cpu")).verdict == "needs-mlx"
