@@ -246,6 +246,38 @@ def settled(conn: sqlite3.Connection) -> set[str]:
     return {r["name"] for r in conn.execute(q, TERMINAL)}
 
 
+def pending(conn, limit: int = 50) -> list[str]:
+    """Proposals nothing has answered yet, most-corroborated first.
+
+    THE MISSING RUNG. The sweep writes proposals and every later tier read a
+    different source -- inspect went to the crowd, so 233 swept proposals sat in
+    the store with nothing consuming them. The ladder in #148 is sweep ->
+    inspect -> judge -> screen -> measure, and without this the first arrow
+    does not exist.
+
+    Ordered by how many independent sightings a name has, because that is the
+    project's own answer to a feed measuring popularity: a thing that keeps
+    coming back is a different signal from a thing that trended once. Ties
+    break on recency so a fresh proposal is not stuck behind an old one.
+
+    A terminal verdict removes a name for good; `queued` and `screened` do not,
+    because those are waypoints rather than answers.
+    """
+    q = f"""
+        SELECT p.name, COUNT(s.id) AS times, MAX(s.seen_at) AS last_seen
+        FROM proposals p JOIN sightings s ON s.proposal_id = p.id
+        WHERE p.resolved <> '' AND p.name NOT IN (
+            SELECT DISTINCT p2.name FROM proposals p2
+            JOIN verdicts v ON v.proposal_id = p2.id
+            WHERE v.outcome IN ({','.join('?' * len(TERMINAL))})
+        )
+        GROUP BY p.id
+        ORDER BY times DESC, last_seen DESC
+        LIMIT ?
+    """
+    return [r["name"] for r in conn.execute(q, (*TERMINAL, limit))]
+
+
 def recurrence(conn: sqlite3.Connection, minimum: int = 2) -> list[dict]:
     """Proposals seen more than once, most-seen first.
 

@@ -325,3 +325,46 @@ def test_the_secret_name_follows_the_chart_name():
     assert refs, "no secret references rendered, so this asserts nothing"
     assert all(r.startswith("other-") for r in refs), \
         f"a reference did not follow nameOverride: {sorted(refs)}"
+
+
+@_HELM_MISSING
+def test_the_fan_out_gives_each_worker_its_own_slice():
+    """Every pod of a plain Job gets identical arguments, so `parallelism: 4`
+    without an index is four workers doing the same work -- four times the API
+    budget and four writers racing on the same rows, for one result.
+
+    The chart claimed a fan-out the code could not honour until `--shard`
+    existed. This asserts the two agree.
+    """
+    docs = render("values-local.yaml")
+    jobs = [(w, pod) for w, pod in pods(docs) if tier(w, pod) == "inspect"]
+    assert jobs, "no inspect job rendered, so this asserts nothing"
+    for w, pod in jobs:
+        spec = w["spec"]
+        assert spec.get("completionMode") == "Indexed", w["metadata"]["name"]
+        assert spec["completions"] == spec["parallelism"], (
+            "an Indexed job with fewer completions than parallelism leaves "
+            "indices nobody runs, so part of the candidate list is skipped")
+        c = pod["containers"][0]
+        assert "--shard" in " ".join(c.get("args", [])), "no shard passed"
+        names = {e["name"] for e in c["env"]}
+        assert "JOB_COMPLETION_INDEX" in names, "the shard has no index to use"
+
+
+@_HELM_MISSING
+def test_every_workload_that_reaches_github_carries_a_token():
+    """The sweep had the token and inspect did not, so the first real fan-out
+    failed all 125 candidates with "populate the GH_TOKEN environment
+    variable" -- and it failed QUIETLY, because a per-candidate error still
+    lets the Job exit 0 with `{"inspected": []}`.
+
+    Nothing checked that a workload which talks to GitHub can authenticate.
+    """
+    for w, pod in pods(render("values-local.yaml")):
+        c = pod["containers"][0]
+        invocation = " ".join(c.get("args", []) + c.get("command", []))
+        if "discover" not in invocation:
+            continue
+        names = {e["name"] for e in c.get("env", [])}
+        assert "GH_TOKEN" in names, (
+            f"{w['metadata']['name']} runs discover and cannot authenticate")

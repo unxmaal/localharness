@@ -553,6 +553,33 @@ def _report_recurrence(a) -> int:
     return 0
 
 
+def shard(names: list[str], spec: str) -> list[str]:
+    """The slice of the work this worker owns, as `i/n`.
+
+    WITHOUT THIS A FAN-OUT IS FICTION. `parallelism: 4` on a Job whose pods all
+    receive the same arguments is four workers doing identical work: four times
+    the API budget, four times the clones, one result, and four writers racing
+    on the same rows.
+
+    A STRIDE, not a contiguous block. The candidate list arrives ranked, so
+    splitting it into blocks would give worker 0 every strong candidate and the
+    last worker the tail -- the slowest repos to clone are not evenly spread
+    either, and blocks turn that into one straggler. `names[i::n]` interleaves,
+    which is both simpler and better balanced.
+
+    Empty spec means the whole list, so the CLI on a laptop is unchanged.
+    """
+    if not spec:
+        return names
+    try:
+        i, n = (int(part) for part in spec.split("/", 1))
+    except ValueError:
+        raise SystemExit(f"--shard wants i/n, got {spec!r}")
+    if n < 1 or not 0 <= i < n:
+        raise SystemExit(f"--shard {spec} is not a slice of {n} workers")
+    return names[i::n]
+
+
 def _report_inspect(a) -> int:
     """Read a candidate's source before anyone downloads its weights. #61."""
     from harness import github, inspect as ins
@@ -563,9 +590,18 @@ def _report_inspect(a) -> int:
     work.mkdir(parents=True, exist_ok=True)
     store = ms.connect()
     try:
-        names = list(a.repos) if a.repos else [
-            n.repo for n in __import__("harness.neighbors", fromlist=["x"])
-            .neighbors(client=client, top=getattr(a, "top", 10))]
+        if a.repos:
+            names = list(a.repos)
+        elif getattr(a, "from_store", False):
+            # The rung the ladder was missing: what the sweep found, rather
+            # than the crowd. Without this the two tiers read different
+            # sources and nothing consumes a swept proposal.
+            names = ms.pending(store, limit=getattr(a, "top", 10) * 5)
+        else:
+            names = [n.repo for n in
+                     __import__("harness.neighbors", fromlist=["x"])
+                     .neighbors(client=client, top=getattr(a, "top", 10))]
+        names = shard(names, getattr(a, "shard", ""))
         out = []
         for repo in names:
             try:
@@ -1144,6 +1180,14 @@ def build_parser() -> argparse.ArgumentParser:
                         "here, before anything is downloaded")
     d.add_argument("--repos", nargs="*", default=[],
                    help="with --inspect, specific repos instead of the crowd")
+    d.add_argument("--from-store", action="store_true",
+                   help="with --inspect, take candidates the sweep already "
+                        "found and nothing has answered, most-corroborated "
+                        "first, instead of rebuilding the crowd")
+    d.add_argument("--shard", default="", metavar="I/N",
+                   help="with --inspect, take only this worker's slice of the "
+                        "candidates. Kubernetes passes the index of an Indexed "
+                        "Job; without it every worker does the same work")
     d.add_argument("--recurrence", action="store_true",
                    help="what keeps coming back, from the discovery store")
     d.add_argument("--comments", type=int, default=0, metavar="N",

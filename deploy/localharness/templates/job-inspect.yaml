@@ -13,7 +13,13 @@ spec:
   # and it must never land on the GPU pool -- a pod holding a card to read a
   # README starves the only tier that needs one.
   parallelism: {{ .Values.inspect.parallelism }}
-  completions: {{ .Values.inspect.completions }}
+  completions: {{ .Values.inspect.parallelism }}
+  # INDEXED, which is what makes the fan-out real. Every pod of a plain Job
+  # receives identical arguments, so `parallelism: 4` would be four workers
+  # doing the same work: four times the API budget, four times the clones, one
+  # result, and four writers racing on the same rows. Indexed gives each pod
+  # JOB_COMPLETION_INDEX, which becomes its `--shard i/n`.
+  completionMode: Indexed
   backoffLimit: {{ .Values.inspect.backoffLimit }}
   template:
     metadata:
@@ -26,9 +32,18 @@ spec:
         - name: inspect
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          args: ["discover", "--inspect", "--json"]
+          command: ["sh", "-c"]
+          args:
+            - >-
+              exec lh discover --inspect --from-store --json
+              --shard "${JOB_COMPLETION_INDEX}/{{ .Values.inspect.parallelism }}"
           env:
+            - name: JOB_COMPLETION_INDEX
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
             {{- include "localharness.storeEnv" . | nindent 12 }}
+            {{- include "localharness.githubEnv" . | nindent 12 }}
           resources:
             {{- toYaml .Values.resources.cheap | nindent 12 }}
 {{- end }}
