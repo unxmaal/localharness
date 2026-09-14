@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from harness import paths
+from harness import paths, store
 
 SCHEMA_VERSION = 2
 
@@ -103,8 +103,18 @@ def db_path() -> Path:
     return paths.home() / "discovery.db"
 
 
-def connect(path: Path | None = None) -> sqlite3.Connection:
-    """Open (creating if needed) and migrate to SCHEMA_VERSION."""
+def connect(path: Path | None = None):
+    """Open (creating if needed) and migrate to SCHEMA_VERSION.
+
+    SQLite unless LOCALHARNESS_STORE says postgres, because `lh` on a laptop
+    must keep working with no cluster at all -- a discovery engine that only
+    runs in Kubernetes is a worse tool than the one that already exists.
+    """
+    if store.backend() == store.POSTGRES:
+        conn = store.postgres_connect()
+        conn.executescript(_DDL)
+        _migrate(conn)
+        return conn
     path = Path(path) if path is not None else db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=BUSY_TIMEOUT_SECONDS)
@@ -248,7 +258,11 @@ def recurrence(conn: sqlite3.Connection, minimum: int = 2) -> list[dict]:
                COUNT(s.id) AS times, COUNT(DISTINCT s.source) AS sources,
                MIN(s.seen_at) AS first_seen, MAX(s.seen_at) AS last_seen
         FROM proposals p JOIN sightings s ON s.proposal_id = p.id
-        GROUP BY p.id HAVING times >= ?
+        -- COUNT repeated rather than `HAVING times >= ?`. SQLite lets HAVING
+        -- see a select-list alias and standard SQL does not, so the alias
+        -- version runs here and raises UndefinedColumn on Postgres. ORDER BY
+        -- may use the alias in both, which is why it still does.
+        GROUP BY p.id HAVING COUNT(s.id) >= ?
         ORDER BY times DESC, sources DESC, last_seen DESC
     """
     return [dict(r) for r in conn.execute(q, (minimum,))]
@@ -403,7 +417,12 @@ def traverse(conn: sqlite3.Connection, name: str, depth: int = 2,
              "both": "CASE WHEN e.src = w.id THEN e.dst ELSE e.src END"}[direction]
     q = f"""
         WITH RECURSIVE walk(id, depth, relation) AS (
-            SELECT ?, 0, ''
+            -- CAST is load-bearing, not decoration. Postgres infers the
+            -- parameter's type from the non-recursive term, decides smallint,
+            -- and then refuses the recursive term where the column is integer:
+            -- "column 1 has type smallint in the non-recursive term but type
+            -- integer overall". SQLite accepts the cast and ignores it.
+            SELECT CAST(? AS INTEGER), 0, ''
             UNION
             SELECT {other}, w.depth + 1, e.relation
             FROM edges e JOIN walk w ON {step}
