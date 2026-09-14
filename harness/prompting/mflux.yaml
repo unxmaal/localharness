@@ -1,0 +1,31 @@
+# How to command the mflux image engines. Issue #138.
+#
+# DELIBERATELY THIN. What is written here is what this project has established;
+# the rest is absent rather than filled with plausible advice, because a prompt
+# guide that invents its own confident tone is worse than none -- a caller
+# cannot tell which half was measured.
+engine: mflux
+version: 1
+lane: image
+
+responds_to: >-
+  Not established here. No prompt-form comparison has been run for these
+  engines: the image lane's measurements are about which engine and how fast,
+  never about how a prompt is phrased.
+
+ignores: >-
+  Not established here.
+
+constraints:
+  - Every eval case pins a resolution and the CLI defaults to 512. A prompt
+    written for one resolution is not a measurement at another; two correct
+    numbers once looked like a regression for exactly this reason.
+  - Quantisation is 8-bit and the candidate name does not carry it, so
+    `flux2-klein-4b` names something the receipts only ever ran as
+    `flux2-klein-4b-q8`.
+
+unknown:
+  - Whether these engines reward structured prompts as H3 does.
+  - Whether negative phrasing works. Generative models generally fail at
+    negation and occupying the space positively works better, but that was
+    measured on H3 video rather than on these.

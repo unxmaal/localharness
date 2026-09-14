@@ -1,0 +1,55 @@
+# How to command MiniMax H3. Issue #138.
+#
+# Reverse-engineered for the tsatd teaser and re-verified against the vendor's
+# own guide; it was expensive to establish and lived only in a knowledge base
+# where no running code could reach it.
+engine: h3
+version: 1
+lane: video
+source:
+  - https://huggingface.co/MiniMaxAI/MiniMax-H3/raw/main/docs/VIDEO_PROMPT_WRITING_GUIDE_base_en.md
+  - https://huggingface.co/MiniMaxAI/MiniMax-H3/raw/main/docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md
+
+responds_to: >-
+  A STRUCTURED, SECTIONED prompt. Not prose. The model is documented as picky
+  about the exact section keywords, and freeform description wastes a
+  generation that costs minutes.
+
+sections:
+  base: >-
+    integrated_multimodal_description, then overall_soundscape (one to four
+    sentences covering ambience, physical action and non-verbal human sound),
+    then the remaining sections in the guide's order. Write each beat to fill
+    the whole clip: an under-described beat is padded by animating the
+    reference image rather than by holding the shot.
+  reference: >-
+    A subject_definitions block at the very beginning of EVERY clip prompt,
+    binding each <Picture N> to a <Subject N>. A reference image may define the
+    ENVIRONMENT as a subject, not only a character.
+
+markers: >-
+  retention_analysis markers are TWO DISJOINT VOCABULARIES split by modality,
+  and conflating them is the error the first version of this made. Visible
+  content (<Subject N>, <Picture N>, <Video N>) takes fully_preserved or
+  partially_preserved. Audio takes its OWN set, and that set is NOT RECORDED
+  HERE -- so never apply a visible-content marker to a sound. The task type
+  must match the asset's role.
+
+ignores: >-
+  Mood words in non_diegetic_music. The guide bans them outright and the ban
+  was confirmed verbatim against the vendor text rather than taken from a
+  community repo.
+
+constraints:
+  - Width and height must be multiples of 32. Otherwise the latent is
+    CIRCULAR-padded, wrapping the top of the image into the bottom row and
+    folding fabricated content into a real patch token. 1344x768 is clean.
+  - reference_image and first_frame are mutually exclusive.
+  - Duration is sent explicitly, never inferred.
+
+corroboration: >-
+  Counted across 653 repos in the H3 ecosystem rather than asserted: first and
+  last frame bracketing appears in 91 independent repos, the mutual exclusion
+  of reference_image and first_frame in 9, and "write each beat to fill the
+  clip" in only 2. The last is weak and is marked as such here rather than
+  presented at the same confidence as the others.
