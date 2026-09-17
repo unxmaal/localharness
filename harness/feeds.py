@@ -15,6 +15,7 @@ import os
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass, field
@@ -457,6 +458,71 @@ def probe(url: str, **kw) -> tuple[bool, str]:
     if not entries:
         return False, "parses as a feed but has no entries"
     return True, f"{len(entries)} entries"
+
+
+#: Where a feed lives when the page does not say. Ordered by how often each is
+#: the answer, so the first hit is usually the first request.
+FEED_PATHS = ("/feed", "/rss", "/feed.xml", "/rss.xml", "/atom.xml",
+              "/index.xml", "/feeds/posts/default")
+
+_ALTERNATE = re.compile(
+    r'<link\b[^>]*\brel=["\']?alternate["\']?[^>]*>', re.I)
+_TYPE_FEED = re.compile(
+    r'\btype=["\']?application/(?:rss|atom)\+xml', re.I)
+_HREF = re.compile(r'\bhref=["\']([^"\']+)["\']', re.I)
+
+
+def declared_feeds(html: str, base: str) -> list[str]:
+    """Feed URLs a page advertises, the way a browser reads them."""
+    out = []
+    for tag in _ALTERNATE.findall(html):
+        if not _TYPE_FEED.search(tag):
+            continue
+        href = _HREF.search(tag)
+        if href:
+            out.append(urllib.parse.urljoin(base, href.group(1)))
+    return out
+
+
+def find_feed(url: str, fetcher=fetch, probe=probe) -> tuple[str, str]:
+    """Resolve the feed for a page, returning (feed_url, why).
+
+    A proposed source arrives as ONE ARTICLE LINK lifted from someone's prose,
+    which is usually not itself a feed. Ask the page what it advertises, then
+    try the conventional paths on its host. Issue #183.
+    """
+    try:
+        text = fetcher(url)
+    except FeedError as exc:
+        return "", str(exc)[:200]
+    # THE URL MAY ALREADY BE THE FEED. Costs nothing -- the body is in hand --
+    # and skips guessing at paths for a source that needed no resolving.
+    try:
+        entries = parse(text)
+    except FeedError as exc:
+        entries, why_not = [], str(exc)
+    else:
+        why_not = "parses as a feed but has no entries"
+    if entries:
+        return url, f"{len(entries)} entries"
+    tried = []
+    parts = urllib.parse.urlsplit(url)
+    root = urllib.parse.urlunsplit((parts.scheme, parts.netloc, "", "", ""))
+    for cand in declared_feeds(text, url) + [root + p for p in FEED_PATHS]:
+        if cand in tried:
+            continue
+        tried.append(cand)
+        # A SPECULATIVE PATH GETS ONE ATTEMPT. `fetch` defaults to 4 retries
+        # 20s apart, which is right for a source we committed to reading and
+        # wrong for a guess: seven misses cost nine minutes and timed out the
+        # sources report. A 404 on /feed is an answer, not a flaky network.
+        ok, why = probe(cand, retries=0)
+        if ok:
+            return cand, why
+    # CARRY WHY THE PAGE ITSELF FAILED. "no feed at 8 paths" says a search
+    # happened; it does not say the URL was an HTML article, which is what a
+    # reader needs to judge whether the host is worth pursuing by hand.
+    return "", f"{why_not}; no feed at {len(tried)} candidate path(s)"
 
 
 def read(source: Source, cache_dir: Path | None = None,

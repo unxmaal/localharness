@@ -28,7 +28,7 @@ spec:
             - name: sweep
               image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
               imagePullPolicy: {{ .Values.image.pullPolicy }}
-              args: ["discover", "--feeds", "--json"]
+              args: ["discover", "--sweep", "--json"]
               env:
                 {{- include "localharness.storeEnv" . | nindent 16 }}
                 {{- include "localharness.githubEnv" . | nindent 16 }}
