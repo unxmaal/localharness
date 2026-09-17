@@ -557,3 +557,84 @@ def test_the_verdict_list_is_derived_rather_than_written_down():
     got = ins.verdicts()
     assert "needs-mlx" in got and "needs-cuda" in got and "needs-rocm" in got
     assert "fits" in got
+
+
+# ---- a clone that did not finish (issue #181) ------------------------------
+
+def test_a_finished_clone_is_recognised(tmp_path):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "README.md").write_text("hi", encoding="utf-8")
+    assert ins.cloned(tmp_path)
+
+
+def test_a_killed_clone_leaves_a_git_dir_and_no_worktree(tmp_path):
+    """What AdaptiveMotorControlLab/AmadeusGPT left behind after 180s."""
+    (tmp_path / ".git").mkdir()
+    assert not ins.cloned(tmp_path)
+
+
+def test_a_half_clone_is_removed_rather_than_scanned(tmp_path):
+    dest = tmp_path / "half"
+    dest.mkdir()
+    (dest / ".git").mkdir()
+    calls = []
+
+    def run(argv, **kw):
+        calls.append(argv)
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / ".git").mkdir(exist_ok=True)
+        (dest / "setup.py").write_text("", encoding="utf-8")
+        return ""
+
+    ins.clone("org/repo", dest, run=run)
+    assert calls, "a half-clone must be re-cloned, not returned as it stands"
+    assert ins.files(dest), "and the retry must leave a readable tree"
+
+
+def test_a_finished_clone_is_not_fetched_again(tmp_path):
+    dest = tmp_path / "whole"
+    dest.mkdir()
+    (dest / ".git").mkdir()
+    (dest / "setup.py").write_text("", encoding="utf-8")
+
+    def run(argv, **kw):
+        raise AssertionError("re-cloned a tree that was already complete")
+
+    assert ins.clone("org/repo", dest, run=run) == dest
+
+
+def test_a_failed_clone_leaves_nothing_behind(tmp_path):
+    dest = tmp_path / "doomed"
+
+    def run(argv, **kw):
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / ".git").mkdir()
+        raise ins.InspectError("git: no answer in 180s")
+
+    with pytest.raises(ins.InspectError):
+        ins.clone("org/repo", dest, run=run)
+    assert not dest.exists()
+
+
+def test_a_clone_timeout_is_an_inspect_error(monkeypatch):
+    """TimeoutExpired is not an InspectError, so it escaped the per-candidate
+    guard in _report_inspect and took the whole batch down. Issue #181."""
+    import subprocess
+
+    def boom(*a, **kw):
+        raise subprocess.TimeoutExpired(cmd=["git"], timeout=180.0)
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    with pytest.raises(ins.InspectError) as exc:
+        ins._run(["git", "clone", "x"])
+    assert "180s" in str(exc.value)
+
+
+def test_a_nonzero_exit_is_still_an_inspect_error(monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(
+        args=a, returncode=128, stdout="", stderr="repository not found"))
+    with pytest.raises(ins.InspectError) as exc:
+        ins._run(["git", "clone", "x"])
+    assert "repository not found" in str(exc.value)

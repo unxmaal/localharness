@@ -304,6 +304,17 @@ def decide(conn: sqlite3.Connection, name: str, outcome: str, *, tier: str = "",
                        (name,)).fetchone()
     if not row:
         raise KeyError(f"no proposal named {name!r}")
+    # A DETERMINISTIC TIER RESTATING ITSELF IS NOT A SECOND FACT. A judge
+    # re-scoring is a new draw and a run is a new run, so the skip is narrow:
+    # no score, no run path, and the previous row said exactly this. Issue #184.
+    if score is None and not run_path:
+        same = conn.execute(
+            "SELECT id FROM verdicts WHERE proposal_id = ? AND tier = ? "
+            "AND outcome = ? AND detail = ? AND score IS NULL AND run_path = '' "
+            "ORDER BY id DESC LIMIT 1",
+            (row["id"], tier, outcome, detail)).fetchone()
+        if same:
+            return same["id"]
     vid = conn.execute(
         "INSERT INTO verdicts (proposal_id, outcome, tier, detail, issue, "
         "run_path, score, rubric, judge, decided_at) VALUES (?,?,?,?,?,?,?,?,?,?)",

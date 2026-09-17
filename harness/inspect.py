@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -207,20 +208,40 @@ class Fit:
 
 
 def _run(argv: list[str], cwd: Path | None = None, timeout: float = 180.0) -> str:
-    proc = subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
-                          timeout=timeout)
+    try:
+        proc = subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
+                              timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # A TimeoutExpired is not an InspectError, so it escaped the caller's
+        # per-candidate guard and took the whole batch down with it. Issue #181.
+        raise InspectError(f"{argv[0]}: no answer in {timeout:.0f}s") from None
     if proc.returncode != 0:
         raise InspectError(f"{argv[0]}: {proc.stderr.strip()[:200]}")
     return proc.stdout
+
+
+def cloned(dest: Path) -> bool:
+    """Did a clone finish? A killed one leaves a .git and no worktree."""
+    dest = Path(dest)
+    return (dest / ".git").is_dir() and any(
+        p.name != ".git" for p in dest.iterdir())
 
 
 def clone(repo: str, dest: Path, run=_run) -> Path:
     """Shallow, single branch, no tags, no history. Source only."""
     dest = Path(dest)
     if dest.exists():
-        return dest
-    run(["git", "clone", "--depth", "1", "--single-branch", "--no-tags",
-         f"https://github.com/{repo}.git", str(dest)])
+        # A HALF-CLONE READS AS ZERO FILES, and zero files is a verdict of no
+        # mlx, no cuda, no weights -- confidently wrong rather than loud.
+        if cloned(dest):
+            return dest
+        shutil.rmtree(dest, ignore_errors=True)
+    try:
+        run(["git", "clone", "--depth", "1", "--single-branch", "--no-tags",
+             f"https://github.com/{repo}.git", str(dest)])
+    except InspectError:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
     return dest
 
 

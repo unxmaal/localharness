@@ -347,3 +347,69 @@ def test_the_limit_is_honoured(tmp_path):
             name=f"org/r{i}", kind="proposal", lane="image", source="feed",
             url=f"https://{i}", why="", relevance=1, resolved=f"org/r{i}"))
     assert len(ms.pending(conn, limit=2)) == 2
+
+
+# ---- a tier restating itself (issue #184) ----------------------------------
+
+def _store(tmp_path, name="org/thing"):
+    conn = ms.connect(tmp_path / "d.db")
+    ms.record(conn, ms.Seen(name=name, source="feed", url="u"))
+    return conn
+
+
+def test_a_deterministic_tier_restating_itself_adds_no_row(tmp_path):
+    """Two sweeps over an unchanged candidate are one fact, not two. 128 of
+    671 rows in the real store were this."""
+    conn = _store(tmp_path)
+    first = ms.decide(conn, "org/thing", "queued", tier=ms.INSPECT,
+                      detail="fits: weights from 3.0 to 3.0 GiB")
+    again = ms.decide(conn, "org/thing", "queued", tier=ms.INSPECT,
+                      detail="fits: weights from 3.0 to 3.0 GiB")
+    assert again == first
+    n = conn.execute("SELECT COUNT(*) c FROM verdicts").fetchone()["c"]
+    assert n == 1
+
+
+def test_a_changed_detail_is_a_new_verdict(tmp_path):
+    """The negative half: re-inspecting after the ceiling moved says something
+    new, and dropping that would hide the tier correcting itself."""
+    conn = _store(tmp_path)
+    ms.decide(conn, "org/thing", "declined", tier=ms.INSPECT,
+              detail="too-big: 51.8 GiB over the 22 GiB ceiling")
+    ms.decide(conn, "org/thing", "queued", tier=ms.INSPECT,
+              detail="fits: weights from 17.0 to 17.0 GiB")
+    n = conn.execute("SELECT COUNT(*) c FROM verdicts").fetchone()["c"]
+    assert n == 2
+
+
+def test_two_tiers_saying_the_same_words_are_two_verdicts(tmp_path):
+    """A screen verdict and a later measurement are two facts even when the
+    text matches. Which tier produced a row is part of comparability."""
+    conn = _store(tmp_path)
+    ms.decide(conn, "org/thing", "screened", tier=ms.SCREEN, detail="ran")
+    ms.decide(conn, "org/thing", "screened", tier=ms.MEASURE, detail="ran")
+    n = conn.execute("SELECT COUNT(*) c FROM verdicts").fetchone()["c"]
+    assert n == 2
+
+
+def test_a_rescore_is_always_a_new_draw(tmp_path):
+    """The judge samples and nothing pins a seed, so an identical score from a
+    second run is a second observation, not a repeat. RULE #217."""
+    conn = _store(tmp_path)
+    ms.decide(conn, "org/thing", "queued", tier=ms.JUDGE, detail="novel",
+              score=3.0, rubric="novelty@5", judge="q3-4b")
+    ms.decide(conn, "org/thing", "queued", tier=ms.JUDGE, detail="novel",
+              score=3.0, rubric="novelty@5", judge="q3-4b")
+    n = conn.execute("SELECT COUNT(*) c FROM verdicts").fetchone()["c"]
+    assert n == 2
+
+
+def test_a_second_run_is_always_a_new_verdict(tmp_path):
+    """Same for a run path: two runs are two runs however they turned out."""
+    conn = _store(tmp_path)
+    ms.decide(conn, "org/thing", "measured", tier=ms.MEASURE, detail="9/9",
+              run_path="runs/a")
+    ms.decide(conn, "org/thing", "measured", tier=ms.MEASURE, detail="9/9",
+              run_path="runs/b")
+    n = conn.execute("SELECT COUNT(*) c FROM verdicts").fetchone()["c"]
+    assert n == 2

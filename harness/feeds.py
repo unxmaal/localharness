@@ -15,6 +15,7 @@ import os
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass, field
@@ -457,6 +458,54 @@ def probe(url: str, **kw) -> tuple[bool, str]:
     if not entries:
         return False, "parses as a feed but has no entries"
     return True, f"{len(entries)} entries"
+
+
+#: Where a feed lives when the page does not say. Ordered by how often each is
+#: the answer, so the first hit is usually the first request.
+FEED_PATHS = ("/feed", "/rss", "/feed.xml", "/rss.xml", "/atom.xml",
+              "/index.xml", "/feeds/posts/default")
+
+_ALTERNATE = re.compile(
+    r'<link\b[^>]*\brel=["\']?alternate["\']?[^>]*>', re.I)
+_TYPE_FEED = re.compile(
+    r'\btype=["\']?application/(?:rss|atom)\+xml', re.I)
+_HREF = re.compile(r'\bhref=["\']([^"\']+)["\']', re.I)
+
+
+def declared_feeds(html: str, base: str) -> list[str]:
+    """Feed URLs a page advertises, the way a browser reads them."""
+    out = []
+    for tag in _ALTERNATE.findall(html):
+        if not _TYPE_FEED.search(tag):
+            continue
+        href = _HREF.search(tag)
+        if href:
+            out.append(urllib.parse.urljoin(base, href.group(1)))
+    return out
+
+
+def find_feed(url: str, fetcher=fetch, probe=probe) -> tuple[str, str]:
+    """Resolve the feed for a page, returning (feed_url, why).
+
+    A proposed source arrives as ONE ARTICLE LINK lifted from someone's prose,
+    which is never itself a feed. Ask the page what it advertises, then try the
+    conventional paths on its host. Issue #183.
+    """
+    try:
+        html = fetcher(url)
+    except FeedError as exc:
+        return "", str(exc)[:200]
+    tried = []
+    parts = urllib.parse.urlsplit(url)
+    root = urllib.parse.urlunsplit((parts.scheme, parts.netloc, "", "", ""))
+    for cand in declared_feeds(html, url) + [root + p for p in FEED_PATHS]:
+        if cand in tried:
+            continue
+        tried.append(cand)
+        ok, why = probe(cand)
+        if ok:
+            return cand, why
+    return "", f"no feed at {len(tried)} candidate path(s)"
 
 
 def read(source: Source, cache_dir: Path | None = None,

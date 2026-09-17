@@ -1361,10 +1361,13 @@ def _report_sources(a) -> int:
         print("\nsources these feeds point at that we do not read:")
         for c in proposed:
             # Probing is the difference between a shortlist and a guess: half
-            # of these hosts serve no feed at all. Issue #50.
-            ok, why = feeds.probe(c.source)
-            mark = "FEED " if ok else "none "
+            # of these hosts serve no feed at all. Issue #50. #182 fixed the
+            # argument (the URL is in `source`, not `how`); this resolves the
+            # host to its feed, which an example article link never is. #183.
+            feed, why = feeds.find_feed(c.source)
+            mark = "FEED " if feed else "none "
             print(f"  {mark} {c.name:20} {c.note}")
+            print(f"        {feed or c.source}")
             print(f"        {why}")
         print(f"\n  Add one to {feeds.config_path()} to start reading it. "
               f"Deliberately manual: a source URL out of untrusted prose "
