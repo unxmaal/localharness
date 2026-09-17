@@ -488,24 +488,41 @@ def find_feed(url: str, fetcher=fetch, probe=probe) -> tuple[str, str]:
     """Resolve the feed for a page, returning (feed_url, why).
 
     A proposed source arrives as ONE ARTICLE LINK lifted from someone's prose,
-    which is never itself a feed. Ask the page what it advertises, then try the
-    conventional paths on its host. Issue #183.
+    which is usually not itself a feed. Ask the page what it advertises, then
+    try the conventional paths on its host. Issue #183.
     """
     try:
-        html = fetcher(url)
+        text = fetcher(url)
     except FeedError as exc:
         return "", str(exc)[:200]
+    # THE URL MAY ALREADY BE THE FEED. Costs nothing -- the body is in hand --
+    # and skips guessing at paths for a source that needed no resolving.
+    try:
+        entries = parse(text)
+    except FeedError as exc:
+        entries, why_not = [], str(exc)
+    else:
+        why_not = "parses as a feed but has no entries"
+    if entries:
+        return url, f"{len(entries)} entries"
     tried = []
     parts = urllib.parse.urlsplit(url)
     root = urllib.parse.urlunsplit((parts.scheme, parts.netloc, "", "", ""))
-    for cand in declared_feeds(html, url) + [root + p for p in FEED_PATHS]:
+    for cand in declared_feeds(text, url) + [root + p for p in FEED_PATHS]:
         if cand in tried:
             continue
         tried.append(cand)
-        ok, why = probe(cand)
+        # A SPECULATIVE PATH GETS ONE ATTEMPT. `fetch` defaults to 4 retries
+        # 20s apart, which is right for a source we committed to reading and
+        # wrong for a guess: seven misses cost nine minutes and timed out the
+        # sources report. A 404 on /feed is an answer, not a flaky network.
+        ok, why = probe(cand, retries=0)
         if ok:
             return cand, why
-    return "", f"no feed at {len(tried)} candidate path(s)"
+    # CARRY WHY THE PAGE ITSELF FAILED. "no feed at 8 paths" says a search
+    # happened; it does not say the URL was an HTML article, which is what a
+    # reader needs to judge whether the host is worth pursuing by hand.
+    return "", f"{why_not}; no feed at {len(tried)} candidate path(s)"
 
 
 def read(source: Source, cache_dir: Path | None = None,

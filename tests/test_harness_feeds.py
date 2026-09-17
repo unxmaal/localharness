@@ -542,20 +542,20 @@ def test_a_page_declaring_nothing_declares_nothing():
 def test_the_declared_feed_is_preferred_over_a_guessed_path():
     asked = []
 
-    def probe(url):
-        asked.append(url)
+    def probe(url, **kw):
+        asked.append((url, kw.get("retries")))
         return url == "https://b.example/feed", "3 entries"
 
     got, why = feeds.find_feed("https://b.example/post/1",
                                fetcher=lambda u: ALTERNATE, probe=probe)
     assert got == "https://b.example/feed"
-    assert asked == ["https://b.example/feed"], "stop at the first answer"
+    assert asked == [("https://b.example/feed", 0)], "stop at the first answer"
 
 
 def test_a_conventional_path_is_tried_when_the_page_declares_nothing():
     """hatenablog serves /feed on every blog and advertises it nowhere the
     proposal's example article can show. Issue #183."""
-    def probe(url):
+    def probe(url, **kw):
         return url == "https://b.example/rss", "9 entries"
 
     got, _ = feeds.find_feed("https://b.example/entry/2026/09/11",
@@ -568,7 +568,7 @@ def test_a_host_with_no_feed_anywhere_resolves_to_nothing():
     resolver that always finds something is not resolving anything."""
     got, why = feeds.find_feed("https://b.example/post/1",
                                fetcher=lambda u: "<html></html>",
-                               probe=lambda u: (False, "root element is <html>"))
+                               probe=lambda u, **kw: (False, "root element is <html>"))
     assert got == ""
     assert "candidate path" in why
 
@@ -591,3 +591,33 @@ def test_the_probe_is_given_a_url_and_never_the_hint_text():
     assert not hasattr(cap, "url")
     assert cap.source.startswith("http")
     assert not cap.how.startswith("http")
+
+
+def test_a_url_that_is_already_a_feed_needs_no_resolving():
+    """A source can be proposed by its feed URL. The body is already in hand,
+    so answering from it costs nothing and skips guessing at paths."""
+    def probe(url, **kw):
+        raise AssertionError("guessed at a path for a URL that was the feed")
+
+    feed = (Path(__file__).parent / "fixtures" / "feeds"
+            / "reddit-top-week.xml").read_text(encoding="utf-8")
+    got, why = feeds.find_feed("https://b.example/feed.xml",
+                               fetcher=lambda u: feed, probe=probe)
+    assert got == "https://b.example/feed.xml"
+    assert "entries" in why
+
+
+def test_a_speculative_path_is_tried_once_and_not_retried():
+    """fetch defaults to 4 retries 20s apart, right for a source we committed
+    to reading and wrong for a guess: seven misses cost nine minutes and timed
+    out the sources report."""
+    budgets = []
+
+    def probe(url, **kw):
+        budgets.append(kw.get("retries"))
+        return False, "404"
+
+    feeds.find_feed("https://b.example/post/1",
+                    fetcher=lambda u: "<html></html>", probe=probe)
+    assert budgets, "nothing was probed"
+    assert set(budgets) == {0}, "a guess must not inherit the retry budget"
