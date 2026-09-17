@@ -1362,7 +1362,7 @@ def _report_sources(a) -> int:
         for c in proposed:
             # Probing is the difference between a shortlist and a guess: half
             # of these hosts serve no feed at all. Issue #50.
-            ok, why = feeds.probe(c.how or c.url)
+            ok, why = feeds.probe(c.source)
             mark = "FEED " if ok else "none "
             print(f"  {mark} {c.name:20} {c.note}")
             print(f"        {why}")
