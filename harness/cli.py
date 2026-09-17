@@ -419,6 +419,8 @@ def cmd_discover(a) -> int:
     every time anything is installed or any eval is run. A number in a document
     is wrong by the next commit.
     """
+    if getattr(a, "sweep", False):
+        return _report_sweep(a)
     if getattr(a, "inspect", False):
         return _report_inspect(a)
     if getattr(a, "judge", False) and getattr(a, "from_store", False):
@@ -1375,6 +1377,33 @@ def _report_sources(a) -> int:
     return 0
 
 
+#: Every source family, in the order a sweep reads them. Each entry is the
+#: attribute cmd_discover dispatches on, so adding a source family here is the
+#: only edit needed to put it in the sweep.
+SOURCE_TIERS = ("feeds", "neighbors")
+
+
+def _report_sweep(a) -> int:
+    """Read EVERY source, then report. What "run a discovery" should mean.
+
+    `--feeds` refreshes the eight feeds and leaves github-crowd untouched,
+    because only the --neighbors path calls record_fetch for it. So a sweep
+    that ran feeds alone left the star graph -- the source measured as this
+    project's best, and the one with zero overlap with the feeds -- nine days
+    stale while reporting success. Issue #187.
+    """
+    rc = 0
+    for tier in SOURCE_TIERS:
+        # Each report reads its own flags off the namespace, so the flag being
+        # dispatched on has to be the one that is set.
+        flags = {t: t == tier for t in SOURCE_TIERS}
+        sub = argparse.Namespace(**{**vars(a), **flags, "sweep": False})
+        if not a.json:
+            print(f"\n=== {tier} ===")
+        rc = cmd_discover(sub) or rc
+    return rc
+
+
 def _report_feeds(a) -> int:
     from harness import memory_store as ms
     store = ms.connect()
@@ -1638,6 +1667,10 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--external", action="store_true",
                    help="ask the registries what exists that this machine has "
                         "never measured (needs --lane)")
+    d.add_argument("--sweep", action="store_true",
+                   help="read every source family, then report. What running "
+                        "a discovery means: --feeds alone leaves the star "
+                        "graph unread")
     d.add_argument("--feeds", action="store_true",
                    help="read the community aggregation feeds for candidates")
     d.add_argument("--sources", action="store_true",

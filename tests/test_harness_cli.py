@@ -4,6 +4,7 @@ Tests here never invoke a real generator: they assert the command line built,
 the exit status, and what the user is told. Whether mflux draws a good fox is
 the eval suite's question.
 """
+import argparse
 import os
 import struct
 from pathlib import Path
@@ -737,3 +738,68 @@ def test_sensitivity_lists_its_probes_and_what_it_cannot_cover(capsys):
 def test_an_unknown_probe_is_named_rather_than_swept(capsys):
     assert cli.main(["sensitivity", "no_such_knob"]) != 0
     assert "no_such_knob" in capsys.readouterr().err
+
+
+# ---- a sweep reads every source family (issue #187) ------------------------
+
+def test_a_sweep_reads_every_source_family(monkeypatch):
+    """--feeds alone left github-crowd nine days stale while reporting
+    success, because only the --neighbors path records a fetch for it."""
+    from harness import cli
+
+    read = []
+    monkeypatch.setattr(cli, "_report_feeds", lambda a: read.append("feeds") or 0)
+    monkeypatch.setattr(cli, "_report_neighbors",
+                        lambda a: read.append("neighbors") or 0)
+    rc = cli.cmd_discover(argparse.Namespace(sweep=True, json=False))
+    assert rc == 0
+    assert read == list(cli.SOURCE_TIERS)
+
+
+def test_a_sweep_dispatches_one_tier_at_a_time(monkeypatch):
+    """Each report reads its own flag off the namespace, so a sub-run must
+    carry exactly one tier set or cmd_discover dispatches to the wrong one."""
+    from harness import cli
+
+    seen = []
+    monkeypatch.setattr(cli, "_report_feeds",
+                        lambda a: seen.append((a.feeds, a.neighbors)) or 0)
+    monkeypatch.setattr(cli, "_report_neighbors",
+                        lambda a: seen.append((a.feeds, a.neighbors)) or 0)
+    cli.cmd_discover(argparse.Namespace(sweep=True, json=False))
+    assert seen == [(True, False), (False, True)]
+
+
+def test_a_sweep_does_not_recurse(monkeypatch):
+    """The sub-namespace must clear `sweep`, or each tier sweeps again."""
+    from harness import cli
+
+    depth = []
+    monkeypatch.setattr(cli, "_report_feeds",
+                        lambda a: depth.append(a.sweep) or 0)
+    monkeypatch.setattr(cli, "_report_neighbors", lambda a: 0)
+    cli.cmd_discover(argparse.Namespace(sweep=True, json=False))
+    assert depth == [False]
+
+
+def test_a_failing_tier_does_not_hide_behind_a_passing_one(monkeypatch):
+    """A sweep that returns 0 because the last tier worked would report
+    success while the star graph went unread, which is issue #187 again."""
+    from harness import cli
+
+    monkeypatch.setattr(cli, "_report_feeds", lambda a: 1)
+    monkeypatch.setattr(cli, "_report_neighbors", lambda a: 0)
+    assert cli.cmd_discover(argparse.Namespace(sweep=True, json=False)) == 1
+
+
+def test_feeds_alone_still_reads_only_the_feeds(monkeypatch):
+    """The negative half: --feeds keeps meaning --feeds, so the CronJob's old
+    behaviour is still reachable and this is a new verb, not a redefinition."""
+    from harness import cli
+
+    read = []
+    monkeypatch.setattr(cli, "_report_feeds", lambda a: read.append("feeds") or 0)
+    monkeypatch.setattr(cli, "_report_neighbors",
+                        lambda a: read.append("neighbors") or 0)
+    cli.cmd_discover(argparse.Namespace(sweep=False, feeds=True, json=False))
+    assert read == ["feeds"]
