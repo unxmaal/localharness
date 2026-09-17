@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from harness import discover, feeds
+from harness import discover, feeds, paths
 from harness import machine as mach
 from harness.memory import Accelerator
 from harness.feeds import FeedError, Source
@@ -621,3 +621,39 @@ def test_a_speculative_path_is_tried_once_and_not_retried():
                     fetcher=lambda u: "<html></html>", probe=probe)
     assert budgets, "nothing was probed"
     assert set(budgets) == {0}, "a guess must not inherit the retry budget"
+
+
+# ---- the suite never writes to a real home (issue #188) --------------------
+
+def test_the_suite_gets_its_own_home(_home):
+    """Red-proofs the autouse fixture: without it this reads the developer's
+    real ~/localharness and the whole guard is decorative."""
+    assert paths.home() == _home
+    assert paths.home() != feeds.paths.DEFAULT_HOME
+
+
+def test_reading_a_source_stamps_the_state_it_was_given(tmp_path):
+    """read() redirected cache_dir and not the state write, so a test that
+    looked isolated stamped the user's real discovery-state.json."""
+    state = tmp_path / "state.json"
+    src = Source("s", "https://example.invalid/f.rss")
+    feeds.read(src, cache_dir=tmp_path, state=state,
+               fetcher=lambda u: WEEK.read_text(encoding="utf-8"))
+    assert feeds.last_fetched("s", path=state) is not None
+
+
+def test_reading_a_source_never_stamps_the_developers_real_home(tmp_path, _home):
+    """The negative half, and the one that would have caught #188: with no
+    `state` given the write still has to land under LOCALHARNESS_HOME, never
+    at the hardcoded default that is somebody's actual machine."""
+    real = paths.DEFAULT_HOME / "discovery-state.json"
+    before = real.read_bytes() if real.exists() else None
+
+    src = Source("s", "https://example.invalid/f.rss")
+    feeds.read(src, cache_dir=tmp_path,
+               fetcher=lambda u: WEEK.read_text(encoding="utf-8"))
+
+    assert (_home / "discovery-state.json").exists()
+    assert feeds.last_fetched("s") is not None
+    after = real.read_bytes() if real.exists() else None
+    assert after == before, "a test wrote to the developer's real home"

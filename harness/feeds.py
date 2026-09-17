@@ -526,8 +526,15 @@ def find_feed(url: str, fetcher=fetch, probe=probe) -> tuple[str, str]:
 
 
 def read(source: Source, cache_dir: Path | None = None,
-         ttl_hours: float = 12.0, fetcher=fetch) -> list[Entry]:
-    """Entries for one source, from a cached copy when it is fresh enough."""
+         ttl_hours: float = 12.0, fetcher=fetch,
+         state: Path | None = None) -> list[Entry]:
+    """Entries for one source, from a cached copy when it is fresh enough.
+
+    `state` is redirectable for the same reason `cache_dir` is. Without it this
+    function wrote half its output to wherever the caller asked and half to the
+    real home, so a test that redirected the cache still stamped the user's
+    discovery-state.json. Issue #188.
+    """
     cache_dir = Path(cache_dir or (paths.home() / "cache" / "feeds"))
     cache_dir.mkdir(parents=True, exist_ok=True)
     cached = cache_dir / f"{re.sub(r'[^A-Za-z0-9_-]', '_', source.name)}.xml"
@@ -536,7 +543,7 @@ def read(source: Source, cache_dir: Path | None = None,
     text = fetcher(source.url)
     entries = parse(text)          # parse before caching, never cache a block page
     cached.write_text(text, encoding="utf-8")
-    record_fetch(source.name)
+    record_fetch(source.name, path=state)
     return entries
 
 
