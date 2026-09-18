@@ -419,6 +419,8 @@ def cmd_discover(a) -> int:
     every time anything is installed or any eval is run. A number in a document
     is wrong by the next commit.
     """
+    if getattr(a, "loop", False):
+        return _report_loop(a)
     if getattr(a, "sweep", False):
         return _report_sweep(a)
     if getattr(a, "inspect", False):
@@ -1383,6 +1385,70 @@ def _report_sources(a) -> int:
 SOURCE_TIERS = ("feeds", "neighbors")
 
 
+#: The loop, in order: (label, the attribute cmd_discover dispatches on, does
+#: it need --run). Sweeping reads feeds and the GitHub API and takes about a
+#: minute, which is the "find what exists" step and runs either way. INSPECT
+#: CLONES SOURCE, measured at over ten minutes across a full queue, so it is
+#: gated with the rest: a dry run that takes ten minutes is not a dry run.
+LOOP_STEPS = (("sweep", "sweep", False),
+              ("inspect", "inspect", True),
+              ("queue", "queue", False))
+
+
+def _report_loop(a) -> int:
+    """Every step from a sweep to an adopted winner. Issue #201.
+
+    SAYS WHAT IT WOULD DO AND STOPS unless --run. Fetching weights and running
+    a lane are the two operations that spend gigabytes and minutes, and a loop
+    that starts doing either because something ranked well is how a laptop ends
+    up unusable overnight.
+    """
+    import argparse as _ap
+
+    from harness import adopt, rank
+    from harness import memory_store as ms
+
+    run = bool(getattr(a, "run", False))
+    rc = 0
+    for label, attr, needs_run in LOOP_STEPS:
+        if needs_run and not run:
+            print(f"\n=== {label} (skipped; --run) ===")
+            continue
+        print(f"\n=== {label} ===")
+        flags = {f: f == attr for _, f, _ in LOOP_STEPS}
+        sub = _ap.Namespace(**{**vars(a), **flags, "loop": False})
+        rc = cmd_discover(sub) or rc
+
+    store = ms.connect()
+    try:
+        rows = ms.judgeable(store, limit=500)
+        short = rank.wanted(rows)
+        if short:
+            print(f"\n=== lanes wanted ===")
+            print(f"{len(short)} candidate(s) recur and no lane can test them. "
+                  f"A lane is a decision for a person, so they are reported "
+                  f"rather than ranked or invented:")
+            for row in short[:10]:
+                print(f"  {row.get('times', 0)}x  {row['name']}")
+        print(f"\n=== adopted ===")
+        current = adopt.adopted(store)
+        if current:
+            for lane, name in sorted(current.items()):
+                print(f"  {lane:8} {name}")
+        else:
+            print("  nothing adopted yet; every lane serves its typed constant")
+    finally:
+        store.close()
+
+    if not run:
+        print("\ninspect, fetch, screen and measure not run. Add --run to "
+              "spend the disk and the minutes.")
+        return rc
+    print("\n=== fetch, screen, measure, adopt ===")
+    print("  not yet wired into the chain; see #201.")
+    return rc
+
+
 def _report_sweep(a) -> int:
     """Read EVERY source, then report. What "run a discovery" should mean.
 
@@ -1667,6 +1733,9 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--external", action="store_true",
                    help="ask the registries what exists that this machine has "
                         "never measured (needs --lane)")
+    d.add_argument("--loop", action="store_true",
+                   help="every step from a sweep to an adopted winner. Says "
+                        "what it would do; --run spends the disk and minutes")
     d.add_argument("--sweep", action="store_true",
                    help="read every source family, then report. What running "
                         "a discovery means: --feeds alone leaves the star "

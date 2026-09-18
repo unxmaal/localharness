@@ -147,7 +147,7 @@ class AudioError(RuntimeError):
 
 
 def speak(text: str, out: str | Path, voice: str = DEFAULT_KOKORO_VOICE,
-          speed: float = 1.0, model: str = DEFAULT_TTS_MODEL,
+          speed: float = 1.0, model: str = "",
           base_url: str = DEFAULT_BASE_URL,
           timeout: float = 120.0,
           ref_audio: str | Path | None = None,
@@ -164,6 +164,11 @@ def speak(text: str, out: str | Path, voice: str = DEFAULT_KOKORO_VOICE,
     never sent, which sends you looking in the wrong place.
     """
     out = Path(out)
+    # THE ADOPTED WINNER, resolved here rather than captured in the signature.
+    # A default argument is bound when the function is defined, so an adoption
+    # written after import could never reach a caller. Issue #201.
+    from harness import adopt
+    model = model or adopt.default_for("tts", DEFAULT_TTS_MODEL)
     payload = {"model": model, "input": text,
                "speed": speed, "response_format": "wav"}
     # Cloning path only: Kokoro takes neither field. Issue #6.

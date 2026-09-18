@@ -115,16 +115,45 @@ def value(row: dict, *, serving: set[str] = frozenset(),
     return score, why
 
 
-def rank(rows, *, serving=(), measured_lanes=(), ceiling_gib: float = 22.0):
-    """Best first. Ties break on name so the order is stable across runs."""
+def lane_of(row) -> str:
+    """The lane this row can be tested in, normalised. Empty means none."""
+    lane = (row.get("lane") or "").strip().lower()
+    return "" if lane in ("all", "text") else lane
+
+
+def rank(rows, *, serving=(), measured_lanes=(), ceiling_gib: float = 22.0,
+         keep_laneless: bool = False):
+    """Best first. Ties break on name so the order is stable across runs.
+
+    A candidate NO LANE CAN TEST IS DROPPED rather than ranked last. Penalising
+    it left 66 of 94 queue slots holding things nothing could measure, which
+    crowds out the candidates a screen could actually answer a question about.
+    Most are tools rather than models -- mflux, mlx-vlm, nativ -- and no lane
+    tests a library. See wanted() for what to do with them instead. Issue #201.
+    """
     serving = {s.lower() for s in serving}
     measured = {m.lower() for m in measured_lanes}
     out = []
     for row in rows:
+        if not keep_laneless and not lane_of(row):
+            continue
         got, why = value(row, serving=serving, measured_lanes=measured,
                          ceiling_gib=ceiling_gib)
         out.append({**row, "value": got, "value_why": "; ".join(why)})
     return sorted(out, key=lambda r: (-r["value"], r["name"]))
+
+
+def wanted(rows, minimum: int = 2) -> list[dict]:
+    """Laneless candidates that keep coming back, most-seen first.
+
+    A LANE IS A PERSON'S DECISION. Dropping these silently would throw away the
+    signal that the harness is missing something; inventing a lane for them
+    would be the harness deciding what it is for. So they are reported, and
+    somebody chooses. Issue #201.
+    """
+    out = [r for r in rows
+           if not lane_of(r) and int(r.get("times") or 0) >= minimum]
+    return sorted(out, key=lambda r: (-int(r.get("times") or 0), r["name"]))
 
 
 def serving(config=None) -> set[str]:
