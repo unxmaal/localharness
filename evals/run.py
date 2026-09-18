@@ -228,11 +228,74 @@ def is_kokoro(model: str) -> bool:
     return "kokoro" in model.lower()
 
 
+def effective_sampling(modality: str, candidates: list[str]) -> dict:
+    """What this run actually asked for, per modality.
+
+    The receipt used to record completion.SAMPLING verbatim, which is the
+    SHIPPED table rather than what the run used. A candidate carrying
+    `temperature=0.7` produced a receipt identical to one at the default, so
+    comparable() answered "same exam" and two temperatures would rank in one
+    table. Issue #90.
+
+    The default falls through per modality exactly as complete_with_usage
+    resolves it, so a run with no overrides records what it always recorded.
+    """
+    out = {m: dict(v) for m, v in sorted(completion.SAMPLING.items())}
+    seen: dict[str, dict] = {}
+    for m in sorted({modality} | set(out)):
+        if m and m != "all":
+            out.setdefault(m, {})
+            out[m].setdefault("temperature", completion.DEFAULT_TEMPERATURE)
+    for candidate in candidates:
+        if kind_of(candidate) != "gateway":
+            continue
+        _, _, optstr = candidate.partition(",")
+        if not optstr:
+            continue
+        for key, value in parse_options(optstr, candidate).items():
+            try:
+                value = float(value)
+            except ValueError:
+                pass
+            seen.setdefault(key, {}).setdefault(value, []).append(candidate)
+            out.setdefault(modality, {})[key] = value
+    # ONE RECEIPT DESCRIBES ONE RUN. Candidates disagreeing on a sampling knob
+    # would leave the receipt recording whichever was parsed last, and
+    # comparable() treats sampling as an axis precisely because two values are
+    # two exams. Refuse rather than record a number that was true of a third of
+    # the run. Issue #90.
+    for key, values in sorted(seen.items()):
+        if len(values) > 1:
+            spread = "; ".join(f"{v} ({', '.join(c)})"
+                               for v, c in sorted(values.items(), key=str))
+            raise SystemExit(
+                f"candidates disagree on {key}: {spread}. Two values are two "
+                f"exams, so run them separately and compare the results.")
+    return out
+
+
 def build_runner(candidate: str, gateway: str, outdir: Path | None,
                  adherence: str | None = None):
     kind = kind_of(candidate)
     if kind == "gateway":
-        return CompletionRunner(gateway, candidate)
+        # A gateway alias may carry sampling overrides, so a sweep is a command
+        # rather than an edit to a constant. `temperature` is the one that had
+        # never been varied: completion.SAMPLING pins svg and web at 0.4 and
+        # everything else falls through to DEFAULT_TEMPERATURE. Issue #90.
+        alias, _, optstr = candidate.partition(",")
+        options = parse_options(optstr, candidate) if optstr else {}
+        over = {}
+        for key in ("temperature", "top_p", "repetition_penalty"):
+            if key in options:
+                try:
+                    over[key] = float(options.pop(key))
+                except ValueError:
+                    raise SystemExit(
+                        f"{candidate}: {key} must be a number") from None
+        if options:
+            raise SystemExit(f"{candidate}: unknown option(s) "
+                             f"{', '.join(sorted(options))}")
+        return CompletionRunner(gateway, alias.strip(), sampling=over or None)
     if kind == "tts":
         return _speech_runner(candidate, outdir)
     if kind == "stt":
@@ -551,7 +614,7 @@ def main(argv: list[str] | None = None) -> int:
             modality=args.modality,
             case_ids=tuple(sorted({c.id for c in cases})),
             repeat=args.repeat,
-            sampling={m: dict(v) for m, v in sorted(completion.SAMPLING.items())},
+            sampling=effective_sampling(args.modality, candidates),
             gateway=args.gateway,
             adherence=getattr(args, "adherence", "") or "",
             tier="screen" if getattr(args, "screen", False) else "measure",

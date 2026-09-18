@@ -901,3 +901,181 @@ def test_the_default_voice_is_one_this_machine_could_have():
 
     assert audio.DEFAULT_KOKORO_VOICE in (
         "am_adam", "am_onyx", "bm_george", "af_sky", "ff_siwis")
+
+
+# ---- sampling overrides on a gateway candidate (issue #90) -----------------
+
+def test_a_gateway_candidate_takes_no_overrides_by_default(tmp_path):
+    """The shipped defaults are what the product uses, so a bare alias must
+    send nothing extra."""
+    r = build_runner("local-mid", "http://gw", tmp_path)
+    assert r.candidate == "local-mid"
+    assert r.sampling == {}
+
+
+def test_a_temperature_override_reaches_the_runner(tmp_path):
+    r = build_runner("local-mid,temperature=0.7", "http://gw", tmp_path)
+    assert r.candidate == "local-mid", "the option must not enter the model name"
+    assert r.sampling == {"temperature": 0.7}
+
+
+def test_a_non_numeric_override_is_a_bad_spec_not_a_traceback(tmp_path):
+    with pytest.raises(SystemExit) as exc:
+        build_runner("local-mid,temperature=hot", "http://gw", tmp_path)
+    assert "must be a number" in str(exc.value)
+
+
+def test_an_unknown_option_is_refused(tmp_path):
+    """Accepting it silently would send an unknown key to the gateway and
+    report whatever came back as a measurement of the alias."""
+    with pytest.raises(SystemExit) as exc:
+        build_runner("local-mid,nonsense=1", "http://gw", tmp_path)
+    assert "nonsense" in str(exc.value)
+
+
+def test_the_receipt_records_the_temperature_the_run_used():
+    """A run at 0.7 previously produced a receipt identical to one at the
+    default, so comparable() called them one exam."""
+    from harness import completion
+    from evals.run import effective_sampling
+
+    base = effective_sampling("code", ["local-mid"])
+    hot = effective_sampling("code", ["local-mid,temperature=0.7"])
+    assert base["code"]["temperature"] == completion.DEFAULT_TEMPERATURE
+    assert hot["code"]["temperature"] == 0.7
+
+
+def test_two_temperatures_are_not_one_table():
+    from evals.core import Receipt, comparable
+    from evals.run import effective_sampling
+
+    def r(cands):
+        return Receipt(modality="code", case_ids=["a"], tier="measure",
+                       repeat=1, gateway="http://gw",
+                       sampling=effective_sampling("code", cands))
+
+    ok, why = comparable(r(["local-mid"]), r(["local-mid,temperature=0.7"]))
+    assert not ok
+    assert "sampling" in why.lower() or "0.7" in why
+
+
+def test_the_same_temperature_still_compares():
+    """The negative half: an axis that refuses everything ranks nothing."""
+    from evals.core import Receipt, comparable
+    from evals.run import effective_sampling
+
+    def r():
+        return Receipt(modality="code", case_ids=["a"], tier="measure",
+                       repeat=1, gateway="http://gw",
+                       sampling=effective_sampling("code", ["local-mid"]))
+
+    ok, _ = comparable(r(), r())
+    assert ok
+
+
+def test_a_lane_with_its_own_sampling_keeps_it():
+    """svg and web are pinned at 0.4 by completion.SAMPLING and must not be
+    rewritten to the default by the fall-through."""
+    from evals.run import effective_sampling
+
+    got = effective_sampling("svg", ["local-mid"])
+    assert got["svg"]["temperature"] == 0.4
+    assert got["svg"]["repetition_penalty"] == 1.1
+
+
+def test_the_temperature_in_the_receipt_is_the_one_the_request_sends(monkeypatch, tmp_path):
+    """Gauntlet class 8, the confounded experiment: RULE #215 recorded three
+    configurations labelled '1 hop', '2 hops' and '2 hops / 450' that produced
+    identical runs, so the conclusion described an experiment that never ran.
+
+    A temperature sweep has exactly that shape. The receipt records what
+    effective_sampling COMPUTED; this asserts it equals what the gateway is
+    actually asked for. Without it, broken plumbing reports 'the ordering does
+    not move' and the constant is declared safe on three identical runs."""
+    import httpx
+
+    from harness import completion
+    from evals.core import Case
+    from evals.run import effective_sampling
+
+    sent = {}
+
+    class Reply:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"choices": [{"message": {"content": "x = 1"}}], "usage": {}}
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+    def post(url, json=None, **kw):
+        sent.update(json or {})
+        return Reply()
+
+    monkeypatch.setattr(httpx, "post", post)
+
+    for asked in (0.0, 0.2, 0.7):
+        spec = f"local-mid,temperature={asked}"
+        runner = build_runner(spec, "http://gw", tmp_path)
+        runner.generate(Case(id="c", modality="code", prompt="p"))
+        recorded = effective_sampling("code", [spec])["code"]["temperature"]
+        assert sent["temperature"] == asked, (
+            f"asked {asked}, the gateway was sent {sent.get('temperature')}")
+        assert recorded == asked, f"asked {asked}, the receipt recorded {recorded}"
+
+
+def test_a_bare_alias_sends_the_shipped_default(monkeypatch, tmp_path):
+    """The negative half. A knob that always overrides would mean every past
+    run was at some other temperature than the one recorded."""
+    import httpx
+
+    from harness import completion
+    from evals.core import Case
+
+    sent = {}
+
+    class Reply:
+        status_code = 200
+        json = staticmethod(
+            lambda: {"choices": [{"message": {"content": "x = 1"}}], "usage": {}})
+        raise_for_status = staticmethod(lambda: None)
+
+    monkeypatch.setattr(httpx, "post",
+                        lambda url, json=None, **kw: (sent.update(json or {}), Reply())[1])
+    build_runner("local-mid", "http://gw", tmp_path).generate(
+        Case(id="c", modality="code", prompt="p"))
+    assert sent["temperature"] == completion.DEFAULT_TEMPERATURE
+
+
+def test_a_lane_with_its_own_sampling_is_unchanged_by_a_bare_alias(monkeypatch, tmp_path):
+    """svg is pinned at 0.4. A bare alias must still send 0.4, or this change
+    silently re-tuned two lanes that were not under test."""
+    import httpx
+
+    from evals.core import Case
+
+    sent = {}
+
+    class Reply:
+        status_code = 200
+        json = staticmethod(
+            lambda: {"choices": [{"message": {"content": "<svg/>"}}], "usage": {}})
+        raise_for_status = staticmethod(lambda: None)
+
+    monkeypatch.setattr(httpx, "post",
+                        lambda url, json=None, **kw: (sent.update(json or {}), Reply())[1])
+    build_runner("local-mid", "http://gw", tmp_path).generate(
+        Case(id="c", modality="svg", prompt="p"))
+    assert sent["temperature"] == 0.4
+    assert sent["repetition_penalty"] == 1.1
+
+
+def test_two_options_on_one_candidate_both_apply(tmp_path):
+    """Gauntlet class 7: the single form working does not prove the batch form
+    works. `Closes #a, #b` cost seven issues on that assumption."""
+    r = build_runner("local-mid,temperature=0.7,top_p=0.9", "http://gw", tmp_path)
+    assert r.candidate == "local-mid"
+    assert r.sampling == {"temperature": 0.7, "top_p": 0.9}
