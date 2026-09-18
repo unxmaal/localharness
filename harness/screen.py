@@ -75,11 +75,26 @@ def is_attachment(description: str) -> str:
 
 
 def candidate_for(lane: str, model: str, description: str = "") -> str:
-    """The candidate spec for this lane, or "" when nothing here can run it."""
+    """The candidate spec for this lane, or "" when nothing here can run it.
+
+    ALREADY-SPELLED SPECS PASS THROUGH. A challenger arrives from the store as
+    a bare repo id and is wrapped once; the INCUMBENT arrives from
+    winners.typed() already spelled `mflux:flux2-klein-4b`, and wrapping it
+    again produced `mflux:mflux:flux2-klein-4b`, which resolve() rejects. So
+    the lane's own control contributed no cases, the challenger ran alone, and
+    the run printed the pairing it intended above a receipt with one candidate
+    in it. A candidate measured beside a control that did not run says nothing
+    about the candidate. Issue #214.
+    """
     if is_attachment(description):
         return ""
     spec = LANE_CANDIDATE.get(lanes.canonical(lane), "")
-    return spec.format(model=model) if spec else ""
+    if not spec:
+        return ""
+    prefix = spec.split("{model}", 1)[0]
+    if prefix and model.startswith(prefix):
+        return model
+    return spec.format(model=model)
 
 
 def plan(rows, *, missing=None) -> list[dict]:
