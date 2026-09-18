@@ -142,13 +142,30 @@ FLUX1_MODELS = {
 }
 
 
+def family_of(model: str) -> str:
+    """The part of `model` that can name an mflux family.
+
+    A DISCOVERED CANDIDATE IS A REPO ID. The sweep proposes
+    `filipstrand/Z-Image-Turbo-mflux-4bit` and the family lookup matched on
+    `startswith`, so the owner prefix hid `z-image-turbo` and the image lane
+    could screen its own typed defaults and nothing the loop found. mflux
+    itself takes a repo id for --model; this was our lookup refusing. #213.
+    """
+    name = (model or "").strip()
+    _, _, tail = name.rpartition("/")
+    return (tail or name).lower()
+
+
 def mflux_binary(model: str) -> str:
     """The mflux entry point that can actually run `model`."""
     if model in FLUX1_MODELS:
         return "mflux-generate"
+    name = family_of(model)
     for prefix in sorted(ENTRY_POINTS, key=len, reverse=True):
-        if model.startswith(prefix):
+        if model.startswith(prefix) or name.startswith(prefix):
             return ENTRY_POINTS[prefix]
+    if name in FLUX1_MODELS:
+        return "mflux-generate"
     raise ValueError(
         f"unknown mflux model {model!r}. Known families: "
         f"{', '.join(sorted(ENTRY_POINTS))}; "
