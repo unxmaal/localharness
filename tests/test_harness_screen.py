@@ -18,7 +18,7 @@ def test_a_candidate_whose_weights_are_absent_is_waiting_not_failed():
     """A SCREEN NEVER DOWNLOADS. Fetching is its own step with its own disk
     budget, and a tier that quietly pulls gigabytes because something ranked
     well is how a laptop fills up overnight."""
-    got = screen.plan(rows(("org/m", "image")), have=lambda n: False)[0]
+    got = screen.plan(rows(("org/m", "image")), missing=lambda n: [n])[0]
     assert got["state"] == screen.WAITING
     assert "lh fetch" in got["why_not"]
 
@@ -26,13 +26,13 @@ def test_a_candidate_whose_weights_are_absent_is_waiting_not_failed():
 def test_a_lane_with_no_runner_is_named_rather_than_dropped():
     """A queue that silently drops what it cannot run looks like a queue that
     ran out."""
-    got = screen.plan(rows(("org/v", "video")), have=lambda n: True)[0]
+    got = screen.plan(rows(("org/v", "video")), missing=lambda n: [])[0]
     assert got["state"] == screen.NO_RUNNER
     assert "video" in got["why_not"]
 
 
 def test_a_candidate_with_no_lane_says_so_in_its_own_terms():
-    got = screen.plan(rows(("org/x", "")), have=lambda n: True)[0]
+    got = screen.plan(rows(("org/x", "")), missing=lambda n: [])[0]
     assert got["state"] == screen.NO_RUNNER
     assert "no lane" in got["why_not"]
 
@@ -51,7 +51,7 @@ def test_a_ready_candidate_gets_the_spec_its_lane_actually_takes():
 def test_the_command_is_one_case_one_repeat_and_no_metrics():
     """A screen asks whether it ran. A quality metric here would invite ranking
     a screen against a measurement, which is two different exams."""
-    row = screen.plan(rows(("org/m", "image")), have=lambda n: True)[0]
+    row = screen.plan(rows(("org/m", "image")), missing=lambda n: [])[0]
     argv = screen.argv(row)
     assert "--screen" in argv
     assert argv[argv.index("--repeat") + 1] == "1"
@@ -87,3 +87,43 @@ def test_screened_is_a_verdict_the_store_recognises(tmp_path):
     row = conn.execute("SELECT outcome, tier FROM verdicts").fetchone()
     conn.close()
     assert (row["outcome"], row["tier"]) == ("screened", "screen")
+
+
+# ---- ready means loadable, not merely present (issue #196) -----------------
+
+def test_a_model_whose_config_names_an_absent_repo_is_not_ready():
+    """Marvis-AI's 8-bit MLX repo is complete -- every symlink resolving, no
+    .incomplete files -- and names a tokenizer in a DIFFERENT repo that is not
+    on disk. `ready` on that cost a real run to discover."""
+    got = screen.plan(rows(("org/m", "tts")),
+                      missing=lambda n: ["org/tokenizer"])[0]
+    assert got["state"] == screen.WAITING
+    assert "org/tokenizer" in got["why_not"], "say WHAT to fetch"
+
+
+def test_a_model_missing_only_itself_reads_as_a_plain_fetch():
+    """The ordinary case must keep its ordinary wording, or every
+    waiting-on-fetch row starts shouting about dependencies."""
+    got = screen.plan(rows(("org/m", "tts")), missing=lambda n: [n])[0]
+    assert got["state"] == screen.WAITING
+    assert got["why_not"] == "weights are not on disk; lh fetch --run"
+
+
+def test_a_model_with_everything_present_is_ready():
+    """The negative half: a closure check that never passes screens nothing."""
+    got = screen.plan(rows(("org/m", "tts")), missing=lambda n: [])[0]
+    assert got["state"] == screen.READY
+
+
+def test_a_lane_with_no_runner_is_not_asked_about_weights():
+    """Ordering matters: a missing runner is the answer regardless of disk, and
+    asking the cache first would touch the filesystem for every unrunnable row."""
+    asked = []
+
+    def missing(n):
+        asked.append(n)
+        return []
+
+    got = screen.plan(rows(("org/x", "")), missing=missing)[0]
+    assert got["state"] == screen.NO_RUNNER
+    assert asked == [], "no runner, so the cache was never consulted"

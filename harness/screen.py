@@ -47,26 +47,37 @@ def candidate_for(lane: str, model: str) -> str:
     return spec.format(model=model) if spec else ""
 
 
-def plan(rows, *, have=None) -> list[dict]:
+def plan(rows, *, missing=None) -> list[dict]:
     """What a screen would do to each row, and what stands in the way.
 
-    `have` decides whether the weights are already on disk. Injected so this is
-    testable without a cache and without a download.
+    `missing` says what a candidate still needs that is not on disk -- ITSELF
+    AND WHAT ITS CONFIG NAMES, because a complete repo is not a loadable model.
+    Marvis-AI's 8-bit MLX repo is whole and names a tokenizer in a different
+    repo; `ready` on that cost a real run to discover, and the screen tier
+    exists to be cheap. Injected so this is testable without a cache and
+    without a download. Issue #196.
     """
-    if have is None:
-        from harness.fetching import have as _have
-        have = _have
+    if missing is None:
+        from harness.fetching import missing as _missing
+        missing = _missing
     out = []
     for row in rows:
         name = row["name"]
         lane = (row.get("lane") or "").strip().lower()
         spec = candidate_for(lane, name)
+        absent = [] if not spec else missing(name)
         if not spec:
             state, why = NO_RUNNER, (
                 f"no runner for the {lane} lane" if lane
                 else "no lane, so no case and no metric")
-        elif not have(name):
+        elif absent == [name]:
             state, why = WAITING, "weights are not on disk; lh fetch --run"
+        elif absent:
+            # NAME WHAT IS MISSING. "not ready" without the id sends whoever
+            # reads it back to the server log to find out what to fetch.
+            state, why = WAITING, (
+                f"needs {', '.join(absent)}, which its config names and "
+                f"nothing has fetched; lh fetch --run")
         else:
             state, why = READY, f"evals.run --modality {lane} --screen"
         out.append({**row, "state": state, "why_not": why, "candidate": spec,
