@@ -17,7 +17,7 @@ from pathlib import Path
 
 from harness import paths, store
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 #: Outcomes a proposal can reach. TERMINAL ones suppress re-proposal.
 VERDICTS = ("measured", "declined", "broken", "queued", "ignored", "screened")
@@ -186,9 +186,52 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if have and have < 4 and "description" not in _columns(conn, "proposals"):
         conn.execute("ALTER TABLE proposals "
                      "ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+    if have and have < 5:
+        _canonical_lanes(conn)
+        _backfill_lanes(conn)
     conn.execute("INSERT OR REPLACE INTO meta VALUES ('schema', ?)",
                  (str(SCHEMA_VERSION),))
     conn.commit()
+
+
+def _canonical_lanes(conn) -> None:
+    """One name per lane. `text` IS `code`, and `all` was never a lane.
+
+    discover.py wrote `text` and inspect.PIPELINE_LANES wrote `code` for the
+    same models; rank.lane_of then discarded `text` as laneless, so half the
+    lane never reached the queue. `all` is a SOURCE's coverage claim. #207.
+    """
+    from harness import lanes
+    for old, new in lanes.ALIASES.items():
+        conn.execute("UPDATE proposals SET lane=? WHERE lower(lane)=?",
+                     (new, old))
+
+
+def _backfill_lanes(conn) -> None:
+    """Route rows the registry never classified, using their own prose.
+
+    A proposal arrives with a one-line description of what it does and the
+    lane was only ever read from a HuggingFace `pipeline_tag`, so a GitHub
+    repo could never have one and 287 of 381 rows sat laneless while carrying
+    the answer. Only rows with NO lane are touched: the registry's own label
+    is the publisher's answer and outranks a guess at it. #207.
+    """
+    from harness import lanes
+    rows = conn.execute(
+        "SELECT p.id, p.name, s.why FROM proposals p "
+        "JOIN sightings s ON s.proposal_id = p.id WHERE p.lane = ''"
+    ).fetchall()
+    # A proposal seen twice gets both descriptions, and they can disagree.
+    # Disagreement is exactly the case from_prose refuses to break, so it is
+    # fed all of them at once and falls silent rather than picking one.
+    prose: dict = {}
+    for row in rows:
+        pid, name = row[0], row[1]
+        prose.setdefault(pid, [name]).append(row[2] or "")
+    for pid, parts in prose.items():
+        lane = lanes.from_prose(" ".join(parts))
+        if lane:
+            conn.execute("UPDATE proposals SET lane=? WHERE id=?", (lane, pid))
 
 
 def _columns(conn, table: str) -> set[str]:

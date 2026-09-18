@@ -29,7 +29,8 @@ import sys
 from pathlib import Path
 
 from harness.checks import code as code_check
-from harness import audio, completion, discover as discovery, env, exclusive, paths, proc, vector
+from harness import (audio, completion, discover as discovery, env, exclusive,
+                     lanes, paths, proc, vector)
 from harness.checks import html as html_check
 from harness.checks import image as image_check
 from harness.checks import svg as svg_check
@@ -944,7 +945,7 @@ def _report_queue(a) -> int:
         store.close()
     want = (getattr(a, "lane", "") or "").strip().lower()
     if want:
-        rows = [r for r in rows if rank.lane_of(r) == want]
+        rows = [r for r in rows if lanes.serves(rank.lane_of(r), want)]
     if not rows:
         print(f"nothing queued in the {want} lane that a screen has not answered"
               if want else "nothing queued that a screen has not answered")
@@ -1086,7 +1087,7 @@ def _report_screen(a) -> int:
         store.close()
     want = (getattr(a, "lane", "") or "").strip().lower()
     if want:
-        rows = [r for r in rows if rank.lane_of(r) == want]
+        rows = [r for r in rows if lanes.serves(rank.lane_of(r), want)]
     ranked = rank.rank(rows, serving=rank.serving(),
                        measured_lanes=rank.lanes_with_receipts())
     planned = screen.plan(ranked)[:getattr(a, "top", 5)]
@@ -1434,7 +1435,7 @@ def _report_loop(a) -> int:
     try:
         rows = ms.judgeable(store, limit=500)
         if want:
-            rows = [r for r in rows if rank.lane_of(r) == want]
+            rows = [r for r in rows if lanes.serves(rank.lane_of(r), want)]
             print(f"\n(scoped to the {want} lane: {len(rows)} candidate(s))")
         short = rank.wanted(rows)
         if short:
@@ -1498,8 +1499,7 @@ def _loop_spend(a, rc: int) -> int:
     finally:
         store.close()
     if want:
-        fresh = [r for r in fresh
-                 if (r.get("lane") or "").strip().lower() == want]
+        fresh = [r for r in fresh if lanes.serves(r.get("lane"), want)]
     if not fresh:
         print("  nothing survived the screen, so there is nothing to measure. "
               "A screen that rejects everything is the tier doing its job.")
@@ -1522,7 +1522,15 @@ def _measure_and_adopt(a, row: dict) -> int:
     from harness import adopt, screen, winners
     from harness import memory_store as ms
 
-    name, lane = row["name"], (row.get("lane") or "").strip().lower()
+    name = row["name"]
+    # A text candidate is filed under `code` and can be measured in web, svg
+    # and extract too. When the caller scoped the loop to one of those, that
+    # is the lane to measure in: the incumbent, the cases and the metric all
+    # belong to the lane being asked about, not the one the row was filed
+    # under. #207.
+    want = (getattr(a, "lane", "") or "").strip().lower()
+    lane = (want if want and lanes.serves(row.get("lane"), want)
+            else lanes.canonical(row.get("lane")))
     spec = screen.candidate_for(lane, name)
     if not spec:
         return err(f"{name}: screened in the {lane} lane and no candidate "

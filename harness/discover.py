@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 
 from pathlib import Path
 
-from harness import paths
+from harness import lanes, paths
 from harness.stages import (ENTRY_POINT_STAGES, STAGE_ENTRY_POINTS,
                             stage_unavailable)
 
@@ -411,13 +411,23 @@ _LANE_QUERIES = {
 #: Lanes served by a tool rather than by a runtime-specific model, so every
 #: machine looks in the same place. Without this they would fall through to an
 #: empty list and propose nothing, silently.
+#:
+#: The dedicated svg models are kept even though both LOST to a general LLM
+#: writing markup (5/6 vs 3/6, issue #3): a lane whose only queries are the
+#: incumbent's family can never find the thing that beats it.
 _LANE_QUERIES_ANY = {
     "svg": ["starvector", "OmniSVG"],
 }
 
-#: Every lane discovery can search, whichever machine is asking.
-LANES = sorted(set(_LANE_QUERIES_ANY) | {
-    lane for per_lane in _LANE_QUERIES.values() for lane in per_lane})
+#: Every lane discovery can search, whichever machine is asking. `code`, `web`,
+#: `svg` and `extract` are here via lanes.TEXT_SERVED: they are all one prompt
+#: to a text model and a structural check on what comes back, so they ask the
+#: registry the same question the `text` row already asked. Until #207 they
+#: asked nothing at all -- lane_queries("code") and lane_queries("web") raised
+#: ValueError, so the 2nd and 3rd priority lanes could not be searched for.
+LANES = sorted(set(_LANE_QUERIES_ANY) | set(lanes.TEXT_SERVED) | {
+    lanes.canonical(lane)
+    for per_lane in _LANE_QUERIES.values() for lane in per_lane})
 
 
 def lane_queries(lane: str, machine=None) -> list[str]:
@@ -425,6 +435,7 @@ def lane_queries(lane: str, machine=None) -> list[str]:
 
     A machine with more than one runtime asks for both, since either would run.
     """
+    lane = lanes.canonical(lane)
     if lane not in LANES:
         raise ValueError(
             f"no external queries defined for lane {lane!r}; "
@@ -433,9 +444,13 @@ def lane_queries(lane: str, machine=None) -> list[str]:
         from harness import machine as _machine
         machine = _machine.detect()
 
+    # A text-served lane asks the text row's question. Spelling four near-copies
+    # of the same query list per runtime is the "one question, two answers"
+    # defect this project has now filed six times.
+    key = "text" if lane in lanes.TEXT_SERVED else lane
     out: list[str] = list(_LANE_QUERIES_ANY.get(lane, []))
     for runtime in sorted(machine.runtimes):
-        out += _LANE_QUERIES.get(runtime, {}).get(lane, [])
+        out += _LANE_QUERIES.get(runtime, {}).get(key, [])
     return out
 
 #: The command that would measure a proposal, per lane. A proposal exists to
@@ -444,10 +459,12 @@ def lane_queries(lane: str, machine=None) -> list[str]:
 #: `mflux:<id>`, an engine that machine does not have, for weights mflux cannot
 #: load. The rows without a {id} are lanes with no per-model engine yet.
 _HOW = {
-    "text": "--modality extract --candidates <alias for {id}>",
+    "code": "--modality code --candidates {id}",
+    "web": "--modality web --candidates {id}",
+    "extract": "--modality extract --candidates {id}",
     "stt": "--modality stt --candidates stt:{id}",
     "tts": "--modality tts --candidates tts:{id}",
-    "svg": "--modality svg --candidates <needs a runner: see issue #3>",
+    "svg": "--modality svg --candidates {id}",
     "image": "--modality image --candidates <needs an engine>",
     "video": "--modality video --candidates <needs a runner>",
 }
@@ -712,7 +729,15 @@ def from_feeds(sources=None, reader=None, verify=True,
                     # membership of a lane that does not exist, and since a
                     # recorded lane is never overwritten, the real one that the
                     # source tier reads off a model card could never land.
-                    lane="" if src.lane == "all" else src.lane, resolved=repo))
+                    # A SOURCE'S `all` IS ITS COVERAGE, NOT THE CANDIDATE'S
+                    # LANE, which lanes.ALIASES now says once. When the source
+                    # claims no lane, the proposal's own prose is asked: a
+                    # GitHub repo has no HuggingFace pipeline_tag, so the
+                    # registry route could never classify one and 48 of 48
+                    # crowd proposals sat laneless. #207.
+                    lane=(lanes.canonical(src.lane)
+                          or lanes.from_prose(f"{repo} {p.why}")),
+                    resolved=repo))
             if repo in settled:
                 suppressed += 1
                 drop("settled", repo)
