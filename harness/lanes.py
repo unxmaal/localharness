@@ -99,3 +99,29 @@ def from_prose(text) -> str:
     got = [lane for lane, pattern in _PROSE.items()
            if re.search(pattern, str(text or ""), re.I)]
     return got[0] if len(got) == 1 else ""
+
+
+def testable_in(lane) -> tuple[str, ...]:
+    """Every lane a candidate of `lane` can be screened and measured in.
+
+    ONE TEXT MODEL SERVES FOUR LANES. code, web, svg and extract differ in
+    what they ask for, not in what runs them: `lh svg` and `lh web` have
+    always resolved to the same Qwen the code lane serves, and the svg lane's
+    own three-way found a general model writing markup beating both dedicated
+    text-to-SVG models (issue #3).
+
+    A proposal carries ONE lane string, so a text candidate was filed under
+    `code` and the web and svg lanes read as having zero candidates when they
+    had 103. That looked like a reach problem -- no source discusses web page
+    design -- and reporting it as one would have sent somebody hunting for
+    feeds that do not exist. #207.
+    """
+    got = canonical(lane)
+    if not got:
+        return ()
+    return TEXT_SERVED if got in TEXT_SERVED else (got,)
+
+
+def serves(candidate_lane, target_lane) -> bool:
+    """Can a candidate filed under `candidate_lane` run `target_lane`'s cases?"""
+    return canonical(target_lane) in testable_in(candidate_lane)

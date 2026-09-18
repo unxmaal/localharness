@@ -179,3 +179,34 @@ def test_value_and_rank_agree_about_what_a_lane_is():
     scored, why = rank.value(_row("org/x", lane="text"), measured_lanes=set())
     assert "no lane can measure it" not in why
     assert "code is a wanted lane" in why
+
+
+# --- one text model serves four lanes --------------------------------------
+
+def test_a_text_candidate_can_be_tested_in_every_text_served_lane():
+    """`lh svg` and `lh web` have always resolved to the code lane's model.
+    Filing a candidate under one of them hid it from the other three: web and
+    svg read as having ZERO candidates while holding 103. Issue #207."""
+    assert set(lanes.testable_in("code")) == set(lanes.TEXT_SERVED)
+    for target in lanes.TEXT_SERVED:
+        assert lanes.serves("code", target)
+        assert lanes.serves("text", target), "the alias travels too"
+
+
+def test_an_image_candidate_is_only_an_image_candidate():
+    """The negative control. mflux does not write markup."""
+    assert lanes.testable_in("image") == ("image",)
+    for target in lanes.TEXT_SERVED + ("video", "stt", "tts"):
+        assert not lanes.serves("image", target)
+
+
+def test_a_laneless_candidate_serves_nothing():
+    assert lanes.testable_in("") == ()
+    assert lanes.testable_in("all") == ()
+    assert not lanes.serves("", "code")
+
+
+def test_a_speech_candidate_does_not_leak_into_the_wanted_lanes():
+    for lane in ("stt", "tts"):
+        assert lanes.testable_in(lane) == (lane,)
+        assert not any(lanes.serves(lane, w) for w in lanes.WANTED)
