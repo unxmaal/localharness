@@ -589,6 +589,13 @@ def instruments() -> dict:
         found["ocr"] = ocr.available_backend() or ""
     except Exception:  # noqa: BLE001
         pass
+    try:
+        # WHICH SERVER PRODUCED THE TOKENS. Without it two runs across
+        # different engines look like the same exam to comparable(). Issue #190.
+        from harness import serving
+        found["serving"] = serving.text_engine()
+    except Exception:  # noqa: BLE001
+        pass
     return {k: v for k, v in found.items() if v}
 
 
