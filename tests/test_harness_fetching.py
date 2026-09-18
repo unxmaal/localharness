@@ -209,3 +209,109 @@ def test_a_laneless_weight_is_not_declined(db):
     f.run(db, {"org/orphan": 2 * f.GIB}, snapshot=lambda **kw: "/x",
           free=900 * f.GIB)
     assert "org/orphan" not in ms.settled(db)
+
+
+# ---- what a model needs beyond itself (issue #196) -------------------------
+
+def cached(root, model_id, config=None):
+    """A repo in the shape huggingface_hub leaves behind."""
+    import json
+
+    d = (root / "hub" / f"models--{model_id.replace('/', '--')}"
+         / "snapshots" / "abc123")
+    d.mkdir(parents=True, exist_ok=True)
+    if config is not None:
+        (d / "config.json").write_text(json.dumps(config), encoding="utf-8")
+    return d
+
+
+def test_a_config_naming_another_repo_declares_a_requirement(tmp_path):
+    """Marvis-AI's 8-bit MLX repo is complete and names its tokenizer in a
+    different repo. The load fails offline; the directory check cannot see it."""
+    cached(tmp_path, "org/model-8bit",
+           {"text_tokenizer": "org/model-base", "model_type": "llama"})
+    assert f.requires("org/model-8bit", tmp_path) == ["org/model-base"]
+
+
+def test_provenance_is_not_a_requirement(tmp_path):
+    """`_name_or_path` records where a config came from. microsoft/
+    wavlm-base-plus-sv names microsoft/wavlm-base-plus, which is NOT on this
+    machine, and the model loads anyway -- so treating it as a dependency marks
+    a working model unready. The first real repo scanned proved this."""
+    cached(tmp_path, "org/derived", {"_name_or_path": "org/parent"})
+    assert f.requires("org/derived", tmp_path) == []
+
+
+def test_a_value_that_is_not_repo_shaped_is_not_a_repo(tmp_path):
+    """The negative half. A matcher that claims everything claims nothing."""
+    cached(tmp_path, "org/m", {"text_tokenizer": "bfloat16",
+                               "codec_model": "/absolute/path",
+                               "vocoder": "has spaces/in it"})
+    assert f.requires("org/m", tmp_path) == []
+
+
+def test_a_model_naming_itself_is_not_its_own_dependency(tmp_path):
+    cached(tmp_path, "org/m", {"text_tokenizer": "org/m"})
+    assert f.requires("org/m", tmp_path) == []
+
+
+def test_a_model_with_no_config_requires_nothing(tmp_path):
+    """Most repos have no config.json worth reading, and a missing one is not
+    an error -- it is the common case."""
+    cached(tmp_path, "org/plain")
+    assert f.requires("org/plain", tmp_path) == []
+
+
+def test_missing_reports_the_dependency_when_the_model_is_present(tmp_path):
+    cached(tmp_path, "org/model-8bit", {"text_tokenizer": "org/model-base"})
+    assert f.missing("org/model-8bit", tmp_path) == ["org/model-base"]
+
+
+def test_missing_reports_the_model_itself_when_nothing_is_there(tmp_path):
+    assert f.missing("org/absent", tmp_path) == ["org/absent"]
+
+
+def test_missing_is_empty_when_the_whole_closure_is_present(tmp_path):
+    cached(tmp_path, "org/model-8bit", {"text_tokenizer": "org/model-base"})
+    cached(tmp_path, "org/model-base")
+    assert f.missing("org/model-8bit", tmp_path) == []
+
+
+def test_fetching_a_model_also_fetches_what_its_config_names(db, tmp_path, monkeypatch):
+    """The other half of #196. Reporting "needs org/base" is no use if the one
+    command that can go online will not fetch it: queued() reads proposals, and
+    a tokenizer repo is never proposed by anybody."""
+    ms.record(db, ms.Seen(name="org/model-8bit", source="inspect", lane="tts",
+                          kind="weights", resolved="org/model-8bit"))
+    ms.decide(db, "org/model-8bit", "queued", tier="inspect")
+
+    got = []
+    monkeypatch.setattr(f, "download", lambda repo, snapshot=None: got.append(repo) or "/x")
+    monkeypatch.setattr(f, "requires", lambda name, root=None: ["org/base"])
+    monkeypatch.setattr(f, "have", lambda name, root=None: False)
+    monkeypatch.setattr(f, "plan",
+                        lambda name, *a, **k: f.Plan(name, 1, True, "ok"))
+
+    f.run(db, {"org/model-8bit": 1}, limit=1)
+    assert got == ["org/model-8bit", "org/base"]
+
+
+def test_a_dependency_already_present_is_not_refetched(db, monkeypatch):
+    """The negative half: re-downloading what is already cached is the cost the
+    offline guard exists to avoid."""
+    ms.record(db, ms.Seen(name="org/model-8bit", source="inspect", lane="tts",
+                          kind="weights", resolved="org/model-8bit"))
+    ms.decide(db, "org/model-8bit", "queued", tier="inspect")
+
+    got = []
+    monkeypatch.setattr(f, "download", lambda repo, snapshot=None: got.append(repo) or "/x")
+    monkeypatch.setattr(f, "requires", lambda name, root=None: ["org/base"])
+    # Only the DEPENDENCY is cached. Patching have() true for everything would
+    # also take the model itself out of the queue, and the test would pass for
+    # the wrong reason.
+    monkeypatch.setattr(f, "have", lambda name, root=None: name == "org/base")
+    monkeypatch.setattr(f, "plan",
+                        lambda name, *a, **k: f.Plan(name, 1, True, "ok"))
+
+    f.run(db, {"org/model-8bit": 1}, limit=1)
+    assert got == ["org/model-8bit"], "the cached dependency was refetched"

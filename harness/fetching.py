@@ -94,6 +94,64 @@ def have(model_id: str, root: Path | None = None) -> bool:
     return (home / "hub" / f"models--{model_id.replace('/', '--')}").exists()
 
 
+#: Config keys whose value names a repo you must ALSO have on disk. Kept as an
+#: allowlist rather than "anything repo-shaped", because the first real repo
+#: scanned proved that wrong. Issue #196.
+REQUIRES_KEYS = ("text_tokenizer", "tokenizer_name", "audio_tokenizer",
+                 "codec_model", "vocoder", "base_model")
+
+#: Repo-shaped and NOT a requirement, with the evidence. `_name_or_path` is
+#: HuggingFace boilerplate recording the checkpoint a config was derived from:
+#: microsoft/wavlm-base-plus-sv names microsoft/wavlm-base-plus, which is not on
+#: this machine, and the model loads anyway. Treating it as a dependency marks
+#: a working model unready.
+PROVENANCE_KEYS = {
+    "_name_or_path": "where the config came from, not what it needs",
+}
+
+#: `org/name`, and not a path, a mime type or a ratio.
+_REPO = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
+
+
+def _config(model_id: str, root: Path | None = None) -> dict:
+    """The cached config.json for a model, or {} if there is not one."""
+    import json
+    import os
+
+    home = Path(root or os.environ.get("HF_HOME")
+                or Path.home() / ".cache" / "huggingface")
+    d = home / "hub" / f"models--{model_id.replace('/', '--')}"
+    for cfg in sorted(d.glob("snapshots/*/config.json")):
+        try:
+            return json.loads(cfg.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+    return {}
+
+
+def requires(model_id: str, root: Path | None = None) -> list[str]:
+    """Other repos this model's own config says it needs.
+
+    A REPO BEING COMPLETE IS NOT A MODEL BEING LOADABLE. Marvis-AI's 8-bit MLX
+    repo is whole -- every symlink resolving, no .incomplete files -- and names
+    `text_tokenizer: Marvis-AI/marvis-tts-250m-v0.2`, which is a different repo.
+    With HF_HUB_OFFLINE=1 the load fails rather than fetching it. Issue #196.
+    """
+    data = _config(model_id, root)
+    out = []
+    for key in REQUIRES_KEYS:
+        value = data.get(key)
+        if isinstance(value, str) and _REPO.match(value) and value != model_id:
+            out.append(value)
+    return sorted(set(out))
+
+
+def missing(model_id: str, root: Path | None = None) -> list[str]:
+    """Everything this model needs that is not on disk, itself included."""
+    wanted = [model_id] + requires(model_id, root)
+    return [m for m in wanted if not have(m, root)]
+
+
 def queued(conn, tiers=FETCHABLE_TIERS, kind: str = FETCHABLE_KIND,
            needs_lane: bool = True) -> list[dict]:
     """Weights the inspect tier queued, best score first.
@@ -210,6 +268,21 @@ def run(conn, sizes: dict[str, int], *, limit: int = 1, snapshot=None,
             done.append({"repo": name, "ok": False, "why": str(exc)})
             continue
         fetched += 1
+        # WHAT IT NEEDS BESIDE ITSELF. Only readable once the config is on
+        # disk, so this is after the download rather than in the plan. A model
+        # whose tokenizer lives in another repo is `ready` and unloadable
+        # without it, and HF_HUB_OFFLINE turns that into a hard failure at run
+        # time rather than a slow first call. Issue #196.
+        for dep in requires(name):
+            if have(dep):
+                continue
+            try:
+                download(dep, snapshot=snapshot)
+                done.append({"repo": dep, "ok": True,
+                             "why": f"needed by {name}"})
+            except FetchError as exc:
+                done.append({"repo": dep, "ok": False,
+                             "why": f"needed by {name}: {exc}"})
         ms.decide(conn, row["name"], "queued", tier="fetch",
                   detail=f"downloaded to {where}", run_path=where)
         done.append({"repo": name, "ok": True, "why": where})
