@@ -942,8 +942,12 @@ def _report_queue(a) -> int:
         waiting = ms.judgeable_total(store)
     finally:
         store.close()
+    want = (getattr(a, "lane", "") or "").strip().lower()
+    if want:
+        rows = [r for r in rows if rank.lane_of(r) == want]
     if not rows:
-        print("nothing queued that a screen has not answered")
+        print(f"nothing queued in the {want} lane that a screen has not answered"
+              if want else "nothing queued that a screen has not answered")
         return 0
     ranked = rank.rank(rows, serving=rank.serving(),
                        measured_lanes=rank.lanes_with_receipts(),
@@ -1080,6 +1084,9 @@ def _report_screen(a) -> int:
         rows = ms.judgeable(store, limit=getattr(a, "top", 25) * 4)
     finally:
         store.close()
+    want = (getattr(a, "lane", "") or "").strip().lower()
+    if want:
+        rows = [r for r in rows if rank.lane_of(r) == want]
     ranked = rank.rank(rows, serving=rank.serving(),
                        measured_lanes=rank.lanes_with_receipts())
     planned = screen.plan(ranked)[:getattr(a, "top", 5)]
@@ -1419,9 +1426,13 @@ def _report_loop(a) -> int:
         sub = _ap.Namespace(**{**vars(a), **flags, "loop": False})
         rc = cmd_discover(sub) or rc
 
+    want = (getattr(a, "lane", "") or "").strip().lower()
     store = ms.connect()
     try:
         rows = ms.judgeable(store, limit=500)
+        if want:
+            rows = [r for r in rows if rank.lane_of(r) == want]
+            print(f"\n(scoped to the {want} lane: {len(rows)} candidate(s))")
         short = rank.wanted(rows)
         if short:
             print(f"\n=== lanes wanted ===")
@@ -1464,6 +1475,9 @@ def _loop_spend(a, rc: int) -> int:
     top = int(getattr(a, "top", 3) or 3)
     budget = float(getattr(a, "budget_gib", 20.0) or 20.0)
 
+    want = (getattr(a, "lane", "") or "").strip().lower()
+    if want:
+        print(f"\n(spending only on the {want} lane)")
     print(f"\n=== fetch (up to {top}, budget {budget:g} GiB) ===")
     sub = _ap.Namespace(**{**vars(a), "loop": False, "run": True,
                            "limit": top, "json": False})
@@ -1480,6 +1494,9 @@ def _loop_spend(a, rc: int) -> int:
         fresh = ms.survivors(store, limit=top)
     finally:
         store.close()
+    if want:
+        fresh = [r for r in fresh
+                 if (r.get("lane") or "").strip().lower() == want]
     if not fresh:
         print("  nothing survived the screen, so there is nothing to measure. "
               "A screen that rejects everything is the tier doing its job.")

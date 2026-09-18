@@ -127,3 +127,49 @@ def test_a_lane_with_no_runner_is_not_asked_about_weights():
     got = screen.plan(rows(("org/x", "")), missing=missing)[0]
     assert got["state"] == screen.NO_RUNNER
     assert asked == [], "no runner, so the cache was never consulted"
+
+
+# ---- an adapter is not a candidate (2026-09-18) ---------------------------
+
+def test_a_lora_is_refused_before_anything_downloads():
+    """Every candidate in the image queue was a style LoRA. `mflux:org/style`
+    downloads gigabytes and then fails, recording a verdict that says nothing
+    about the thing."""
+    assert screen.is_attachment("text-to-image; diffusers; tagged lora") == "lora"
+    assert screen.candidate_for("image", "org/style",
+                                "tagged text-to-image, lora") == ""
+
+
+def test_a_comfyui_node_pack_is_refused():
+    assert screen.is_attachment("served by minimax-h3; tagged comfyui") == "comfyui"
+
+
+def test_a_real_model_is_still_a_candidate():
+    """The negative half. A filter that refuses everything screens nothing."""
+    assert screen.is_attachment("task text-to-image; served by mlx; "
+                                "tagged mlx, mflux, text-to-image") == ""
+    assert screen.candidate_for("image", "org/base",
+                                "tagged mlx, mflux") == "mflux:org/base"
+
+
+def test_a_candidate_with_no_description_is_not_assumed_to_be_an_adapter():
+    """Most rows carry no description. Treating silence as an adapter would
+    empty the queue."""
+    assert screen.is_attachment("") == ""
+    assert screen.candidate_for("image", "org/x") == "mflux:org/x"
+
+
+def test_an_enumerated_exception_survives():
+    """`lora-ready` describes a base model that ACCEPTS adapters. Matching the
+    substring blindly would refuse exactly the models worth having."""
+    assert screen.is_attachment("a lora-ready base model") == ""
+
+
+def test_the_state_says_why_rather_than_no_runner():
+    """`no runner for the image lane` is false and sends the reader looking for
+    a missing runner. The lane has one; this is not a model."""
+    got = screen.plan([{"name": "org/style", "lane": "image",
+                        "description": "tagged lora"}],
+                      missing=lambda n: [])[0]
+    assert got["state"] == screen.NO_RUNNER
+    assert "attaches to a model" in got["why_not"]
