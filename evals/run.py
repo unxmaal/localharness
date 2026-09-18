@@ -507,6 +507,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--compare", nargs="+", metavar="RESULTS.JSON",
                     help="put finished runs in one table, or refuse if their "
                          "receipts say they are not comparable")
+    ap.add_argument("--across", default="",
+                    help="with --compare, the ONE receipt axis these runs vary "
+                         "on. Reports what changed cell by cell instead of "
+                         "ranking them, and still refuses if a second axis "
+                         "also differs")
     ap.add_argument("--modality", required=False,
                     help=f"one of {', '.join(ALL_MODALITIES)}, or 'all'")
     ap.add_argument("--candidates", required=False,
@@ -541,7 +546,7 @@ def main(argv: list[str] | None = None) -> int:
     # without it the screen tier hands out the unguarded path. Issue #191.
     env.guard()
     if args.compare:
-        return compare_runs(args.compare)
+        return compare_runs(args.compare, getattr(args, "across", ""))
     # Required for a RUN, not for a comparison. Left off `required=True` so
     # `--compare` can stand alone; enforced here so a normal run still fails
     # loudly rather than halfway through.
@@ -741,7 +746,46 @@ def accelerator_id() -> str:
     return f"{acc.kind}:{acc.name}" if acc.kind else ""
 
 
-def compare_runs(files: list[str]) -> int:
+def compare_across(axis: str, loaded: list) -> int:
+    """A sweep over ONE axis, compared cell by cell rather than ranked.
+
+    comparable() refuses these runs, correctly: two sampling settings are two
+    exams and must not share a leaderboard. Asking what the axis DOES is the
+    opposite question, so this is a named exception and not a bypass -- a run
+    differing on a SECOND axis is still refused, because a sweep whose
+    configurations differ in two ways cannot say which one moved the result.
+    """
+    from harness import paired
+
+    if axis not in paired.AXES:
+        print(f"unknown axis {axis!r}; one of {', '.join(paired.AXES)}")
+        return 1
+    base_file, base, _, base_rows = loaded[0]
+    for f, receipt, _, rows in loaded[1:]:
+        differs = paired.differences(base, receipt)
+        if axis not in differs:
+            print(f"REFUSED: {base_file} and {f} agree on {axis}, so there is "
+                  f"nothing to sweep. Nothing varied.")
+            return 1
+        extra = [d for d in differs if d != axis]
+        if extra:
+            print(f"REFUSED: {base_file} and {f} differ on {', '.join(extra)} "
+                  f"as well as {axis}. A sweep that varies two things cannot "
+                  f"say which one moved the result.")
+            return 1
+        print(f"\n{axis}: {getattr(base, axis)!r} -> {getattr(receipt, axis)!r}")
+        print(f"  {'candidate':34} {'lost':>5} {'gained':>7} {'same':>6} "
+              f"{'p':>7}  verdict")
+        for cell in paired.cells(base_rows, rows):
+            print(f"  {cell.candidate:34} {cell.lost:5d} {cell.gained:7d} "
+                  f"{cell.unchanged:6d} {cell.p:7.2f}  {cell.verdict}")
+    print("\n  Paired by case and repeat index. p is the exact McNemar test on "
+          "discordant\n  cells; concordant cells carry no information about a "
+          "change.")
+    return 0
+
+
+def compare_runs(files: list[str], across: str = "") -> int:
     """Put two or more finished runs in one table -- or refuse to.
 
     `comparable()` has existed and been tested since the receipts were added,
@@ -778,10 +822,13 @@ def compare_runs(files: list[str]) -> int:
                                   where=raw.get("where", ""),
                                   swap_used_mb=raw.get("swap_used_mb", 0),
                                   cases_digest=raw.get("cases_digest", "")),
-                       data.get("summary") or {}))
+                       data.get("summary") or {},
+                       data.get("rows") or []))
 
-    first_file, first, _ = loaded[0]
-    for f, receipt, _ in loaded[1:]:
+    first_file, first, _, _ = loaded[0]
+    if across:
+        return compare_across(across, loaded)
+    for f, receipt, _, _ in loaded[1:]:
         ok, why = comparable(first, receipt)
         if not ok:
             print(f"REFUSED: {first_file} and {f} are not comparable -- {why}.")
@@ -789,7 +836,7 @@ def compare_runs(files: list[str]) -> int:
             return 1
 
     merged: dict = {}
-    for f, _, summary in loaded:
+    for f, _, summary, _ in loaded:
         for name, row in summary.items():
             # Same candidate in two comparable runs: keep them apart by file,
             # since two samples of one candidate is a repeat, not a duplicate.
