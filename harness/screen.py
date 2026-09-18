@@ -41,8 +41,38 @@ LANE_CANDIDATE = {
 WAITING, NO_RUNNER, READY = "waiting-on-fetch", "no-runner", "ready"
 
 
-def candidate_for(lane: str, model: str) -> str:
+#: Words in a card that mean "this attaches to a model" rather than "this is
+#: one". An adapter, a node pack or a workflow cannot be handed to a runner as
+#: a candidate: mflux loads a base model, and `mflux:org/some-style-lora`
+#: downloads gigabytes and then fails, recording a verdict that says nothing
+#: about the thing.
+NOT_A_MODEL = ("lora", "comfyui", "workflow", "adapter", "controlnet",
+               "textual_inversion", "embedding")
+
+#: The one substring that is a model in its own right despite matching above.
+#: Kept as an enumerated exception so the list can be read rather than guessed.
+NOT_A_MODEL_EXCEPTIONS = ("lora-ready",)
+
+
+def is_attachment(description: str) -> str:
+    """The word that says this attaches to a model, or "" if none does.
+
+    Read from the registry's own tags. A style LoRA and a ComfyUI node pack are
+    both `text-to-image` and neither is something a lane can run alone.
+    """
+    text = (description or "").lower()
+    for allowed in NOT_A_MODEL_EXCEPTIONS:
+        text = text.replace(allowed, "")
+    for word in NOT_A_MODEL:
+        if word in text:
+            return word
+    return ""
+
+
+def candidate_for(lane: str, model: str, description: str = "") -> str:
     """The candidate spec for this lane, or "" when nothing here can run it."""
+    if is_attachment(description):
+        return ""
     spec = LANE_CANDIDATE.get((lane or "").strip().lower(), "")
     return spec.format(model=model) if spec else ""
 
@@ -64,11 +94,14 @@ def plan(rows, *, missing=None) -> list[dict]:
     for row in rows:
         name = row["name"]
         lane = (row.get("lane") or "").strip().lower()
-        spec = candidate_for(lane, name)
+        spec = candidate_for(lane, name, row.get("description") or "")
         absent = [] if not spec else missing(name)
+        attached = is_attachment(row.get("description") or "")
         if not spec:
             state, why = NO_RUNNER, (
-                f"no runner for the {lane} lane" if lane
+                f"a {attached}: it attaches to a model rather than being one, "
+                f"so no runner takes it as a candidate" if attached
+                else f"no runner for the {lane} lane" if lane
                 else "no lane, so no case and no metric")
         elif absent == [name]:
             state, why = WAITING, "weights are not on disk; lh fetch --run"
