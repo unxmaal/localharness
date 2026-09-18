@@ -18,10 +18,14 @@ from evals.runners.base import BaseRunner, RunnerError
 
 
 class CompletionRunner(BaseRunner):
-    def __init__(self, gateway: str, candidate: str, timeout: float = 180.0):
+    def __init__(self, gateway: str, candidate: str, timeout: float = 180.0,
+                 sampling: dict | None = None):
         self.gateway = gateway.rstrip("/")
         self.candidate = candidate
         self.timeout = timeout
+        #: Overrides on top of completion.SAMPLING for this run. Empty means
+        #: the shipped defaults, which is what the product uses.
+        self.sampling = dict(sampling or {})
 
     def generate(self, case: Case):
         import time
@@ -35,7 +39,7 @@ class CompletionRunner(BaseRunner):
             text, usage = completion.complete_with_usage(
                 case.prompt, model=self.candidate, gateway=self.gateway,
                 modality=case.modality, context=case.context,
-                timeout=self.timeout)
+                timeout=self.timeout, sampling=self.sampling or None)
         except completion.CompletionError as exc:
             # One dud must never abort a fifty-case run: every failure is a row.
             raise RunnerError(str(exc)) from exc
