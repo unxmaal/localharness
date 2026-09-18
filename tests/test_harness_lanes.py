@@ -8,6 +8,7 @@ measured and nothing else, `svg` could be searched for and not screened.
 These tests are a GATE, not an inventory: every gap they name was closed in
 the same change, so they start green and must be held there.
 """
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -17,9 +18,35 @@ from harness import discover, inspect as ins, lanes, rank, screen
 CASES = Path(__file__).resolve().parents[1] / "evals" / "cases"
 
 
+#: Lanes whose cases are GENERATED rather than committed, with the step that
+#: creates each. An allowlist that outlives its reason is how a check rots, so
+#: test_a_generated_lane_is_still_absent_from_the_tree asserts each one is
+#: genuinely untracked.
+GENERATED = {
+    "stt": "uv run python -m evals.corpora  (LibriSpeech test-clean, "
+           ".gitignore:10)",
+}
+
+
+def published() -> set[str]:
+    """Case directories a fresh clone gets, asked of git rather than the disk.
+
+    THE DESK IS NOT THE RUNNER. This read `CASES.iterdir()` and went red on
+    three runners at once while `make check` was green here, because
+    `evals/cases/stt/` holds 300 generated LibriSpeech clips and is gitignored.
+    The directory exists on the machine that generated it and in no clone.
+    Resolve against what a push would PUBLISH.
+    """
+    out = subprocess.run(["git", "ls-files", "evals/cases"],
+                         cwd=CASES.parents[1], capture_output=True, text=True,
+                         check=True).stdout
+    return {line.split("/")[2] for line in out.splitlines()
+            if line.startswith("evals/cases/") and line.count("/") > 2}
+
+
 def test_every_measurable_modality_is_a_named_lane():
     """A directory of cases with no lane name cannot be discovered for."""
-    on_disk = {d.name for d in CASES.iterdir() if d.is_dir()}
+    on_disk = published()
     assert on_disk <= set(lanes.ALL), (
         f"evals/cases has {sorted(on_disk - set(lanes.ALL))}, "
         f"which lanes.ALL does not name")
@@ -27,10 +54,19 @@ def test_every_measurable_modality_is_a_named_lane():
 
 def test_every_named_lane_has_cases_to_measure_it():
     """A lane nothing can measure is a lane that cannot finish the ladder."""
-    on_disk = {d.name for d in CASES.iterdir() if d.is_dir()}
-    assert set(lanes.ALL) <= on_disk, (
-        f"lanes.ALL names {sorted(set(lanes.ALL) - on_disk)} "
-        f"with no directory under evals/cases")
+    missing = set(lanes.ALL) - published() - set(GENERATED)
+    assert not missing, (
+        f"lanes.ALL names {sorted(missing)} with no cases under evals/cases "
+        f"and no entry in GENERATED saying how they are made")
+
+
+def test_a_generated_lane_is_still_absent_from_the_tree():
+    """The exception must keep earning its place. If someone commits the stt
+    cases, this fails and the allowlist entry gets deleted rather than quietly
+    excusing a lane that no longer needs excusing."""
+    for lane, how in GENERATED.items():
+        assert lane not in published(), (
+            f"{lane} cases are tracked now; drop it from GENERATED ({how})")
 
 
 def test_every_named_lane_can_be_searched_for():

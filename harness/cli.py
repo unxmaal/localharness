@@ -937,22 +937,24 @@ def _report_queue(a) -> int:
     from harness import rank
     from harness import memory_store as ms
 
+    want = (getattr(a, "lane", "") or "").strip().lower()
     store = ms.connect()
     try:
-        rows = ms.judgeable(store, limit=getattr(a, "top", 25) * 4)
-        waiting = ms.judgeable_total(store)
+        rows, waiting = _queueable(store, want)
     finally:
         store.close()
-    want = (getattr(a, "lane", "") or "").strip().lower()
-    if want:
-        rows = [r for r in rows if lanes.serves(rank.lane_of(r), want)]
     if not rows:
         print(f"nothing queued in the {want} lane that a screen has not answered"
               if want else "nothing queued that a screen has not answered")
         return 0
+    # RANK THEM ALL, THEN TAKE THE TOP. rank() drops what no screen can answer
+    # -- a laneless row, an adapter -- so the denominator has to come from
+    # after that or it counts rows that will never be offered. The image lane
+    # held 11 waiting of which 6 were LoRAs. Issue #209.
     ranked = rank.rank(rows, serving=rank.serving(),
                        measured_lanes=rank.lanes_with_receipts(),
-                       ceiling_gib=22.0)[:getattr(a, "top", 25)]
+                       ceiling_gib=22.0)
+    waiting, ranked = len(ranked), ranked[:getattr(a, "top", 25)]
     if a.json:
         print(json.dumps({"queue": ranked, "waiting": waiting}, indent=2))
         return 0
@@ -1080,14 +1082,16 @@ def _report_screen(a) -> int:
     from harness import rank, screen
     from harness import memory_store as ms
 
+    want = (getattr(a, "lane", "") or "").strip().lower()
     store = ms.connect()
     try:
-        rows = ms.judgeable(store, limit=getattr(a, "top", 25) * 4)
+        # THE SAME DEFECT AS _report_queue, at the tier that actually runs the
+        # model. `--top 2` sampled 8 rows of 114 and filtered those, so the
+        # loop fetched two image models and then said "nothing queued to
+        # screen". Issue #209.
+        rows, _ = _queueable(store, want)
     finally:
         store.close()
-    want = (getattr(a, "lane", "") or "").strip().lower()
-    if want:
-        rows = [r for r in rows if lanes.serves(rank.lane_of(r), want)]
     ranked = rank.rank(rows, serving=rank.serving(),
                        measured_lanes=rank.lanes_with_receipts())
     planned = screen.plan(ranked)[:getattr(a, "top", 5)]
@@ -1401,6 +1405,30 @@ SOURCE_TIERS = ("feeds", "neighbors")
 #: minute, which is the "find what exists" step and runs either way. INSPECT
 #: CLONES SOURCE, measured at over ten minutes across a full queue, so it is
 #: gated with the rest: a dry run that takes ten minutes is not a dry run.
+def _queueable(store, want: str = "") -> tuple[list[dict], int]:
+    """The waiting candidates in scope, and how many there are.
+
+    SCOPE FIRST, THEN LIMIT. cmd_queue used to fetch `top * 4` rows and filter
+    those, so `--lane` did not scope the queue: it sampled the backlog in
+    whatever order the store returned it and kept whatever matched. At the
+    default --top 25 the sample is 100 of 114 and the defect is invisible; at
+    --top 2 it is 8, and the image lane reported empty while holding five
+    candidates. A narrow budget is exactly when the scope matters most, and it
+    was where the sampling bit hardest. Issue #209.
+
+    The returned count is the in-scope total, because a scoped queue printing
+    "5 of 114 waiting" answers a different question with its denominator than
+    with its numerator.
+    """
+    from harness import rank
+    from harness import memory_store as ms
+
+    rows = ms.judgeable(store, limit=1_000_000)
+    if want:
+        rows = [r for r in rows if lanes.serves(rank.lane_of(r), want)]
+    return rows, len(rows)
+
+
 LOOP_STEPS = (("sweep", "sweep", False),
               ("inspect", "inspect", True),
               ("queue", "queue", False))
@@ -1433,9 +1461,8 @@ def _report_loop(a) -> int:
     want = (getattr(a, "lane", "") or "").strip().lower()
     store = ms.connect()
     try:
-        rows = ms.judgeable(store, limit=500)
+        rows, _ = _queueable(store, want)
         if want:
-            rows = [r for r in rows if lanes.serves(rank.lane_of(r), want)]
             print(f"\n(scoped to the {want} lane: {len(rows)} candidate(s))")
         short = rank.wanted(rows)
         if short:
