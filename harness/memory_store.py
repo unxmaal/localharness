@@ -39,7 +39,11 @@ REGISTRIES = (GITHUB, HUGGINGFACE)
 #: others silently returning nothing -- the same class as a list forked into
 #: two configs. VERDICTS already had this treatment; the tiers did not.
 INSPECT, JUDGE, SCREEN, MEASURE = "inspect", "judge", "screen", "measure"
-TIERS = (INSPECT, JUDGE, SCREEN, MEASURE)
+#: The closing tier. A lane reads its adopted winner from here and falls
+#: back to the typed constant when nothing has been adopted. See
+#: harness/adopt.py.
+ADOPT = "adopt"
+TIERS = (INSPECT, JUDGE, SCREEN, MEASURE, ADOPT)
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
