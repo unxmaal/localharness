@@ -90,6 +90,11 @@ def value(row: dict, *, serving: set[str] = frozenset(),
     elif lane not in measured_lanes:
         score += OPEN_LANE
         why.append(f"no run receipt in the {lane} lane")
+    if lane:
+        bonus = priority_of(lane)
+        if bonus:
+            score += bonus
+            why.append(f"{lane} is a wanted lane")
 
     times = int(row.get("times") or 0)
     if times > 1:
@@ -113,6 +118,32 @@ def value(row: dict, *, serving: set[str] = frozenset(),
         score += CHEAP
         why.append(f"{gib:.1f} GiB, cheap to screen")
     return score, why
+
+
+#: What the lanes are worth, highest first, as stated by the person this
+#: harness is for. A lane absent from this list is worth less than any lane in
+#: it.
+#:
+#: WHY IT IS NEEDED: the value-of-information score rewards "no run receipt in
+#: this lane" identically for every lane, so the LEAST wanted lane attracts the
+#: most attention precisely because it has been ignored. Without this, the
+#: queue tied seven candidates at +5.0 and broke the tie ALPHABETICALLY, which
+#: put a tts model above an image one because S sorts after D.
+LANE_PRIORITY = ("image", "code", "web", "svg", "video")
+
+#: The most a lane's priority can add. Deliberately smaller than KNOWN_LINEAGE
+#: and NO_LANE: a wanted lane breaks a tie, and never outranks "this teaches
+#: nothing".
+PRIORITY = 2.0
+
+
+def priority_of(lane: str) -> float:
+    """A lane's share of PRIORITY, 0.0 for one nobody asked for."""
+    lane = (lane or "").strip().lower()
+    if lane not in LANE_PRIORITY:
+        return 0.0
+    rank_from_top = LANE_PRIORITY.index(lane)
+    return PRIORITY * (len(LANE_PRIORITY) - rank_from_top) / len(LANE_PRIORITY)
 
 
 def lane_of(row) -> str:

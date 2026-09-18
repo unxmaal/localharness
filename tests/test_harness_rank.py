@@ -107,3 +107,48 @@ def test_serving_is_read_from_the_gateway_config_not_a_list():
     assert all("/" in name for name in got)
     # The provider prefix LiteLLM routes through is not part of the id.
     assert not any(name.startswith("openai/") for name in got)
+
+
+# ---- the lanes are not equally wanted (2026-09-18) ------------------------
+
+def test_the_priority_order_is_the_one_that_was_asked_for():
+    """image, code, web, svg, video. Pinned because a reordering here silently
+    changes what the loop spends its download budget on."""
+    assert rank.LANE_PRIORITY == ("image", "code", "web", "svg", "video")
+    got = [rank.priority_of(l) for l in rank.LANE_PRIORITY]
+    assert got == sorted(got, reverse=True), "priority must fall down the list"
+
+
+def test_a_lane_nobody_asked_for_gets_nothing():
+    assert rank.priority_of("tts") == 0.0
+    assert rank.priority_of("stt") == 0.0
+    assert rank.priority_of("") == 0.0
+
+
+def test_a_wanted_lane_outranks_an_unwanted_one_on_equal_information():
+    """The defect this fixes: every candidate tied at +5.0 and the tiebreak was
+    ALPHABETICAL, so a tts model sat above an image one because of its name."""
+    rows = [{"name": "zzz/image-model", "lane": "image", "times": 1, "bytes": 0},
+            {"name": "aaa/tts-model", "lane": "tts", "times": 1, "bytes": 0}]
+    got = rank.rank(rows, serving=(), measured_lanes=())
+    assert [r["name"] for r in got] == ["zzz/image-model", "aaa/tts-model"]
+
+
+def test_priority_never_outranks_teaching_nothing():
+    """A requant of something already served teaches nothing whatever lane it
+    is in. If priority could overcome that, the loop would spend its budget
+    re-measuring what it already runs."""
+    rows = [{"name": "org/requant", "lane": "image", "times": 1, "bytes": 0,
+             "description": "built from org/served"},
+            {"name": "org/fresh", "lane": "video", "times": 1, "bytes": 0,
+             "description": ""}]
+    got = rank.rank(rows, serving={"org/served"}, measured_lanes=())
+    assert [r["name"] for r in got] == ["org/fresh", "org/requant"], (
+        "image is the top lane, and a requant of something already served "
+        "still teaches nothing")
+
+
+def test_the_reason_names_the_lane():
+    rows = [{"name": "org/m", "lane": "image", "times": 1, "bytes": 0}]
+    got = rank.rank(rows, serving=(), measured_lanes=())
+    assert "wanted lane" in got[0]["value_why"]
