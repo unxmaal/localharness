@@ -1589,8 +1589,11 @@ def _measure_and_adopt(a, row: dict) -> int:
                    f"adopted from it")
     summary = data.get("summary") or {}
     rows = data.get("rows") or []
-    inc_row = _summary_row(summary, incumbent)
-    ch_row = _summary_row(summary, name)
+    # MATCH ON THE SPEC, not the bare name: an engine receipt key carries the
+    # engine as its head, so `filipstrand/Z-Image-Turbo-mflux-4bit` has to be
+    # asked about as `mflux:filipstrand/...` for the two sides to line up.
+    inc_row = _summary_row(summary, inc_spec, lane)
+    ch_row = _summary_row(summary, spec, lane)
     if not inc_row:
         # THE INCUMBENT IS THE CONTROL. A candidate measured beside a control
         # that did not run says nothing about the candidate, which is the
@@ -1615,17 +1618,36 @@ def _measure_and_adopt(a, row: dict) -> int:
     return 0
 
 
-def _summary_row(summary: dict, wanted: str) -> dict | None:
+def _summary_row(summary: dict, wanted: str, lane: str) -> dict | None:
     """The summary entry for a candidate, matched on the name the run used.
 
-    A run reports `Kokoro-82M-bf16/bm_george` for a candidate named
-    `mlx-community/Kokoro-82M-bf16`, so this matches on the stem rather than
-    demanding the string the caller happens to hold.
+    ASKS winners.matches RATHER THAN GUESSING. The three receipt spellings are
+    enumerated and argued there, and the shape differs by FAMILY in a way that
+    the local version got backwards for two of the three:
+
+        speech   mlx-community/Kokoro-82M-bf16  ->  Kokoro-82M-bf16/af_sky
+                 model is the HEAD, voice the tail
+        engine   mflux:flux2-klein-4b           ->  mflux/flux2-klein-4b-q8
+                 engine is the HEAD, model the tail
+
+    Written for the first, it matched `mflux` against `mflux:flux2-klein-4b`
+    and reported that the image lane's own control had contributed no rows to a
+    receipt it is plainly named in. Issue #219.
+
+    `quantised` counts as a match here. mflux hardcodes quantize=8, so every
+    image receipt names a -q8 artifact and refusing it would mean no image
+    candidate could ever be adopted. winners reports the distinction because
+    for a TYPED DEFAULT it is a finding; for the two sides of one paired run it
+    is the normal case.
     """
-    stem = wanted.split("/")[-1].split(",")[0].strip().lower()
+    from harness import winners
+
+    # THE LANE IS REQUIRED, not defaulted. The receipt shape differs by family
+    # and a default would silently pick one, which is how this got written the
+    # wrong way round in the first place.
+    family = winners.FAMILIES.get(lanes.canonical(lane), "alias")
     for key, row in summary.items():
-        head = key.split("/")[0].strip().lower()
-        if head == stem or key.strip().lower() == wanted.strip().lower():
+        if winners.matches(wanted, key, family):
             return {**row, "candidate": key}
     return None
 
