@@ -410,6 +410,24 @@ def set_registry(conn, name: str, registry: str) -> None:
     conn.commit()
 
 
+def survivors(conn, limit: int = 10) -> list[dict]:
+    """Candidates whose LATEST verdict is a passed screen, newest first.
+
+    The latest verdict, not any verdict: a candidate that screened green and
+    was later measured and declined must not be handed to the measure tier
+    again every time the loop runs.
+    """
+    rows = conn.execute("""
+        SELECT p.name, p.lane, v.detail
+        FROM proposals p JOIN verdicts v ON v.proposal_id = p.id
+        WHERE v.id = (SELECT v2.id FROM verdicts v2
+                      WHERE v2.proposal_id = p.id ORDER BY v2.id DESC LIMIT 1)
+          AND v.tier = ? AND v.outcome = 'screened'
+        ORDER BY v.id DESC LIMIT ?
+    """, (SCREEN, limit)).fetchall()
+    return [dict(r) for r in rows]
+
+
 def by_registry(conn) -> dict[str, int]:
     """How many unanswered proposals each registry owns, "" being the ones
     nothing can resolve. Reported rather than hidden: a name with no registry

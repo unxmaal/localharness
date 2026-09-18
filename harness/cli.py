@@ -1444,9 +1444,138 @@ def _report_loop(a) -> int:
         print("\ninspect, fetch, screen and measure not run. Add --run to "
               "spend the disk and the minutes.")
         return rc
-    print("\n=== fetch, screen, measure, adopt ===")
-    print("  not yet wired into the chain; see #201.")
+    return _loop_spend(a, rc)
+
+
+def _loop_spend(a, rc: int) -> int:
+    """Fetch, screen, measure and adopt, ONE CANDIDATE AT A TIME.
+
+    Serial by construction, not by accident. An eval sweeping aliases took this
+    machine down by loading a 16 GiB model while a 7.8 GiB one was still
+    resident (RULE #193). The budget is a ceiling on what this invocation will
+    download, and `--top` a ceiling on how many candidates it will carry the
+    whole way.
+    """
+    import argparse as _ap
+
+    from harness import adopt, fetching, screen
+    from harness import memory_store as ms
+
+    top = int(getattr(a, "top", 3) or 3)
+    budget = float(getattr(a, "budget_gib", 20.0) or 20.0)
+
+    print(f"\n=== fetch (up to {top}, budget {budget:g} GiB) ===")
+    sub = _ap.Namespace(**{**vars(a), "loop": False, "run": True,
+                           "limit": top, "json": False})
+    rc = cmd_fetch(sub) or rc
+
+    print(f"\n=== screen ===")
+    sub = _ap.Namespace(**{**vars(a), "loop": False, "screen": True,
+                           "run": True, "limit": top, "json": False})
+    rc = cmd_discover(sub) or rc
+
+    print(f"\n=== measure and adopt ===")
+    store = ms.connect()
+    try:
+        fresh = ms.survivors(store, limit=top)
+    finally:
+        store.close()
+    if not fresh:
+        print("  nothing survived the screen, so there is nothing to measure. "
+              "A screen that rejects everything is the tier doing its job.")
+        return rc
+    for row in fresh:
+        rc = _measure_and_adopt(a, row) or rc
     return rc
+
+
+def _measure_and_adopt(a, row: dict) -> int:
+    """One challenger against the lane's incumbent, then the verdict.
+
+    PAIRED AND IN ONE RUN. Both candidates see the same cases, the same repeat
+    count and the same machine, so the only axis that moved is the candidate.
+    Two separate runs would be two receipts that comparable() would refuse, and
+    rightly.
+    """
+    import subprocess
+
+    from harness import adopt, screen, winners
+    from harness import memory_store as ms
+
+    name, lane = row["name"], (row.get("lane") or "").strip().lower()
+    spec = screen.candidate_for(lane, name)
+    if not spec:
+        return err(f"{name}: screened in the {lane} lane and no candidate "
+                   f"spec can be built for it")
+    incumbent = adopt.default_for(lane, winners.typed().get(lane, ""))
+    if not incumbent:
+        print(f"  {name}: the {lane} lane has no incumbent to beat, so there "
+              f"is nothing to compare against. Measure it on its own first.")
+        return 0
+    inc_spec = screen.candidate_for(lane, incumbent) or incumbent
+    argv = ["uv", "run", "python", "-m", "evals.run", "--modality", lane,
+            "--repeat", str(int(getattr(a, "repeat", 3) or 3)),
+            "--candidates", f"{inc_spec},{spec}"]
+    print(f"\n  {lane}: {name} against {incumbent}")
+    print(f"    {' '.join(argv)}", flush=True)
+    proc = subprocess.run(argv, capture_output=True, text=True)
+    if proc.returncode != 0:
+        err(proc.stderr.strip()[-400:] or "no stderr")
+        return 1
+    data = _latest_receipt(lane)
+    if not data:
+        return err(f"{name}: the run wrote no receipt, so nothing can be "
+                   f"adopted from it")
+    summary = data.get("summary") or {}
+    rows = data.get("rows") or []
+    inc_row = _summary_row(summary, incumbent)
+    ch_row = _summary_row(summary, name)
+    if not inc_row or not ch_row:
+        return err(f"{name}: the run's summary names "
+                   f"{sorted(summary)!r}, so the pair cannot be compared")
+    verdict = adopt.decide(lane, inc_row, ch_row, rows)
+    print(f"    {'ADOPTED' if verdict.adopt else 'kept the incumbent'}: "
+          f"{verdict.why}")
+    store = ms.connect()
+    try:
+        adopt.record(store, verdict)
+    finally:
+        store.close()
+    return 0
+
+
+def _summary_row(summary: dict, wanted: str) -> dict | None:
+    """The summary entry for a candidate, matched on the name the run used.
+
+    A run reports `Kokoro-82M-bf16/bm_george` for a candidate named
+    `mlx-community/Kokoro-82M-bf16`, so this matches on the stem rather than
+    demanding the string the caller happens to hold.
+    """
+    stem = wanted.split("/")[-1].split(",")[0].strip().lower()
+    for key, row in summary.items():
+        head = key.split("/")[0].strip().lower()
+        if head == stem or key.strip().lower() == wanted.strip().lower():
+            return {**row, "candidate": key}
+    return None
+
+
+def _latest_receipt(modality: str) -> dict | None:
+    """The newest run receipt for this modality, whole."""
+    import json
+
+    root = paths.home() / "runs"
+    if not root.exists():
+        return None
+    for d in sorted(root.iterdir(), reverse=True):
+        if not d.name.endswith(f"-{modality}"):
+            continue
+        f = d / "results.json"
+        if f.exists():
+            try:
+                return json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return None
+    return None
 
 
 def _report_sweep(a) -> int:
@@ -1733,6 +1862,12 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--external", action="store_true",
                    help="ask the registries what exists that this machine has "
                         "never measured (needs --lane)")
+    d.add_argument("--budget-gib", type=float, default=20.0, dest="budget_gib",
+                   help="with --loop --run, the ceiling on what this "
+                        "invocation will download")
+    d.add_argument("--repeat", type=int, default=3,
+                   help="with --loop --run, repetitions per case when "
+                        "measuring a challenger against the incumbent")
     d.add_argument("--loop", action="store_true",
                    help="every step from a sweep to an adopted winner. Says "
                         "what it would do; --run spends the disk and minutes")

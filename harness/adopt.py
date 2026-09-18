@@ -54,8 +54,7 @@ def better(incumbent: dict, challenger: dict) -> bool:
 
 
 def decide(lane: str, incumbent: dict, challenger: dict,
-           before: list[dict] | None = None,
-           after: list[dict] | None = None) -> Verdict:
+           rows: list[dict] | None = None) -> Verdict:
     """Whether this challenger replaces this incumbent.
 
     Two gates, both required. The metric gate answers "better on what this lane
@@ -69,14 +68,14 @@ def decide(lane: str, incumbent: dict, challenger: dict,
     if not better(incumbent, challenger):
         return Verdict(lane, name_i, name_c, False,
                        "does not beat the incumbent on the lane's metric")
-    if before is None or after is None:
+    if not rows:
         return Verdict(lane, name_i, name_c, False,
                        "no paired rows, so the difference is unmeasured")
-    cells = [c for c in paired.cells(before, after) if c.candidate == name_c]
-    if not cells:
+    cell = paired.head_to_head(rows, name_i, name_c)
+    if not cell.discordant and not cell.unchanged:
         return Verdict(lane, name_i, name_c, False,
-                       f"no cells for {name_c} in the paired comparison")
-    cell = cells[0]
+                       f"{name_i} and {name_c} share no case in this run, so "
+                       f"there is nothing to compare")
     if cell.p > ALPHA:
         return Verdict(lane, name_i, name_c, False,
                        f"better on the metric, but {cell.lost} lost against "

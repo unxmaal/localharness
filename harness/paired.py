@@ -97,3 +97,25 @@ def differences(before, after) -> list[str]:
         if getattr(before, name, None) != getattr(after, name, None):
             out.append(name)
     return out
+
+
+def head_to_head(rows: list[dict], incumbent: str, challenger: str) -> Cell:
+    """Two candidates over the same cases in ONE run, paired by case.
+
+    DIFFERENT PAIRING FROM cells(). That one matches a candidate against
+    ITSELF across two runs, which is the sweep question: what did this axis
+    do? This one matches two candidates against EACH OTHER on the same cases,
+    which is the adoption question: is the challenger better here?
+
+    Using cells() for this returns nothing at all, because the two runs it is
+    handed share no candidate, and an empty result reads as "no difference"
+    rather than "wrong comparison".
+    """
+    mine = {r.get("case_id"): bool(r.get("passed"))
+            for r in rows if r.get("candidate") == incumbent}
+    theirs = {r.get("case_id"): bool(r.get("passed"))
+              for r in rows if r.get("candidate") == challenger}
+    keys = mine.keys() & theirs.keys()
+    lost = sum(1 for k in keys if mine[k] and not theirs[k])
+    gained = sum(1 for k in keys if not mine[k] and theirs[k])
+    return Cell(challenger, lost, gained, len(keys) - lost - gained)

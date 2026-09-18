@@ -10,12 +10,12 @@ def row(candidate, wer, rate=1.0, median=0.5):
             "metrics": {"wer": wer}}
 
 
-def cells(candidate, before, after):
-    b = [{"candidate": candidate, "case_id": f"c{i}", "passed": v}
-         for i, v in enumerate(before)]
-    a = [{"candidate": candidate, "case_id": f"c{i}", "passed": v}
-         for i, v in enumerate(after)]
-    return b, a
+def head_to_head_rows(incumbent, challenger):
+    """One run's rows: the incumbent and the challenger over the same cases."""
+    return ([{"candidate": "inc", "case_id": f"c{i}", "passed": v}
+             for i, v in enumerate(incumbent)]
+            + [{"candidate": "ch", "case_id": f"c{i}", "passed": v}
+               for i, v in enumerate(challenger)])
 
 
 def test_a_faster_candidate_that_loses_on_the_metric_is_not_adopted():
@@ -30,16 +30,16 @@ def test_a_better_metric_alone_is_not_enough():
     """A run is a sample. Adopting on the point estimate is how a 12/27 to
     9/27 trend at p=0.45 becomes a decision."""
     inc, ch = row("inc", 0.05), row("ch", 0.01)
-    b, a = cells("ch", [False] * 8, [True] * 5 + [False] * 3)
-    got = adopt.decide("tts", inc, ch, b, a)
+    got = adopt.decide("tts", inc, ch, head_to_head_rows(
+        [False] * 8, [True] * 5 + [False] * 3))
     assert not got.adopt
     assert "not established" in got.why
 
 
 def test_a_significant_win_on_the_metric_is_adopted():
     inc, ch = row("inc", 0.05), row("ch", 0.01)
-    b, a = cells("ch", [False] * 8, [True] * 8)
-    got = adopt.decide("tts", inc, ch, b, a)
+    got = adopt.decide("tts", inc, ch, head_to_head_rows(
+        [False] * 8, [True] * 8))
     assert got.adopt
     assert "p=0.01" in got.why or "p=0.00" in got.why
 
@@ -122,3 +122,117 @@ def test_keeping_them_is_possible_for_a_report_that_wants_them():
     got = rank.rank([proposal("org/tool", "")], serving=(), measured_lanes=(),
                     keep_laneless=True)
     assert [r["name"] for r in got] == ["org/tool"]
+
+
+# ---- the chain's measure-and-adopt step (issue #201) ----------------------
+
+def test_the_incumbent_and_challenger_run_in_one_paired_invocation(monkeypatch, tmp_path):
+    """Two separate runs would be two receipts that comparable() refuses, and
+    rightly: the machine, the cases and the repeat count must all be held."""
+    import argparse
+    import subprocess
+
+    from harness import cli
+
+    seen = {}
+
+    class Done:
+        returncode = 0
+        stderr = ""
+
+    def fake_run(argv, **kw):
+        seen["argv"] = argv
+        return Done()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    # PIN THE INCUMBENT. Speech defaults are platform-branched: this resolves
+    # to kokoro-onnx/Kokoro-82M on Windows and the MLX name elsewhere, so a
+    # fixture naming one of them tests the runner's machine. RULE #249, third
+    # occurrence.
+    monkeypatch.setattr(adopt, "default_for",
+                        lambda lane, fallback, conn=None: "org/Kokoro-82M-bf16")
+    monkeypatch.setattr(cli, "_latest_receipt", lambda m: {
+        "summary": {"Kokoro-82M-bf16": {"pass_rate": 1.0, "median_s": 1.0,
+                                        "metrics": {"wer": 0.05}},
+                    "better-tts": {"pass_rate": 1.0, "median_s": 1.0,
+                                   "metrics": {"wer": 0.01}}},
+        "rows": ([{"candidate": "Kokoro-82M-bf16", "case_id": f"c{i}",
+                   "passed": False} for i in range(8)]
+                 + [{"candidate": "better-tts", "case_id": f"c{i}",
+                     "passed": True} for i in range(8)]),
+    })
+    real = ms.connect
+    monkeypatch.setattr(ms, "connect", lambda *a, **k: real(tmp_path / "d.db"))
+
+    rc = cli._measure_and_adopt(argparse.Namespace(repeat=3),
+                                {"name": "org/better-tts", "lane": "tts"})
+    assert rc == 0
+    argv = seen["argv"]
+    assert "--modality" in argv and "tts" in argv
+    cands = argv[argv.index("--candidates") + 1]
+    assert "better-tts" in cands, "the challenger must be in the run"
+    assert cands.count(",") >= 1, "the incumbent must be in the SAME run"
+
+
+def test_a_lane_with_no_incumbent_measures_nothing(monkeypatch, capsys):
+    """Nothing to beat is not a win. Adopting against an empty incumbent would
+    make the first candidate through the door the lane's default."""
+    import argparse
+
+    from harness import adopt as adopt_mod
+    from harness import cli, winners
+
+    monkeypatch.setattr(winners, "typed", lambda: {})
+    monkeypatch.setattr(adopt_mod, "default_for", lambda lane, fb, conn=None: "")
+    rc = cli._measure_and_adopt(argparse.Namespace(repeat=3),
+                                {"name": "org/x", "lane": "tts"})
+    assert rc == 0
+    assert "no incumbent" in capsys.readouterr().out
+
+
+def test_a_summary_key_is_matched_on_its_stem():
+    """A run reports `Kokoro-82M-bf16/bm_george` for a candidate named
+    `mlx-community/Kokoro-82M-bf16`. Demanding the caller's exact string would
+    make every tts comparison unmatchable."""
+    from harness import cli
+
+    got = cli._summary_row({"Kokoro-82M-bf16/bm_george": {"pass_rate": 1.0}},
+                           "mlx-community/Kokoro-82M-bf16")
+    assert got and got["candidate"] == "Kokoro-82M-bf16/bm_george"
+
+
+def test_an_unmatched_candidate_is_an_error_not_a_silent_skip():
+    from harness import cli
+
+    assert cli._summary_row({"something-else": {}}, "org/wanted") is None
+
+
+def test_only_the_latest_verdict_counts_as_a_survivor(tmp_path):
+    """A candidate that screened green and was later declined must not be
+    handed to the measure tier again on every loop."""
+    conn = ms.connect(tmp_path / "d.db")
+    ms.record(conn, ms.Seen(name="org/a", source="feeds", lane="tts",
+                            kind="weights", resolved="org/a"))
+    ms.decide(conn, "org/a", "screened", tier=ms.SCREEN, detail="ran")
+    assert [r["name"] for r in ms.survivors(conn)] == ["org/a"]
+    ms.decide(conn, "org/a", "declined", tier=adopt.TIER, detail="tts: lost")
+    assert ms.survivors(conn) == []
+
+
+def test_two_candidates_sharing_no_case_is_refused_not_called_a_tie():
+    """Using cells() here returned nothing, and an empty result reads as "no
+    difference" rather than "wrong comparison"."""
+    inc, ch = row("inc", 0.05), row("ch", 0.01)
+    rows = ([{"candidate": "inc", "case_id": "a", "passed": True}]
+            + [{"candidate": "ch", "case_id": "z", "passed": True}])
+    got = adopt.decide("tts", inc, ch, rows)
+    assert not got.adopt
+    assert "share no case" in got.why
+
+
+def test_head_to_head_pairs_on_the_case_not_the_candidate():
+    from harness import paired
+
+    rows = head_to_head_rows([False, False, True], [True, True, True])
+    cell = paired.head_to_head(rows, "inc", "ch")
+    assert (cell.lost, cell.gained, cell.unchanged) == (0, 2, 1)
