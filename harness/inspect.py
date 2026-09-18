@@ -26,6 +26,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from harness import lanes
 from harness import memory_store as ms
 
 GIB = 1024 ** 3
@@ -104,12 +105,17 @@ TAG_LANES = {"asr": "stt", "speech-recognition": "stt", "stt": "stt",
              "text-to-image": "image", "diffusion": "image"}
 
 
-def lane_for(meta: dict) -> str:
+def lane_for(meta: dict, prose: str = "") -> str:
     """Which lane could measure this, or "" when nothing here can.
 
     Empty is not a rejection. It means the eval suite has no case, no runner
     and no metric for this kind of model, which is a gap in the harness and
     sometimes the work worth doing (language ID is issue #2).
+
+    THE REGISTRY OUTRANKS THE PROSE. `pipeline_tag` is the publisher's own
+    answer; `prose` is a one-line description written by whoever mentioned it,
+    and is read only when the registry said nothing. Against the 37 store rows
+    where both speak, they agree 34 times. #207.
     """
     tag = (meta.get("pipeline_tag") or "").strip().lower()
     if tag in PIPELINE_LANES:
@@ -118,7 +124,7 @@ def lane_for(meta: dict) -> str:
         got = TAG_LANES.get(str(t).strip().lower())
         if got:
             return got
-    return ""
+    return lanes.from_prose(prose)
 
 #: Imports and pins that mean it will not run on this machine at all.
 #: NOT awq, gptq or vllm: awq is a QUANTISATION FORMAT that mlx-lm implements

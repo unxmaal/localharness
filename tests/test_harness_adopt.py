@@ -101,12 +101,19 @@ def test_a_candidate_with_no_lane_is_not_ranked():
     assert [r["name"] for r in got] == ["org/model"]
 
 
-def test_a_lane_of_all_or_text_counts_as_none():
+def test_a_lane_of_all_counts_as_none_and_text_is_the_code_lane():
     """A feed source declares lane 'all' to mean it covers everything, and that
-    was recorded as the candidate's own lane on hundreds of proposals."""
+    was recorded as the candidate's own lane on hundreds of proposals.
+
+    `text` is a different case and used to be dropped beside it: it is the
+    code lane under discover.py's older name, and discarding it hid 10
+    proposals from the queue entirely. Issue #207.
+    """
     got = rank.rank([proposal("org/a", "all"), proposal("org/b", "text")],
                     serving=(), measured_lanes=())
-    assert got == []
+    assert [r["name"] for r in got] == ["org/b"]
+    assert got[0]["lane"] == "text", "the stored row is not rewritten in place"
+    assert rank.lane_of(got[0]) == "code"
 
 
 def test_the_laneless_are_reported_rather_than_discarded():

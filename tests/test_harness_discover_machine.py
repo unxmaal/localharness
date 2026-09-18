@@ -51,17 +51,24 @@ def test_linux_and_windows_with_the_same_card_ask_the_same_questions():
 
 
 def test_a_lane_with_no_runtime_specific_answer_still_has_one():
-    """svg is served by tools rather than by a runtime-specific model, so both
-    machines look in the same place. A lane like that must not fall through to
-    an empty list and silently propose nothing."""
-    assert discover.lane_queries("svg", CARD) == discover.lane_queries("svg", APPLE)
-    assert discover.lane_queries("svg", CARD)
+    """svg has dedicated models every machine looks for in the same place, and
+    it must never fall through to an empty list and silently propose nothing.
+
+    It ALSO asks its machine's text queries, because a general model writing
+    markup beat both dedicated svg models 5/6 to 3/6 (issue #3), so the text
+    half legitimately differs between a card and a Mac. Issue #207.
+    """
+    dedicated = set(discover._LANE_QUERIES_ANY["svg"])
+    for box in (CARD, APPLE):
+        assert dedicated <= set(discover.lane_queries("svg", box))
+    assert (discover.lane_queries("svg", CARD)
+            != discover.lane_queries("svg", APPLE))
 
 
 def test_an_unknown_lane_says_which_ones_exist():
     with pytest.raises(ValueError) as exc:
         discover.lane_queries("telepathy", CARD)
-    assert "text" in str(exc.value)
+    assert "code" in str(exc.value)
 
 
 # ---- the engines this machine can actually invoke -------------------------

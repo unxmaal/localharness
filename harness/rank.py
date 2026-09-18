@@ -36,6 +36,8 @@ from __future__ import annotations
 
 import re
 
+from harness import lanes
+
 GIB = 1024 ** 3
 
 #: What each signal is worth. Weights are a policy, so they live in one place
@@ -77,10 +79,9 @@ def value(row: dict, *, serving: set[str] = frozenset(),
 
     #: A feed source declares `all` to mean it covers every lane. That is a
     #: fact about the SOURCE, and 243 proposals carry it as though it were
-    #: theirs.
-    lane = (row.get("lane") or "").strip().lower()
-    if lane in ("all", "text"):
-        lane = ""
+    #: theirs. lane_of() is the one place that knows, rather than the second
+    #: copy of the rule that used to live here. #207.
+    lane = lane_of(row)
     if not lane:
         # NOTHING HERE CAN MEASURE IT. Not a judgement about the model: the
         # eval suite has no case, no runner and no metric for it, which is a
@@ -129,7 +130,7 @@ def value(row: dict, *, serving: set[str] = frozenset(),
 #: most attention precisely because it has been ignored. Without this, the
 #: queue tied seven candidates at +5.0 and broke the tie ALPHABETICALLY, which
 #: put a tts model above an image one because S sorts after D.
-LANE_PRIORITY = ("image", "code", "web", "svg", "video")
+LANE_PRIORITY = lanes.WANTED
 
 #: The most a lane's priority can add. Deliberately smaller than KNOWN_LINEAGE
 #: and NO_LANE: a wanted lane breaks a tie, and never outranks "this teaches
@@ -147,9 +148,12 @@ def priority_of(lane: str) -> float:
 
 
 def lane_of(row) -> str:
-    """The lane this row can be tested in, normalised. Empty means none."""
-    lane = (row.get("lane") or "").strip().lower()
-    return "" if lane in ("all", "text") else lane
+    """The lane this row can be tested in, normalised. Empty means none.
+
+    `text` used to be discarded here alongside `all`, which dropped 10
+    proposals that ARE the code lane under its older name. Issue #207.
+    """
+    return lanes.canonical(row.get("lane"))
 
 
 def rank(rows, *, serving=(), measured_lanes=(), ceiling_gib: float = 22.0,
@@ -161,12 +165,25 @@ def rank(rows, *, serving=(), measured_lanes=(), ceiling_gib: float = 22.0,
     crowds out the candidates a screen could actually answer a question about.
     Most are tools rather than models -- mflux, mlx-vlm, nativ -- and no lane
     tests a library. See wanted() for what to do with them instead. Issue #201.
+
+    AN ADAPTER IS DROPPED FOR THE SAME REASON. screen.is_attachment() already
+    refuses a LoRA, a ComfyUI node pack or a workflow at screen time, because
+    `mflux:org/some-style-lora` downloads gigabytes and then fails. Until #207
+    it refused them only AFTER they had taken the top of the queue: the first
+    six rows were video LoRAs and the next three ComfyUI packs, so the ranking
+    spent its whole first page on things the next tier would not run.
     """
+    from harness import screen
     serving = {s.lower() for s in serving}
     measured = {m.lower() for m in measured_lanes}
     out = []
     for row in rows:
         if not keep_laneless and not lane_of(row):
+            continue
+        # The NAME carries it as often as the card does: `...-lora-I2V` and
+        # `...-ComfyUI` say what they are and have no description at all.
+        if screen.is_attachment(f"{row.get('name') or ''} "
+                                f"{row.get('description') or ''}"):
             continue
         got, why = value(row, serving=serving, measured_lanes=measured,
                          ceiling_gib=ceiling_gib)

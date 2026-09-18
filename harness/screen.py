@@ -20,6 +20,8 @@ absent is reported as waiting on a fetch, not screened and not failed.
 """
 from __future__ import annotations
 
+from harness import lanes
+
 #: lane -> how to spell a candidate of that lane for evals.run, given a model
 #: id. Empty means this harness has no way to invoke an arbitrary model in that
 #: lane, which is a fact about the harness rather than about the candidate.
@@ -27,13 +29,16 @@ from __future__ import annotations
 #: The specs are the ones evals.run already parses; nothing new is invented
 #: here, because a second spelling of the candidate language is the defect that
 #: this project has filed twice under other names.
+#: mlx_lm.server treats the request's `model` as a live repo id and swaps to
+#: it, so a text candidate needs no prefix and no config entry. That is true of
+#: every lane in lanes.TEXT_SERVED and only `code` was listed, so `web` and
+#: `svg` -- the 3rd and 4th priorities -- reported `no-runner` for a candidate
+#: the harness could in fact have screened. Issue #207.
 LANE_CANDIDATE = {
     "image": "mflux:{model}",
     "stt": "stt:{model}",
     "tts": "tts:{model}",
-    # mlx_lm.server treats the request's `model` as a live repo id and swaps to
-    # it, so a text candidate needs no prefix and no config entry.
-    "code": "{model}",
+    **{lane: "{model}" for lane in lanes.TEXT_SERVED},
 }
 
 #: Why a row cannot be screened. Reported per row rather than filtered away: a
@@ -73,7 +78,7 @@ def candidate_for(lane: str, model: str, description: str = "") -> str:
     """The candidate spec for this lane, or "" when nothing here can run it."""
     if is_attachment(description):
         return ""
-    spec = LANE_CANDIDATE.get((lane or "").strip().lower(), "")
+    spec = LANE_CANDIDATE.get(lanes.canonical(lane), "")
     return spec.format(model=model) if spec else ""
 
 

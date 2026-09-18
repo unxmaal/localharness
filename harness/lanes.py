@@ -1,0 +1,101 @@
+"""One definition of what a lane is, because there were four.
+
+Four modules each decided the set of lanes independently and no two agreed:
+
+    discover.LANES          image stt svg text tts video
+    screen.LANE_CANDIDATE   image stt code tts
+    rank.LANE_PRIORITY      image code web svg video
+    evals/cases/*           image stt svg code tts video web extract
+
+`image` was the only lane in all four, so one lane of five could travel the
+whole ladder. `code` could be measured and screened and not searched for;
+`web` could be measured and nothing else; `svg` could be searched for and not
+screened. Issue #207.
+
+These are four genuinely different questions -- what can be searched for, what
+can be screened, what is wanted, what can be measured -- so the fix is not one
+table. It is one NAMING, here, plus a test that every table covers it.
+"""
+from __future__ import annotations
+
+#: Every lane, in the priority order this harness was given, then the ones
+#: nobody asked for. A directory under evals/cases must exist for each, and
+#: tests/test_harness_lanes.py asserts it.
+WANTED = ("image", "code", "web", "svg", "video")
+
+#: Measured here, and not on the wanted list. `extract` has more cases than any
+#: lane but stt and is a text job; stt and tts have the most measurement
+#: history in the project and the person this harness is for does not want them
+#: ranked ahead of the five above.
+UNWANTED = ("extract", "stt", "tts")
+
+ALL = WANTED + UNWANTED
+
+#: Old name -> the name that survives. `text` and `code` were the same lane:
+#: discover.py wrote `text` (10 proposals) and inspect.PIPELINE_LANES mapped
+#: `text-generation` to `code` (38 proposals). rank.lane_of then discarded
+#: `text` as laneless, so half the lane was silently dropped from the queue.
+#:
+#: `all` is a SOURCE's coverage claim, never a candidate's lane, and recording
+#: it as one put 243 of 323 proposals in a lane that does not exist.
+ALIASES = {"text": "code", "all": ""}
+
+#: Lanes a text model serves through mlx_lm.server, which takes the request's
+#: `model` as a live repo id and swaps to it. One prompt, one completion, a
+#: structural check on the output. The four differ in what they ask for and not
+#: in what runs them, which is why they can share both a registry query and a
+#: candidate spec.
+TEXT_SERVED = ("code", "web", "svg", "extract")
+
+
+def canonical(lane) -> str:
+    """The surviving name for `lane`. Empty means no lane at all."""
+    got = (lane or "").strip().lower()
+    return ALIASES.get(got, got)
+
+
+def known(lane) -> bool:
+    """Is this a lane the harness has a name for?"""
+    return canonical(lane) in ALL
+
+
+#: Words in a proposal's own prose that name a lane. Read only when the
+#: registry said nothing, because a model card's `pipeline_tag` is the
+#: publisher's own answer and this is a guess at it.
+#:
+#: DELIBERATELY CONSERVATIVE, and the negative control is the point: of 394
+#: laneless sightings, 285 carry no lane word at all, and a pattern set that
+#: routed those would be worse than the empty lane it replaced. So a term has
+#: to name the OUTPUT, not the topic. `model`, `local`, `fast`, `mlx` and
+#: `quantized` appear in most of the 285 and are in none of these patterns.
+_PROSE = {
+    # The model families are here because a card that says "SDXL" or "FLUX"
+    # names its output modality as plainly as the word "image" does, and the
+    # feeds talk in family names. Kept short and checked against the negative
+    # control: adding them moved it by two rows.
+    "image": r"\b(images?|photos?|pictures?|txt2img|text[- ]to[- ]image|"
+             r"inpaint\w*|upscal\w+|diffusion|sdxl|sd1\.5|flux)\b",
+    "video": r"\b(videos?|animat\w+|keyframes?|text[- ]to[- ]video)\b",
+    "svg": r"\b(svg|vector graphics?|vectoriz\w+)\b",
+    "web": r"\b(web ?pages?|websites?|html|css|front[- ]?end)\b",
+    "tts": r"\b(text[- ]to[- ]speech|tts|speech synthesis|voice clon\w+|"
+           r"narrat\w+)\b",
+    "stt": r"\b(transcri\w+|speech recognition|asr|dictation)\b",
+    "code": r"\b(code|coding|programming|language model|llms?|chat|"
+            r"instruct\w*|reasoning|agentic|tokens?)\b",
+}
+
+
+def from_prose(text) -> str:
+    """The one lane this prose names, or "" when it names none or several.
+
+    AMBIGUITY IS NOT A TIEBREAK. "Juggles a million tokens of text, images and
+    video" names three lanes and the honest answer is that a person has to
+    read it. Returning the first match would put a video model in the code
+    lane, and a wrong lane costs a download and a screen that answers nothing,
+    where an empty one costs a line in `lh discover --wanted`.
+    """
+    import re
+    got = [lane for lane, pattern in _PROSE.items()
+           if re.search(pattern, str(text or ""), re.I)]
+    return got[0] if len(got) == 1 else ""
