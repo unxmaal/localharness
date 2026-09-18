@@ -297,9 +297,14 @@ ask rather than as of whenever someone last updated a list.
 
 ```bash
 lh discover --external --lane image   # ask the model registries
+lh discover --sweep                   # every source family below, in one pass
 lh discover --feeds                   # read where practitioners talk
 lh discover --neighbors               # read what the people who build your tools star
 ```
+
+Use `--sweep` rather than `--feeds` unless you mean only the feeds. `--feeds`
+refreshes the Atom sources and leaves the star graph untouched, which left the
+best-measured source nine days stale while the sweep reported success.
 
 `--external` queries the HuggingFace registry. Good for "what models exist",
 useless for anything that is not a single model.
@@ -351,20 +356,26 @@ pattern-matcher was going to find.
 
 **3. It sorts proposals cheapest-first, so measurement is spent where it counts.**
 
-A sweep produces far more proposals than this machine can run. Four tiers, each
+A sweep produces far more proposals than this machine can run. Each tier is
 more expensive than the last, and each one only sees what survived the one
 before:
 
 | tier | cost | what it answers |
 |---|---|---|
-| judge | about a second, no GPU | is this worth looking at |
 | inspect | seconds, a source clone | can it run on this machine at all |
+| rank | arithmetic over the store | what would a screen teach that is not already known |
 | screen | one minimal run | does it run |
 | measure | the full suite | is it better |
 
+Inspect runs first because it costs seconds and produces facts. Ranking by
+eventual quality was tried and does not work: a triage tier sits above the
+tiers that produce quality, so it is asked to know what does not exist yet.
+What it can order is the value of the information a screen would buy.
+
 ```bash
-lh discover --neighbors --judge   # score proposals 1-10 against a rubric
+lh discover --sweep               # read every source family, not only the feeds
 lh discover --inspect             # clone the source and check it fits
+lh discover --queue               # what a screen would teach, best first
 lh fetch                          # what is queued for download
 lh fetch --run                    # download it, one at a time
 ```
