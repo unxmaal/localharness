@@ -558,9 +558,9 @@ def comparable(a: Receipt, b: Receipt) -> tuple[bool, str]:
     for name in sorted(set(a.instruments) & set(b.instruments)):
         mine, theirs = a.instruments[name], b.instruments[name]
         if mine and theirs and mine != theirs:
-            return False, (f"different {name}: {mine} vs {theirs}. The card is "
-                           f"not the instrument, and two instruments are two "
-                           f"graders")
+            return False, (f"different {name}: {mine} vs {theirs}. The hardware "
+                           f"is not the tooling: the same card with a different "
+                           f"grader, or a different server, is a different exam")
     return True, "same exam"
 
 

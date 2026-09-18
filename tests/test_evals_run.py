@@ -876,3 +876,28 @@ def test_from_winners_names_the_candidate_the_receipts_chose(tmp_path):
                                                 "median_s": 19.4}}}),
         encoding="utf-8")
     assert winner_for("image", runs=tmp_path) == "mflux/flux2-klein-4b-q8"
+
+
+def test_a_kokoro_candidate_without_a_voice_gets_a_cached_one(tmp_path):
+    """The other half of the one above. "" for Kokoro means the server falls
+    back to af_heart, which this machine does not cache, and the stream dies
+    part-way with an incomplete chunked read. RULE #178, issue #195."""
+    from harness import audio
+
+    r = build_runner("tts:mlx-community/Kokoro-82M-bf16", "http://gw", tmp_path)
+    assert r.voice == audio.DEFAULT_KOKORO_VOICE
+
+
+def test_an_explicit_voice_always_wins(tmp_path):
+    r = build_runner("tts:mlx-community/Kokoro-82M-bf16,voice=af_sky",
+                     "http://gw", tmp_path)
+    assert r.voice == "af_sky"
+
+
+def test_the_default_voice_is_one_this_machine_could_have():
+    """A default naming an artifact nobody has is the same class as #147's
+    unobtainable aliases: correct-looking and unusable."""
+    from harness import audio
+
+    assert audio.DEFAULT_KOKORO_VOICE in (
+        "am_adam", "am_onyx", "bm_george", "af_sky", "ff_siwis")

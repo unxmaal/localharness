@@ -24,7 +24,7 @@ import sys
 import time
 from pathlib import Path
 
-from harness import audio, completion, paths
+from harness import audio, completion, env, paths
 from harness.engines import Engine, parse_options, resolve
 
 from dataclasses import replace
@@ -174,8 +174,17 @@ def _speech_runner(candidate: str, outdir: Path | None) -> SpeechRunner:
         raise SystemExit(f"{candidate}: no reference audio at {ref}")
     try:
         # Only Kokoro has a voice table; a candidate may legitimately name none.
+        # ONLY KOKORO HAS A VOICE TABLE, so "" is right for everything else --
+        # bm_george sent to Qwen3-TTS or Marvis is a Kokoro name on a model that
+        # has never heard of it. But "" for KOKORO means the server falls back
+        # to af_heart, which this machine does not have cached, and the stream
+        # dies mid-body. So the default applies to Kokoro and nothing else.
+        # Issue #195.
+        voice = options.get("voice")
+        if voice is None:
+            voice = audio.DEFAULT_KOKORO_VOICE if is_kokoro(model) else ""
         return SpeechRunner(model=model, outdir=outdir,
-                            voice=options.get("voice", ""),
+                            voice=voice,
                             ref_audio=ref or None,
                             lang_code=options.get("lang_code", ""),
                             ear=options.get("ear", "server"))
@@ -208,6 +217,15 @@ def _transcription_runner(candidate: str) -> TranscriptionRunner:
         # A bad backend is a bad candidate string, and gets the same treatment
         # as a bad engine spec: named before the corpus runs, not a traceback.
         raise SystemExit(f"{candidate}: {exc}") from exc
+
+
+def is_kokoro(model: str) -> bool:
+    """Does this model use Kokoro's voice table?
+
+    The voice names are Kokoro's own, so they are meaningful for Kokoro and
+    meaningless anywhere else. Issue #195.
+    """
+    return "kokoro" in model.lower()
 
 
 def build_runner(candidate: str, gateway: str, outdir: Path | None,
@@ -339,11 +357,21 @@ SCREEN_PARAMS = {"width": 256, "height": 256, "steps": 2, "seconds": None,
 
 
 def screen_cases(cases: list[Case]) -> list[Case]:
-    """One case per modality, shrunk. Cheap enough to be wrong about."""
+    """One case per modality AND LANGUAGE, shrunk. Cheap enough to be wrong about.
+
+    Keyed on modality alone this took the alphabetically first id, so the tts
+    lane always picked `fr-liaison` and cases_for -- which filters by the
+    candidate's language -- then matched nothing for every English candidate.
+    The tier returned "no cases of a modality it can run" for the lane's own
+    adopted default. Issue #194.
+
+    Per candidate the cost is unchanged: cases_for still narrows to the one
+    case in that candidate's language.
+    """
     import dataclasses
-    picked: dict[str, Case] = {}
+    picked: dict[tuple[str, str], Case] = {}
     for c in sorted(cases, key=lambda c: c.id):
-        picked.setdefault(c.modality, c)
+        picked.setdefault((c.modality, c.language), c)
     out = []
     for c in picked.values():
         params = dict(c.params)
@@ -445,6 +473,10 @@ def main(argv: list[str] | None = None) -> int:
                          "sample per prompt ranks noise; 3 is the usual "
                          "minimum for an image comparison you would act on")
     args = ap.parse_args(argv)
+    # SAME GUARD AS `lh`, and this is the entry point that actually downloads:
+    # `lh discover --screen` prints this very command for a user to copy, so
+    # without it the screen tier hands out the unguarded path. Issue #191.
+    env.guard()
     if args.compare:
         return compare_runs(args.compare)
     # Required for a RUN, not for a comparison. Left off `required=True` so
@@ -555,6 +587,13 @@ def instruments() -> dict:
     try:
         from harness.checks import ocr
         found["ocr"] = ocr.available_backend() or ""
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        # WHICH SERVER PRODUCED THE TOKENS. Without it two runs across
+        # different engines look like the same exam to comparable(). Issue #190.
+        from harness import serving
+        found["serving"] = serving.text_engine()
     except Exception:  # noqa: BLE001
         pass
     return {k: v for k, v in found.items() if v}

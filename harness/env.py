@@ -154,6 +154,26 @@ def resolve(root: str | None = None,
     return root if usable(root, min_free_gb) else None
 
 
+def guard(stream=None, environ=None, root: str | None = None,
+          min_free_gb: int = HF_MIN_FREE_GB) -> str | None:
+    """apply() plus the warning, for every entry point that spawns a generator.
+
+    ONE IMPLEMENTATION BECAUSE THERE ARE SEVERAL CALLERS. `lh` had this inline
+    and `python -m evals.run` had nothing, so the command the screen tier
+    prints for a user to copy was the one without the guard, and 53 GiB of
+    duplicate weights landed on the smallest disk. Issue #191. A second copy
+    of the warning text would be the same duplication RULE #237 is about.
+    """
+    import sys as _sys
+
+    got = apply(environ=environ, root=root, min_free_gb=min_free_gb)
+    if got is None:
+        print(f"warning: no weights location with {min_free_gb}GB free "
+              f"(tried {configured()}); set HF_ROOT or HF_HOME",
+              file=stream if stream is not None else _sys.stderr)
+    return got
+
+
 def apply(environ=None, root: str | None = None,
           min_free_gb: int = HF_MIN_FREE_GB) -> str | None:
     """Put HF_HOME in `environ` if it is not already there. Returns what it is.
