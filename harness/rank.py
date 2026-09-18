@@ -120,9 +120,9 @@ def value(row: dict, *, serving: set[str] = frozenset(),
     return score, why
 
 
-#: What the lanes are worth, highest first. Eric, 2026-09-18: "the most needed
-#: lanes are raster images, code, web page design, vector images, and video, in
-#: that order." A lane absent from this list is worth less than any lane in it.
+#: What the lanes are worth, highest first, as stated by the person this
+#: harness is for. A lane absent from this list is worth less than any lane in
+#: it.
 #:
 #: WHY IT IS NEEDED: the value-of-information score rewards "no run receipt in
 #: this lane" identically for every lane, so the LEAST wanted lane attracts the
