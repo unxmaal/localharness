@@ -803,3 +803,129 @@ def test_feeds_alone_still_reads_only_the_feeds(monkeypatch):
                         lambda a: read.append("neighbors") or 0)
     cli.cmd_discover(argparse.Namespace(sweep=False, feeds=True, json=False))
     assert read == ["feeds"]
+
+
+# ---- every entry point guards HF_HOME (issue #191) -------------------------
+
+#: Entry points that can spawn a generator, so each one must set HF_HOME before
+#: huggingface_hub is asked for anything. `lh` had the guard inline and
+#: `python -m evals.run` had none, which is the one the screen tier prints.
+#: argv each one PARSES, so the run reaches the guard and stops straight after.
+#: A rejected argv exits inside parse_args and would pass this test against an
+#: entry point that has no guard at all.
+ENTRY_POINTS = {
+    "harness.cli": [],                                  # prints help, returns 2
+    "evals.run": ["--modality", "nonsense"],            # parses, then refuses
+}
+
+
+@pytest.mark.parametrize("module", sorted(ENTRY_POINTS))
+def test_an_entry_point_applies_the_weights_guard(module, monkeypatch):
+    """RULE #237: a policy with several callers needs a test, not care. The
+    previous four drifts of this exact pair were each found in production."""
+    import importlib
+
+    from harness import env
+
+    called = []
+    monkeypatch.setattr(env, "guard", lambda *a, **k: called.append(module))
+    mod = importlib.import_module(module)
+    monkeypatch.setattr(mod, "env", env, raising=False)
+    try:
+        mod.main(ENTRY_POINTS[module])
+    except SystemExit:
+        pass
+    assert called == [module], f"{module}.main() never called env.guard()"
+
+
+def test_the_guard_warns_when_nothing_is_usable(tmp_path, monkeypatch):
+    """Returning None silently would be worse than the bug: huggingface_hub
+    fills whatever it is given, so 'no answer' has to be audible."""
+    import io
+
+    from harness import env
+
+    monkeypatch.setattr(env, "apply", lambda **k: None)
+    out = io.StringIO()
+    assert env.guard(stream=out) is None
+    assert "HF_ROOT" in out.getvalue()
+
+
+def test_the_guard_is_quiet_when_it_finds_somewhere(tmp_path, monkeypatch):
+    """The negative half. A guard that warns unconditionally trains people to
+    ignore it, which is the same as not having it."""
+    import io
+
+    from harness import env
+
+    monkeypatch.setattr(env, "apply", lambda **k: str(tmp_path))
+    out = io.StringIO()
+    assert env.guard(stream=out) == str(tmp_path)
+    assert out.getvalue() == ""
+
+
+#: The ONE site allowed to call env.apply() directly instead of env.guard(),
+#: with the reason. mcp_server builds a CHILD process's environment rather than
+#: its own, so there is no stderr a person is reading at that moment. An
+#: allowlist that outlives its reason is how a check rots, so it names the why.
+APPLY_DIRECTLY = {
+    "harness/mcp_server.py": "populates a child env dict, not this process's",
+}
+
+
+def test_the_guard_is_the_only_door_to_the_weights_root():
+    """Census, not a gate. env.apply() without the warning is how `lh` and
+    `evals.run` came to disagree: one warned, one did nothing. A new entry
+    point calling apply() directly would silently repeat #191."""
+    from harness import repo
+
+    root = Path(__file__).parent.parent
+    offenders = {}
+    for path in repo.publishable(root):
+        rel = Path(path).resolve().relative_to(root.resolve()).as_posix()
+        if not rel.endswith(".py") or rel.startswith("tests/"):
+            continue
+        if rel == "harness/env.py":
+            continue
+        text = (root / rel).read_text(encoding="utf-8")
+        if "env.apply(" in text and rel not in APPLY_DIRECTLY:
+            offenders[rel] = "calls env.apply() directly; use env.guard()"
+    assert not offenders, offenders
+
+
+def test_every_allowed_exception_still_calls_apply():
+    """The other half: an exception that stopped being true must not sit in the
+    allowlist granting cover to nothing."""
+    for rel, why in APPLY_DIRECTLY.items():
+        text = (Path(__file__).parent.parent / rel).read_text(encoding="utf-8")
+        assert "env.apply(" in text, f"{rel} no longer calls apply ({why})"
+
+
+@pytest.mark.parametrize("module", sorted(ENTRY_POINTS))
+def test_an_unguarded_entry_point_really_does_leave_hf_home_unset(module,
+                                                                 monkeypatch):
+    """PRODUCE the failure rather than infer it. The claim behind #191 is that
+    without the guard huggingface_hub falls back to the user's home; 53 GiB of
+    duplicate weights dated 2026-09-05 say it already did. This pins the
+    mechanism, so a guard that silently stops setting HF_HOME is caught."""
+    import importlib
+
+    from harness import env
+
+    monkeypatch.delenv("HF_HOME", raising=False)
+    monkeypatch.setattr(env, "guard", lambda *a, **k: None)   # as if unguarded
+    mod = importlib.import_module(module)
+    try:
+        mod.main(ENTRY_POINTS[module])
+    except SystemExit:
+        pass
+    assert "HF_HOME" not in os.environ, "nothing else sets it, so the guard is load-bearing"
+
+    # And with the guard in place it IS set, on the same argv.
+    monkeypatch.undo()
+    monkeypatch.delenv("HF_HOME", raising=False)
+    try:
+        mod.main(ENTRY_POINTS[module])
+    except SystemExit:
+        pass
+    assert os.environ.get("HF_HOME"), f"{module} left HF_HOME unset"

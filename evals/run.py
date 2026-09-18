@@ -24,7 +24,7 @@ import sys
 import time
 from pathlib import Path
 
-from harness import audio, completion, paths
+from harness import audio, completion, env, paths
 from harness.engines import Engine, parse_options, resolve
 
 from dataclasses import replace
@@ -445,6 +445,10 @@ def main(argv: list[str] | None = None) -> int:
                          "sample per prompt ranks noise; 3 is the usual "
                          "minimum for an image comparison you would act on")
     args = ap.parse_args(argv)
+    # SAME GUARD AS `lh`, and this is the entry point that actually downloads:
+    # `lh discover --screen` prints this very command for a user to copy, so
+    # without it the screen tier hands out the unguarded path. Issue #191.
+    env.guard()
     if args.compare:
         return compare_runs(args.compare)
     # Required for a RUN, not for a comparison. Left off `required=True` so

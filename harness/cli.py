@@ -1803,10 +1803,7 @@ def main(argv: list[str] | None = None) -> int:
     # nothing sourced, and an unset HF_HOME sends huggingface_hub to
     # ~/.cache/huggingface to re-download weights that are already on the
     # volume. Silently, and onto the disk this machine has least of.
-    if env.apply() is None:
-        print(f"warning: no weights location with {env.HF_MIN_FREE_GB}GB free "
-              f"(tried {env.configured()}); set HF_ROOT or HF_HOME",
-              file=sys.stderr)
+    env.guard()
     if not getattr(a, "func", None):
         ap.print_help(sys.stderr)
         return 2
