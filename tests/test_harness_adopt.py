@@ -145,6 +145,12 @@ def test_the_incumbent_and_challenger_run_in_one_paired_invocation(monkeypatch, 
         return Done()
 
     monkeypatch.setattr(subprocess, "run", fake_run)
+    # PIN THE INCUMBENT. Speech defaults are platform-branched: this resolves
+    # to kokoro-onnx/Kokoro-82M on Windows and the MLX name elsewhere, so a
+    # fixture naming one of them tests the runner's machine. RULE #249, third
+    # occurrence.
+    monkeypatch.setattr(adopt, "default_for",
+                        lambda lane, fallback, conn=None: "org/Kokoro-82M-bf16")
     monkeypatch.setattr(cli, "_latest_receipt", lambda m: {
         "summary": {"Kokoro-82M-bf16": {"pass_rate": 1.0, "median_s": 1.0,
                                         "metrics": {"wer": 0.05}},
