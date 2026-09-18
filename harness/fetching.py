@@ -153,7 +153,7 @@ def missing(model_id: str, root: Path | None = None) -> list[str]:
 
 
 def queued(conn, tiers=FETCHABLE_TIERS, kind: str = FETCHABLE_KIND,
-           needs_lane: bool = True) -> list[dict]:
+           needs_lane: bool = True, lane: str = "") -> list[dict]:
     """Weights the inspect tier queued, best score first.
 
     A weight NO LANE CAN TEST is returned but never counted as fetchable:
@@ -169,6 +169,13 @@ def queued(conn, tiers=FETCHABLE_TIERS, kind: str = FETCHABLE_KIND,
                  ORDER BY v.id DESC LIMIT 1) AS tier,
                (SELECT v.detail FROM verdicts v WHERE v.proposal_id = p.id
                  ORDER BY v.id DESC LIMIT 1) AS detail,
+               -- The newest verdict that CARRIES a size, which is not always
+               -- the newest verdict: a later row saying why a fetch was
+               -- refused has no size in it, and neither does the newest
+               -- inspect format. Issue #211.
+               (SELECT v.detail FROM verdicts v WHERE v.proposal_id = p.id
+                 AND (v.detail LIKE '%bytes=%' OR v.detail LIKE '%GiB%')
+                 ORDER BY v.id DESC LIMIT 1) AS sized,
                -- The judge scores REPOS; the queue holds WEIGHTS, and a weight
                -- is never judged (judging a model id in isolation is the
                -- copywriting problem the rubric exists to avoid). So a weight
@@ -191,7 +198,21 @@ def queued(conn, tiers=FETCHABLE_TIERS, kind: str = FETCHABLE_KIND,
            # before that column, so `kind` still answers for it.
            and r["registry"] != ms.GITHUB
            and not have(r["resolved"] or r["name"])]
+    if lane:
+        # A LANE-SCOPED LOOP MUST SCOPE THE STEP THAT SPENDS THE DISK. The loop
+        # printed "(spending only on the image lane)" and then considered
+        # whisper-tiny, wav2vec2, gpt2 and vicuna, because --lane reached the
+        # queue report and not the fetch. Issue #211.
+        from harness import lanes
+        out = [r for r in out if lanes.serves(r.get("lane"), lane)]
     return sorted(out, key=lambda r: -(r["score"] or 0))
+
+
+#: The two spellings the inspect tier has used for a measured size. `bytes=` is
+#: exact and machine-readable; the later `fits: weights from 5.5 to 8.9 GiB` is
+#: a range for humans, and it REPLACED the first without anything reading it.
+_BYTES = re.compile(r"bytes=(\d+)")
+_GIB = re.compile(r"([\d.]+)\s*GiB")
 
 
 def size_of(row: dict) -> int:
@@ -199,10 +220,27 @@ def size_of(row: dict) -> int:
 
     Read from the store rather than asked for again: the registry rate-limits,
     and a size already measured is a fact.
+
+    BOTH SPELLINGS, AND THE NEWEST ROW THAT HAS ONE. queued() returns the
+    latest verdict, and the latest verdict format dropped `bytes=`, so the one
+    row this read was the one that does not carry the number. Every candidate
+    came back unsized and was declined -- terminally -- for a size sitting in
+    the row above. Issue #211.
+
+    `bytes=` is preferred where it exists because it is the SUM of the repo's
+    weights, which is what a download costs. The GiB range is smallest-to-
+    largest of the individual files, so the upper bound is taken: over-
+    estimating a budget refuses a fetch, and under-estimating fills a disk.
     """
-    detail = (row.get("detail") or "")
-    m = re.search(r"bytes=(\d+)", detail)
-    return int(m.group(1)) if m else 0
+    for detail in (row.get("sized") or "", row.get("detail") or ""):
+        m = _BYTES.search(detail)
+        if m:
+            return int(m.group(1))
+    for detail in (row.get("sized") or "", row.get("detail") or ""):
+        found = [float(g) for g in _GIB.findall(detail)]
+        if found:
+            return int(max(found) * GIB)
+    return 0
 
 
 def download(repo: str, snapshot=None) -> str:
@@ -238,17 +276,37 @@ def download(repo: str, snapshot=None) -> str:
             os.environ["HF_HUB_OFFLINE"] = was
 
 
+#: Reasons a fetch did not start that are about THIS HARNESS rather than about
+#: the candidate. Recording one as a verdict settles a real model permanently
+#: on the strength of our own gap. screen.NOT_THE_CANDIDATE is the same list
+#: one tier along.
+NOT_THE_CANDIDATE = ("no measured size",)
+
+
+def refused_by_harness(why: str) -> str:
+    """The phrase saying this refusal is ours, or "" when it is the model's."""
+    text = (why or "").lower()
+    for phrase in NOT_THE_CANDIDATE:
+        if phrase in text:
+            return phrase
+    return ""
+
+
 def run(conn, sizes: dict[str, int], *, limit: int = 1, snapshot=None,
-        free: int | None = None) -> list[dict]:
+        free: int | None = None, lane: str = "") -> list[dict]:
     """Fetch up to `limit` queued candidates, recording what happened.
 
     A refused plan is recorded as `declined`, terminal, so the same oversized
     model is not re-queued every sweep. A failed download is NOT: a network
-    error says nothing about the candidate.
+    error says nothing about the candidate. NEITHER IS A REFUSAL THAT IS ABOUT
+    THIS HARNESS: "no measured size" says the store could not answer a question
+    about itself, and writing that down as declined settled 16 real candidates
+    permanently, including the only upgrade the image lane had. Issue #211,
+    the same class as #206 a day earlier.
     """
     done = []
     fetched = 0
-    for row in queued(conn):
+    for row in queued(conn, lane=lane):
         if not row.get("lane"):
             continue      # nothing here could measure it, so nothing fetches it
         # `limit` bounds DOWNLOADS, not decisions. Counting refusals against it
@@ -259,7 +317,8 @@ def run(conn, sizes: dict[str, int], *, limit: int = 1, snapshot=None,
         name = row["resolved"] or row["name"]
         p = plan(name, sizes.get(name, 0), free=free)
         if not p.ok:
-            ms.decide(conn, row["name"], "declined", tier="fetch", detail=p.why)
+            outcome = "queued" if refused_by_harness(p.why) else "declined"
+            ms.decide(conn, row["name"], outcome, tier="fetch", detail=p.why)
             done.append({"repo": name, "ok": False, "why": p.why})
             continue
         try:

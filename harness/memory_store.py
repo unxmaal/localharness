@@ -17,7 +17,7 @@ from pathlib import Path
 
 from harness import paths, store
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 #: Outcomes a proposal can reach. TERMINAL ones suppress re-proposal.
 VERDICTS = ("measured", "declined", "broken", "queued", "ignored", "screened")
@@ -189,6 +189,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if have and have < 5:
         _canonical_lanes(conn)
         _backfill_lanes(conn)
+    if have and have < 6:
+        _retract_harness_refusals(conn)
     conn.execute("INSERT OR REPLACE INTO meta VALUES ('schema', ?)",
                  (str(SCHEMA_VERSION),))
     conn.commit()
@@ -232,6 +234,39 @@ def _backfill_lanes(conn) -> None:
         lane = lanes.from_prose(" ".join(parts))
         if lane:
             conn.execute("UPDATE proposals SET lane=? WHERE id=?", (lane, pid))
+
+
+def _retract_harness_refusals(conn) -> None:
+    """Re-queue anything settled for a reason that was about US, not about it.
+
+    The fetch tier recorded "no measured size; inspect it first" as `declined`,
+    which is TERMINAL, so 16 real candidates were suppressed from re-proposal
+    forever because a size sat in a verdict row the reader did not look at.
+    Among them was the only upgrade candidate the image lane had.
+
+    A verdict is not deleted -- it is a record of what happened, and losing it
+    would lose the evidence that this went wrong. A fresh `queued` row is
+    appended saying why, and the latest verdict is what every tier reads.
+    Issues #211, #206.
+    """
+    from harness import fetching
+    rows = conn.execute(
+        "SELECT p.id, p.name, v.detail FROM proposals p "
+        "JOIN verdicts v ON v.proposal_id = p.id "
+        "WHERE v.id = (SELECT v2.id FROM verdicts v2 "
+        "               WHERE v2.proposal_id = p.id ORDER BY v2.id DESC LIMIT 1) "
+        "  AND v.outcome = 'declined' AND v.tier = 'fetch'").fetchall()
+    now = time.time()
+    for row in rows:
+        pid, name, detail = row[0], row[1], row[2] or ""
+        phrase = fetching.refused_by_harness(detail)
+        if not phrase:
+            continue
+        conn.execute(
+            "INSERT INTO verdicts (proposal_id, tier, outcome, detail, "
+            "decided_at) VALUES (?, 'fetch', 'queued', ?, ?)",
+            (pid, f"retracted: {phrase!r} was a fact about this harness, "
+                  f"not a verdict on {name}", now))
 
 
 def _columns(conn, table: str) -> set[str]:
