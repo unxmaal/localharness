@@ -1118,7 +1118,10 @@ def _report_screen(a) -> int:
             # out of its chatter: a tier that infers an outcome from stdout is
             # a tier that reports success when the format changes.
             summary = _latest_summary(r["modality"])
-            got, why = screen.outcome(proc.returncode, summary)
+            # The run's own stderr is where a refused request says so, and a
+            # refusal is a fact about the harness rather than the candidate.
+            got, why = screen.outcome(proc.returncode, summary,
+                                      detail=(proc.stderr or "")[-2000:])
             print(f"   {got.upper()}: {why}")
             if proc.returncode != 0:
                 err(proc.stderr.strip()[-400:] or "no stderr")

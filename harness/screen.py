@@ -118,27 +118,110 @@ def plan(rows, *, missing=None) -> list[dict]:
     return out
 
 
+def gateway_routes(config=None) -> tuple[set[str], str]:
+    """The alias names the gateway will accept, and the upstream behind them.
+
+    LiteLLM validates the request's `model` against its configured aliases and
+    answers HTTP 400 for anything else. mlx_lm.server, which sits behind it,
+    treats the name as a live repo id and swaps to it. So a DISCOVERED text
+    candidate -- which is always a repo id and never an alias -- has to reach
+    the upstream directly or it is refused before a token is generated.
+    """
+    import os
+    from pathlib import Path
+    try:
+        import yaml
+    except ImportError:      # pragma: no cover - yaml is a hard dependency
+        return set(), ""
+    root = Path(__file__).resolve().parent.parent
+    config = config or Path(os.environ.get(
+        "GATEWAY_CONFIG", root / "gateway" / "config.yaml"))
+    try:
+        data = yaml.safe_load(Path(config).read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError):
+        return set(), ""
+    names, base = set(), ""
+    for entry in data.get("model_list") or []:
+        if entry.get("model_name"):
+            names.add(str(entry["model_name"]).strip().lower())
+        base = base or (entry.get("litellm_params") or {}).get("api_base", "")
+    return names, base
+
+
+def routed_gateway(model: str, config=None) -> str:
+    """Where to send this candidate, or "" to use the default gateway.
+
+    An alias the gateway knows goes through the gateway. A repo id does not:
+    it goes to the upstream that can hot-swap to it.
+    """
+    names, base = gateway_routes(config)
+    if (model or "").strip().lower() in names:
+        return ""
+    return base if "/" in (model or "") else ""
+
+
 def argv(row: dict, outdir=None) -> list[str]:
     """The exact command a screen runs. One case, one repeat, no quality
     metrics: the screen answers whether it runs, and a metric here would invite
     ranking a screen against a measurement."""
     out = ["python", "-m", "evals.run", "--modality", row["modality"],
            "--screen", "--repeat", "1", "--candidates", row["candidate"]]
+    upstream = routed_gateway(row.get("name") or "")
+    if upstream:
+        out += ["--gateway", upstream.rsplit("/v1", 1)[0]]
     if outdir:
         out += ["--out", str(outdir)]
     return out
 
 
-def outcome(returncode: int, summary: dict | None) -> tuple[str, str]:
+#: Things a run says when the HARNESS could not deliver the request, as opposed
+#: to the candidate failing it. `broken` is terminal, so recording one of these
+#: against a candidate declines it forever for something it never did.
+NOT_THE_CANDIDATE = (
+    "invalid model name",
+    "gateway returned http 400",
+    "is the gateway up",
+    "connection refused",
+)
+
+
+def refused_by_harness(detail: str) -> str:
+    """The phrase saying this never reached the candidate, or "".
+
+    A gateway that declines to route a name is a fact about the gateway's alias
+    table. Qwen3-8B-4bit was recorded `broken -- it ran and passed nothing`
+    after an HTTP 400 stopped it before a single token.
+    """
+    text = (detail or "").lower()
+    for phrase in NOT_THE_CANDIDATE:
+        if phrase in text:
+            return phrase
+    return ""
+
+
+def outcome(returncode: int, summary: dict | None,
+            detail: str = "") -> tuple[str, str]:
     """A store verdict from one screen run.
 
     `broken` is TERMINAL and `screened` is not, which is the right way round: a
     thing that does not run is answered, and a thing that runs still has every
     measurement ahead of it.
+
+    A request the harness could not deliver is NEITHER. It is recorded as
+    `queued`, which is not terminal, so the candidate is asked again once the
+    harness can route it.
     """
+    refused = refused_by_harness(detail)
+    if refused:
+        return "queued", (f"not screened: {refused}. The harness could not "
+                          f"deliver the request, which says nothing about the "
+                          f"candidate")
     if returncode != 0:
         return "broken", f"the screen exited {returncode}"
-    rows = sum(int(v.get("pass", 0)) for v in (summary or {}).values()) \
+    # THE SUMMARY SPELLS IT `passed`. Reading `pass` returned 0 for every run,
+    # so a candidate that passed every case was recorded `broken`, which is
+    # TERMINAL. The screen tier reported the opposite of what it measured.
+    rows = sum(int(v.get("passed", 0)) for v in (summary or {}).values()) \
         if summary else 0
     if not summary:
         return "broken", "the screen produced no rows"

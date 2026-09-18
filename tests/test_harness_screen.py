@@ -69,11 +69,11 @@ def test_a_screen_that_did_not_run_is_broken_and_terminal():
 def test_a_screen_that_ran_and_passed_nothing_is_broken():
     """seedvr2 crashed 0/3 and local-small never closed a tag 0/9. Exiting zero
     is not the same as working."""
-    assert screen.outcome(0, {"c": {"pass": 0}})[0] == "broken"
+    assert screen.outcome(0, {"c": {"total": 3, "passed": 0}})[0] == "broken"
 
 
 def test_a_screen_that_passed_is_screened_and_not_terminal():
-    got, _ = screen.outcome(0, {"c": {"pass": 2}})
+    got, _ = screen.outcome(0, {"c": {"total": 2, "passed": 2}})
     assert got == "screened"
     assert got not in ms.TERMINAL, "it ran; every measurement is still ahead"
 
@@ -173,3 +173,69 @@ def test_the_state_says_why_rather_than_no_runner():
                       missing=lambda n: [])[0]
     assert got["state"] == screen.NO_RUNNER
     assert "attaches to a model" in got["why_not"]
+
+
+# ---- the screen must report what it measured (2026-09-18) -----------------
+
+def test_a_passing_screen_is_screened_not_broken():
+    """The summary spells it `passed`. outcome() read `pass`, so every run
+    scored 0 and a candidate that passed every case was recorded `broken` --
+    which is TERMINAL. The tier reported the opposite of what it measured."""
+    got, why = screen.outcome(0, {"m": {"total": 1, "passed": 1,
+                                        "pass_rate": 1.0}})
+    assert got == "screened"
+    assert "1 case" in why
+
+
+def test_a_failing_screen_is_still_broken():
+    """The negative half. A tier that never says broken screens nothing out."""
+    assert screen.outcome(0, {"m": {"total": 3, "passed": 0}})[0] == "broken"
+
+
+def test_a_refused_request_is_not_the_candidates_failure():
+    """An HTTP 400 from the gateway's alias table stopped Qwen3-8B-4bit before
+    a token was generated, and it was recorded `broken`, which is terminal."""
+    got, why = screen.outcome(1, None,
+                              "gateway returned HTTP 400: Invalid model name")
+    assert got == "queued", "not terminal: the candidate never ran"
+    assert "says nothing about the candidate" in why
+
+
+def test_a_real_failure_is_not_excused_as_a_refusal():
+    """The other half. Treating every non-zero exit as a harness problem would
+    mean nothing is ever screened out."""
+    assert screen.outcome(1, None, "Traceback: ValueError")[0] == "broken"
+
+
+def test_an_alias_goes_through_the_gateway(tmp_path):
+    cfg = tmp_path / "g.yaml"
+    cfg.write_text("model_list:\n  - model_name: q3-4b\n    litellm_params:\n"
+                   "      model: openai/org/x\n      api_base: http://up/v1\n",
+                   encoding="utf-8")
+    assert screen.routed_gateway("q3-4b", cfg) == ""
+
+
+def test_a_repo_id_goes_to_the_upstream(tmp_path):
+    """LiteLLM validates the model name against its aliases and answers 400 for
+    anything else. mlx_lm.server treats it as a live repo id and swaps to it,
+    so a discovered candidate has to reach the upstream directly."""
+    cfg = tmp_path / "g.yaml"
+    cfg.write_text("model_list:\n  - model_name: q3-4b\n    litellm_params:\n"
+                   "      model: openai/org/x\n      api_base: http://up/v1\n",
+                   encoding="utf-8")
+    assert screen.routed_gateway("org/discovered", cfg) == "http://up/v1"
+
+
+def test_a_missing_config_routes_nowhere_rather_than_guessing(tmp_path):
+    assert screen.routed_gateway("org/x", tmp_path / "absent.yaml") == ""
+
+
+def test_the_fixture_key_is_the_one_the_run_writes():
+    """The tests above used `pass` and so did outcome(), so they agreed with
+    each other and with nothing else. A hand-made fixture that never meets the
+    real writer confirms whatever the code already does."""
+    from evals.core import Result, summarize
+
+    got = summarize([Result("case", "cand", True, 1.0, 0, "")])
+    assert "passed" in got["cand"], "outcome() reads this key"
+    assert "pass" not in got["cand"], "and there is no bare `pass` to read"
