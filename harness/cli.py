@@ -843,11 +843,14 @@ def cmd_fetch(a) -> int:
     from harness import fetching, inspect as ins
     from harness import memory_store as ms
 
+    want = (getattr(a, "lane", "") or "").strip().lower()
     store = ms.connect()
     try:
-        rows = fetching.queued(store)
+        rows = fetching.queued(store, lane=want)
         if not rows:
-            print("nothing queued. `lh discover --inspect` fills the queue.")
+            print(f"nothing queued in the {want} lane. "
+                  f"`lh discover --inspect` fills the queue." if want else
+                  "nothing queued. `lh discover --inspect` fills the queue.")
             return 0
         if not a.run:
             testable = [r for r in rows if r.get("lane")]
@@ -871,7 +874,7 @@ def cmd_fetch(a) -> int:
             return 0
         sizes = {(r["resolved"] or r["name"]): fetching.size_of(r)
                  for r in rows[:a.limit]}
-        for got in fetching.run(store, sizes, limit=a.limit):
+        for got in fetching.run(store, sizes, limit=a.limit, lane=want):
             print(f"  {'OK  ' if got['ok'] else 'skip'} {got['repo']}: {got['why']}")
     finally:
         store.close()
