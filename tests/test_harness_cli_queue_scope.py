@@ -75,3 +75,24 @@ def test_the_denominator_counts_only_what_a_screen_could_answer(monkeypatch, cap
     cli._report_queue(argparse.Namespace(lane="image", top=25, json=False))
     out = capsys.readouterr().out
     assert "1 of 1 waiting" in out, out
+
+
+def test_the_screen_tier_scopes_before_limiting_too(monkeypatch, capsys):
+    """The loop fetched two image models and then reported "nothing queued to
+    screen", because _report_screen sampled `top * 4` rows and filtered those.
+    The tier that runs the model had the defect the report tier had."""
+    rows = [{"name": f"org/code{i}", "lane": "code", "description": "",
+             "times": 1, "registry": "huggingface"} for i in range(19)]
+    rows.append({"name": "org/theimage", "lane": "image", "description": "",
+                 "times": 1, "registry": "huggingface"})
+    monkeypatch.setattr("harness.memory_store.judgeable",
+                        lambda conn, limit=50: rows)
+    monkeypatch.setattr("harness.memory_store.connect",
+                        lambda *a, **k: _Store(rows))
+    monkeypatch.setattr("harness.rank.serving", lambda *a, **k: set())
+    monkeypatch.setattr("harness.rank.lanes_with_receipts", lambda *a, **k: set())
+    cli._report_screen(argparse.Namespace(lane="image", top=2, run=False,
+                                          json=False))
+    out = capsys.readouterr().out
+    assert "nothing queued to screen" not in out, out
+    assert "org/theimage" in out, out

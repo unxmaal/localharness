@@ -1082,14 +1082,16 @@ def _report_screen(a) -> int:
     from harness import rank, screen
     from harness import memory_store as ms
 
+    want = (getattr(a, "lane", "") or "").strip().lower()
     store = ms.connect()
     try:
-        rows = ms.judgeable(store, limit=getattr(a, "top", 25) * 4)
+        # THE SAME DEFECT AS _report_queue, at the tier that actually runs the
+        # model. `--top 2` sampled 8 rows of 114 and filtered those, so the
+        # loop fetched two image models and then said "nothing queued to
+        # screen". Issue #209.
+        rows, _ = _queueable(store, want)
     finally:
         store.close()
-    want = (getattr(a, "lane", "") or "").strip().lower()
-    if want:
-        rows = [r for r in rows if lanes.serves(rank.lane_of(r), want)]
     ranked = rank.rank(rows, serving=rank.serving(),
                        measured_lanes=rank.lanes_with_receipts())
     planned = screen.plan(ranked)[:getattr(a, "top", 5)]
