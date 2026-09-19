@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import time
 import sys
 from pathlib import Path
 
@@ -1574,19 +1575,44 @@ def _measure_and_adopt(a, row: dict) -> int:
               f"is nothing to compare against. Measure it on its own first.")
         return 0
     inc_spec = screen.candidate_for(lane, incumbent) or incumbent
+    # THE PAIR MUST REACH THE SAME SERVER. One --gateway serves the whole run,
+    # so when the challenger's repo id sends it to mlx_lm.server the incumbent
+    # cannot travel as a LiteLLM alias: :8081 has never heard of `q3-4b`, the
+    # control scored 0 of 27, and the run had nothing to compare against. The
+    # config maps every alias to the upstream behind it. #223.
+    if screen.routed_gateway(name):
+        upstream = screen.upstream_of(incumbent)
+        if upstream:
+            inc_spec = screen.candidate_for(lane, upstream) or upstream
+    # NAME THE DIRECTORY, DO NOT GUESS AT IT AFTERWARDS. _latest_receipt read
+    # whichever directory sorted highest, and `legacy-ev-small-code` outranks
+    # every timestamp because `l` sorts above `2`. The loop measured two
+    # candidates and then read a receipt from a different experiment. #222.
+    out = (paths.home() / "runs"
+           / f"{time.strftime('%Y%m%d-%H%M%S')}-adopt-{lane}")
     argv = ["uv", "run", "python", "-m", "evals.run", "--modality", lane,
             "--repeat", str(int(getattr(a, "repeat", 3) or 3)),
+            "--out", str(out),
             "--candidates", f"{inc_spec},{spec}"]
+    # ROUTE IT THE WAY THE SCREEN DOES. LiteLLM validates `model` against its
+    # alias table and a discovered candidate is always a repo id, so the
+    # measure sent every request to a server that was never going to accept
+    # the name: 0/27 at 11ms a case, reported as "does not beat the incumbent
+    # on the lane's metric". #223, which is #206 at the tier its fix did not
+    # reach.
+    route = screen.routed_gateway(name)
+    if route:
+        argv += ["--gateway", route]
     print(f"\n  {lane}: {name} against {incumbent}")
     print(f"    {' '.join(argv)}", flush=True)
     proc = subprocess.run(argv, capture_output=True, text=True)
     if proc.returncode != 0:
         err(proc.stderr.strip()[-400:] or "no stderr")
         return 1
-    data = _latest_receipt(lane)
+    data = _receipt_at(out)
     if not data:
-        return err(f"{name}: the run wrote no receipt, so nothing can be "
-                   f"adopted from it")
+        return err(f"{name}: the run wrote no receipt at {out}, so nothing "
+                   f"can be adopted from it")
     summary = data.get("summary") or {}
     rows = data.get("rows") or []
     # MATCH ON THE SPEC, not the bare name: an engine receipt key carries the
@@ -1594,6 +1620,17 @@ def _measure_and_adopt(a, row: dict) -> int:
     # asked about as `mflux:filipstrand/...` for the two sides to line up.
     inc_row = _summary_row(summary, inc_spec, lane)
     ch_row = _summary_row(summary, spec, lane)
+    # ASSERT THE RUN IS THE ONE THAT WAS ASKED FOR. Naming the directory stops
+    # the loop reading a stranger's receipt; this stops it reading a receipt
+    # that is its own and yet describes a different exam, which a crashed or
+    # partially-skipped candidate produces. #222.
+    named = {inc_spec, spec}
+    if not named & set(summary) and len(summary) and not (
+            _summary_row(summary, inc_spec, lane)
+            or _summary_row(summary, spec, lane)):
+        return err(f"{name}: the receipt at {out} names {sorted(summary)!r} "
+                   f"and neither candidate this run asked for, so it does not "
+                   f"describe the run that was just made")
     if not inc_row:
         # THE INCUMBENT IS THE CONTROL. A candidate measured beside a control
         # that did not run says nothing about the candidate, which is the
@@ -1607,6 +1644,35 @@ def _measure_and_adopt(a, row: dict) -> int:
     if not ch_row:
         return err(f"{name}: the challenger contributed no rows. The summary "
                    f"names {sorted(summary)!r}")
+    # A CANDIDATE THAT NEVER RAN IS NOT A CANDIDATE THAT LOST. Every row a
+    # harness refusal means the request never reached a model, and handing
+    # that to adopt.decide dresses a routing failure as a quality result.
+    # screen.NOT_THE_CANDIDATE already enumerates these. #223.
+    # THE CONTROL MUST HAVE RUN. This is the general form of the refusal check
+    # below, and it catches every variant of "the request never reached a
+    # model" without anyone having to enumerate the phrase first: a 404 from a
+    # doubled /v1 got past NOT_THE_CANDIDATE, both candidates scored 0/27, and
+    # the loop reported "does not beat the incumbent on the lane's metric".
+    # A candidate measured beside a control that passed nothing says nothing
+    # about the candidate. #223, and the lesson the tts lane paid for in #194.
+    if not int(inc_row.get("passed") or 0):
+        return err(f"{name}: the incumbent {incumbent} passed "
+                   f"0 of {inc_row.get('total') or '?'}, so this run has no "
+                   f"working control and nothing can be concluded from it. "
+                   f"Fix the lane before reading the challenger.")
+    refused = _all_refused(rows, ch_row.get("candidate") or name)
+    if refused:
+        store = ms.connect()
+        try:
+            ms.decide(store, name, "queued", tier=ms.SCREEN,
+                      detail=f"not measured: {refused}")
+        except KeyError:
+            pass      # measured by hand, never proposed; the report still stands
+        finally:
+            store.close()
+        return err(f"{name}: every case was refused before it reached a model "
+                   f"({refused}). The incumbent passed, so this says nothing "
+                   f"about the candidate and it stays queued.")
     verdict = adopt.decide(lane, inc_row, ch_row, rows)
     print(f"    {'ADOPTED' if verdict.adopt else 'kept the incumbent'}: "
           f"{verdict.why}")
@@ -1652,8 +1718,62 @@ def _summary_row(summary: dict, wanted: str, lane: str) -> dict | None:
     return None
 
 
+#: `_all_refused` found no rows under the key it was given while the receipt
+#: held rows under others. Reported rather than returned as "": the lookup is
+#: the thing that failed, and saying "it ran fine" would be a guess.
+NO_ROWS_FOR_CANDIDATE = "no rows under that name in the receipt"
+
+
+def _all_refused(rows, candidate: str) -> str:
+    """The refusal phrase, when EVERY row for `candidate` is one of ours.
+
+    Empty when any row actually reached a model, because then the candidate
+    really was measured and a low score is its own.
+
+    MATCHED ON THE RECEIPT KEY, which is what the rows carry. A bare repo id
+    matches nothing for an engine lane, where the key is `mflux/<id>-q8`, and
+    "matched nothing" used to return "" -- the same answer as "it ran" -- so a
+    mis-keyed lookup silently disabled the guard instead of failing. A safety
+    check whose lookup miss looks like a pass is worse than no check.
+    """
+    from harness import screen
+
+    mine = [r for r in rows or [] if r.get("candidate") == candidate]
+    if not mine:
+        # No rows at all is a different fact and the caller handles it; no
+        # rows for THIS candidate when others have some is a key mismatch.
+        return "" if not rows else NO_ROWS_FOR_CANDIDATE
+    seen = {screen.refused_by_harness(str(r.get("detail") or "")) for r in mine}
+    return "" if "" in seen else sorted(seen)[0]
+
+
+def _receipt_at(out) -> dict | None:
+    """The receipt this invocation asked for, read from the path it named.
+
+    THE ONLY WAY TO KNOW WHICH RUN A RECEIPT DESCRIBES IS TO HAVE NAMED IT.
+    Asking the directory listing which is newest cannot distinguish a run from
+    a run that merely sorts well. Issue #222.
+    """
+    import json
+
+    f = Path(out) / "results.json"
+    if not f.exists():
+        return None
+    try:
+        return json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
 def _latest_receipt(modality: str) -> dict | None:
-    """The newest run receipt for this modality, whole."""
+    """The newest run receipt for this modality, whole.
+
+    NOT FOR DECIDING ANYTHING. Reporting only. "Newest" here is "sorts highest
+    by directory name", and a directory that does not follow the timestamp
+    convention wins permanently -- `legacy-ev-small-code` has been the code
+    lane's answer since it was created. Anything that draws a conclusion must
+    name its own output directory and read that. #222.
+    """
     import json
 
     root = paths.home() / "runs"

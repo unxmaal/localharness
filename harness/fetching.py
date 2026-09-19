@@ -83,6 +83,12 @@ FETCHABLE_TIERS = ("inspect", "fetch")
 #: it read, and this worker calls snapshot_download, which wants a HuggingFace
 #: model id: every queued name 401'd. A repo is something to install and screen,
 #: a weight is something to fetch, and they are not the same queue.
+#:
+#: THE REGISTRY ANSWERS THIS NOW, and `kind` is the fallback for rows written
+#: before that column existed (#167). Applied as a hard filter it excluded 25
+#: of the 28 ranked code candidates, because the sweep records `candidate` for
+#: a name resolved out of prose, so the screen queued things the fetch could
+#: never reach. #224.
 FETCHABLE_KIND = "weights"
 
 
@@ -188,15 +194,16 @@ def queued(conn, tiers=FETCHABLE_TIERS, kind: str = FETCHABLE_KIND,
                             AND v2.score IS NOT NULL
                           ORDER BY v2.id DESC LIMIT 1), 0) AS score
         FROM proposals p""").fetchall()
+    def downloadable(r) -> bool:
+        """snapshot_download wants a HuggingFace id. The registry says so
+        outright; `kind` only has to answer for rows older than that column."""
+        if r["registry"]:
+            return r["registry"] != ms.GITHUB
+        return not kind or r["kind"] == kind
+
     out = [dict(r) for r in rows
            if r["outcome"] == "queued" and r["tier"] in tiers
-           and (not kind or r["kind"] == kind)
-           # snapshot_download wants a HuggingFace id, and this queue once held
-           # GitHub repo names: every one of them 401'd. `kind` was the only
-           # thing standing between the two, and the store now says outright
-           # which registry a name belongs to. An empty registry is a row from
-           # before that column, so `kind` still answers for it.
-           and r["registry"] != ms.GITHUB
+           and downloadable(r)
            and not have(r["resolved"] or r["name"])]
     if lane:
         # A LANE-SCOPED LOOP MUST SCOPE THE STEP THAT SPENDS THE DISK. The loop
@@ -205,7 +212,45 @@ def queued(conn, tiers=FETCHABLE_TIERS, kind: str = FETCHABLE_KIND,
         # queue report and not the fetch. Issue #211.
         from harness import lanes
         out = [r for r in out if lanes.serves(r.get("lane"), lane)]
-    return sorted(out, key=lambda r: -(r["score"] or 0))
+    return in_rank_order(out, conn)
+
+
+def in_rank_order(rows: list[dict], conn=None) -> list[dict]:
+    """Fetch order is SCREEN order. The fetch exists to feed the screen.
+
+    These were two different questions asked of one queue. This sorted by the
+    judged score of the repo that named the weight; the screen sorts by the
+    value of the information a screen would buy (#175), which is the ordering
+    this project adopted when it retired the judge as a ranker. Measured on the
+    code lane, the two top-six lists had ZERO overlap: three runs each fetched
+    something and each ended with nothing to screen. Issue #224.
+
+    Worse, every judged score in this queue is 0 -- the judge scores REPOS and
+    the queue holds WEIGHTS, inherited through a `needs` edge that mostly does
+    not exist -- so the old order was arbitrary among equals, which put three
+    models over 12 GiB at the head of a 10 GiB budget.
+    """
+    from harness import rank
+
+    # RANK THE STORE'S ROWS, NOT THESE. A fetch row carries name, lane, kind
+    # and size; rank.value reads recurrence, lineage and the card description,
+    # which live on the judgeable row. Ranking these scored every one of them
+    # identically and fell back to the alphabet, which is the ordering this
+    # was replacing.
+    if conn is None:
+        return sorted(rows, key=lambda r: r["name"])
+    from harness import memory_store as _ms
+
+    ranked = rank.rank(_ms.judgeable(conn, limit=1_000_000),
+                       serving=rank.serving(),
+                       measured_lanes=rank.lanes_with_receipts(),
+                       keep_laneless=True)
+    order = {r["name"]: i for i, r in enumerate(ranked)}
+    # A row rank DROPS (an adapter) sorts last rather than vanishing: this
+    # queue's job is to say what it would download, and silently losing a row
+    # here would read as an empty queue.
+    return sorted(rows, key=lambda r: (order.get(r["name"], len(order)),
+                                       r["name"]))
 
 
 #: The two spellings the inspect tier has used for a measured size. `bytes=` is

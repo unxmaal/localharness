@@ -223,7 +223,13 @@ def test_a_repo_id_goes_to_the_upstream(tmp_path):
     cfg.write_text("model_list:\n  - model_name: q3-4b\n    litellm_params:\n"
                    "      model: openai/org/x\n      api_base: http://up/v1\n",
                    encoding="utf-8")
-    assert screen.routed_gateway("org/discovered", cfg) == "http://up/v1"
+    # The `--gateway` FORM, without the /v1 the config carries: evals.run
+    # appends its own path, and passing the config's base made every request
+    # /v1/v1/chat/completions and 404. Stripping used to happen in argv() and
+    # nowhere else, so the measure tier got the wrong one. #223.
+    assert screen.routed_gateway("org/discovered", cfg) == "http://up"
+    assert screen.gateway_routes(cfg)[1] == "http://up/v1", (
+        "the config's own base keeps its /v1; only the argument drops it")
 
 
 def test_a_missing_config_routes_nowhere_rather_than_guessing(tmp_path):
