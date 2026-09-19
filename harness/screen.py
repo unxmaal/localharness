@@ -147,19 +147,9 @@ def gateway_routes(config=None) -> tuple[set[str], str]:
     candidate -- which is always a repo id and never an alias -- has to reach
     the upstream directly or it is refused before a token is generated.
     """
-    import os
-    from pathlib import Path
-    try:
-        import yaml
-    except ImportError:      # pragma: no cover - yaml is a hard dependency
-        return set(), ""
-    root = Path(__file__).resolve().parent.parent
-    config = config or Path(os.environ.get(
-        "GATEWAY_CONFIG", root / "gateway" / "config.yaml"))
-    try:
-        data = yaml.safe_load(Path(config).read_text(encoding="utf-8")) or {}
-    except (OSError, ValueError):
-        return set(), ""
+    from harness import gateway
+
+    data = gateway.load(config)
     names, base = set(), ""
     for entry in data.get("model_list") or []:
         if entry.get("model_name"):
@@ -168,16 +158,49 @@ def gateway_routes(config=None) -> tuple[set[str], str]:
     return names, base
 
 
+def upstream_of(alias: str, config=None) -> str:
+    """The repo id an alias resolves to, or "" if it is not an alias.
+
+    A PAIRED RUN HAS ONE GATEWAY AND TWO CANDIDATES. When the challenger is a
+    repo id the whole run goes to mlx_lm.server, which has never heard of
+    `q3-4b`, so the INCUMBENT then scores 0 of 27 and the run has no control.
+    The config already maps every alias to the upstream behind it; the
+    incumbent travels as that.
+
+    `openai/` is LiteLLM's provider prefix, not part of the id.
+    """
+    from harness import gateway
+
+    want = (alias or "").strip().lower()
+    if not want:
+        return ""
+    for entry in gateway.load(config).get("model_list") or []:
+        if str(entry.get("model_name", "")).strip().lower() != want:
+            continue
+        return gateway.strip_provider(
+            str((entry.get("litellm_params") or {}).get("model", "")))
+    return ""
+
+
 def routed_gateway(model: str, config=None) -> str:
-    """Where to send this candidate, or "" to use the default gateway.
+    """The `--gateway` value for this candidate, or "" for the default.
 
     An alias the gateway knows goes through the gateway. A repo id does not:
     it goes to the upstream that can hot-swap to it.
+
+    RETURNS THE FORM `--gateway` WANTS. It used to return the config's own
+    `.../v1` base and leave the caller to strip it, which argv() did and
+    _measure_and_adopt did not: every request became /v1/v1/chat/completions
+    and 404'd, so the measure scored BOTH candidates 0/27. A transform that
+    only one of two callers performs is the same defect as two spellings of a
+    name. #223.
     """
     names, base = gateway_routes(config)
     if (model or "").strip().lower() in names:
         return ""
-    return base if "/" in (model or "") else ""
+    if "/" not in (model or ""):
+        return ""
+    return base.rsplit("/v1", 1)[0]
 
 
 def argv(row: dict, outdir=None) -> list[str]:
@@ -188,7 +211,7 @@ def argv(row: dict, outdir=None) -> list[str]:
            "--screen", "--repeat", "1", "--candidates", row["candidate"]]
     upstream = routed_gateway(row.get("name") or "")
     if upstream:
-        out += ["--gateway", upstream.rsplit("/v1", 1)[0]]
+        out += ["--gateway", upstream]
     if outdir:
         out += ["--out", str(outdir)]
     return out

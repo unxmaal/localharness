@@ -158,10 +158,17 @@ def test_the_incumbent_and_challenger_run_in_one_paired_invocation(monkeypatch, 
     # occurrence.
     monkeypatch.setattr(adopt, "default_for",
                         lambda lane, fallback, conn=None: "org/Kokoro-82M-bf16")
-    monkeypatch.setattr(cli, "_latest_receipt", lambda m: {
-        "summary": {"Kokoro-82M-bf16": {"pass_rate": 1.0, "median_s": 1.0,
+    # Patched at _receipt_at, because the loop now NAMES the directory it reads
+    # rather than asking which one sorts highest. Issue #222.
+    monkeypatch.setattr(cli, "_receipt_at", lambda out: {
+        # `passed` is load-bearing now: a control that passed NOTHING blocks
+        # any verdict, because a candidate measured beside a dead control says
+        # nothing about the candidate. #223.
+        "summary": {"Kokoro-82M-bf16": {"passed": 8, "total": 8,
+                                        "pass_rate": 1.0, "median_s": 1.0,
                                         "metrics": {"wer": 0.05}},
-                    "better-tts": {"pass_rate": 1.0, "median_s": 1.0,
+                    "better-tts": {"passed": 8, "total": 8,
+                                   "pass_rate": 1.0, "median_s": 1.0,
                                    "metrics": {"wer": 0.01}}},
         "rows": ([{"candidate": "Kokoro-82M-bf16", "case_id": f"c{i}",
                    "passed": False} for i in range(8)]
