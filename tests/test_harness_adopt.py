@@ -204,14 +204,14 @@ def test_a_summary_key_is_matched_on_its_stem():
     from harness import cli
 
     got = cli._summary_row({"Kokoro-82M-bf16/bm_george": {"pass_rate": 1.0}},
-                           "mlx-community/Kokoro-82M-bf16")
+                           "mlx-community/Kokoro-82M-bf16", "tts")
     assert got and got["candidate"] == "Kokoro-82M-bf16/bm_george"
 
 
 def test_an_unmatched_candidate_is_an_error_not_a_silent_skip():
     from harness import cli
 
-    assert cli._summary_row({"something-else": {}}, "org/wanted") is None
+    assert cli._summary_row({"something-else": {}}, "org/wanted", "tts") is None
 
 
 def test_only_the_latest_verdict_counts_as_a_survivor(tmp_path):
