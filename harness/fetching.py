@@ -293,8 +293,16 @@ def refused_by_harness(why: str) -> str:
 
 
 def run(conn, sizes: dict[str, int], *, limit: int = 1, snapshot=None,
-        free: int | None = None, lane: str = "") -> list[dict]:
+        free: int | None = None, lane: str = "",
+        budget: int | None = None) -> list[dict]:
     """Fetch up to `limit` queued candidates, recording what happened.
+
+    `budget` caps what ONE INVOCATION downloads in total, which is the job
+    --budget-gib was documented as doing and never did: it was printed in the
+    header and never passed here, so a 12 GiB budget fetched 24.6 GiB. It is a
+    fact about this invocation, so exceeding it re-queues rather than settling
+    anything. MAX_DOWNLOAD and DISK_FLOOR are absolute and stay in plan().
+    Issue #215.
 
     A refused plan is recorded as `declined`, terminal, so the same oversized
     model is not re-queued every sweep. A failed download is NOT: a network
@@ -306,6 +314,7 @@ def run(conn, sizes: dict[str, int], *, limit: int = 1, snapshot=None,
     """
     done = []
     fetched = 0
+    spent = 0
     for row in queued(conn, lane=lane):
         if not row.get("lane"):
             continue      # nothing here could measure it, so nothing fetches it
@@ -315,7 +324,15 @@ def run(conn, sizes: dict[str, int], *, limit: int = 1, snapshot=None,
         if fetched >= limit:
             break
         name = row["resolved"] or row["name"]
-        p = plan(name, sizes.get(name, 0), free=free)
+        size = sizes.get(name, 0)
+        if budget is not None and size > 0 and spent + size > budget:
+            why = (f"{size / GIB:.1f} GiB would take this run past its "
+                   f"{budget / GIB:.0f} GiB budget ({spent / GIB:.1f} GiB "
+                   f"already fetched)")
+            ms.decide(conn, row["name"], "queued", tier="fetch", detail=why)
+            done.append({"repo": name, "ok": False, "why": why})
+            continue
+        p = plan(name, size, free=free)
         if not p.ok:
             outcome = "queued" if refused_by_harness(p.why) else "declined"
             ms.decide(conn, row["name"], outcome, tier="fetch", detail=p.why)
@@ -327,6 +344,7 @@ def run(conn, sizes: dict[str, int], *, limit: int = 1, snapshot=None,
             done.append({"repo": name, "ok": False, "why": str(exc)})
             continue
         fetched += 1
+        spent += sizes.get(name, 0)
         # WHAT IT NEEDS BESIDE ITSELF. Only readable once the config is on
         # disk, so this is after the download rather than in the plan. A model
         # whose tokenizer lives in another repo is `ready` and unloadable

@@ -874,7 +874,10 @@ def cmd_fetch(a) -> int:
             return 0
         sizes = {(r["resolved"] or r["name"]): fetching.size_of(r)
                  for r in rows[:a.limit]}
-        for got in fetching.run(store, sizes, limit=a.limit, lane=want):
+        gib = getattr(a, "budget_gib", None)
+        budget = int(float(gib) * fetching.GIB) if gib else None
+        for got in fetching.run(store, sizes, limit=a.limit, lane=want,
+                                budget=budget):
             print(f"  {'OK  ' if got['ok'] else 'skip'} {got['repo']}: {got['why']}")
     finally:
         store.close()
