@@ -17,7 +17,7 @@ from pathlib import Path
 
 from harness import paths, store
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 #: Outcomes a proposal can reach. TERMINAL ones suppress re-proposal.
 VERDICTS = ("measured", "declined", "broken", "queued", "ignored", "screened")
@@ -191,6 +191,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         _backfill_lanes(conn)
     if have and have < 7:
         _retract_harness_refusals(conn)
+    if have and have < 8:
+        _retract_verdicts_with_no_control(conn)
     conn.execute("INSERT OR REPLACE INTO meta VALUES ('schema', ?)",
                  (str(SCHEMA_VERSION),))
     conn.commit()
@@ -272,6 +274,37 @@ def _retract_harness_refusals(conn) -> None:
             "decided_at) VALUES (?, ?, 'queued', ?, ?)",
             (pid, tier, f"retracted: {phrase!r} was a fact about this "
                         f"harness, not a verdict on {name}", now))
+
+
+def _retract_verdicts_with_no_control(conn) -> None:
+    """Undo an adoption verdict drawn from a run where the CONTROL scored zero.
+
+    A doubled `/v1` in the gateway argument produced HTTP 404 for every
+    request, so both the incumbent and the challenger passed 0 of 27, and the
+    loop recorded `declined: does not beat the incumbent on the lane's metric`
+    -- a statement about quality, from a run in which nothing ran.
+
+    The receipts are on disk and say so, but re-deriving which runs were
+    affected from them is guesswork after the fact. The one row this produced
+    is named, because naming it is honest and a pattern match would catch
+    legitimate declines too. Issue #223.
+    """
+    rows = conn.execute(
+        "SELECT p.id, p.name FROM proposals p JOIN verdicts v "
+        "ON v.proposal_id = p.id "
+        "WHERE v.id = (SELECT v2.id FROM verdicts v2 "
+        "               WHERE v2.proposal_id = p.id ORDER BY v2.id DESC LIMIT 1) "
+        "  AND v.tier = 'adopt' AND v.outcome = 'declined' "
+        "  AND v.detail LIKE '%does not beat the incumbent%' "
+        "  AND p.name = 'LiquidAI/LFM2.5-350M'").fetchall()
+    now = time.time()
+    for row in rows:
+        conn.execute(
+            "INSERT INTO verdicts (proposal_id, tier, outcome, detail, "
+            "decided_at) VALUES (?, ?, 'queued', ?, ?)",
+            (row[0], SCREEN,
+             "retracted: measured against a control that passed 0 of 27, so "
+             "the verdict described a run in which nothing ran", now))
 
 
 def _columns(conn, table: str) -> set[str]:
@@ -393,14 +426,20 @@ def decide(conn: sqlite3.Connection, name: str, outcome: str, *, tier: str = "",
         raise KeyError(f"no proposal named {name!r}")
     # A DETERMINISTIC TIER RESTATING ITSELF IS NOT A SECOND FACT. A judge
     # re-scoring is a new draw and a run is a new run, so the skip is narrow:
-    # no score, no run path, and the previous row said exactly this. Issue #184.
+    # no score, no run path, and the LATEST row said exactly this. Issue #184.
+    #
+    # LATEST, not any earlier row of the tier. Matching any of them made every
+    # retraction permanent: a re-queued candidate re-screened green, decide()
+    # found the old `screened` row three verdicts back, wrote nothing, and the
+    # retraction stayed the latest verdict forever. Issue #225.
     if score is None and not run_path:
         same = conn.execute(
-            "SELECT id FROM verdicts WHERE proposal_id = ? AND tier = ? "
-            "AND outcome = ? AND detail = ? AND score IS NULL AND run_path = '' "
-            "ORDER BY id DESC LIMIT 1",
-            (row["id"], tier, outcome, detail)).fetchone()
-        if same:
+            "SELECT id, tier, outcome, detail, score, run_path FROM verdicts "
+            "WHERE proposal_id = ? ORDER BY id DESC LIMIT 1",
+            (row["id"],)).fetchone()
+        if (same and same["tier"] == tier and same["outcome"] == outcome
+                and same["detail"] == detail and same["score"] is None
+                and not same["run_path"]):
             return same["id"]
     vid = conn.execute(
         "INSERT INTO verdicts (proposal_id, outcome, tier, detail, issue, "
