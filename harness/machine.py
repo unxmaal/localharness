@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+from pathlib import Path
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -54,10 +55,29 @@ def _has_rocm() -> bool:
     return shutil.which("rocm-smi") is not None or shutil.which("rocminfo") is not None
 
 
+def _has_llamacpp() -> bool:
+    """What loads a GGUF. Nothing else here does.
+
+    30 proposals in the store name GGUF, and until this probe existed the
+    ladder had no way to say so: a GGUF fetched, screened against a server
+    that cannot load it, and was recorded `broken` -- our gap, written down as
+    the candidate's. Issue #228.
+
+    $LLAMACPP_BIN is what the Linux runbook sets; the bare name covers a
+    package install.
+    """
+    import os
+    named = os.environ.get("LLAMACPP_BIN", "").strip()
+    if named and Path(named).exists():
+        return True
+    return any(shutil.which(n) for n in ("llama-server", "llama-cli"))
+
+
 #: runtime -> how to tell whether this machine has it. Order is not meaningful;
 #: a machine may have several.
 _RUNTIME_PROBES = {
     "mlx": _has_mlx,
+    "llamacpp": _has_llamacpp,
     "cuda": _has_cuda,
     "rocm": _has_rocm,
 }

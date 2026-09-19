@@ -773,6 +773,9 @@ def _report_inspect(a) -> int:
                 # WHAT IT IS, beside what the verdict said about it. The judge
                 # reads this; with only a name it cannot rank at all (#175).
                 description=fit.description))
+            if ms.set_lane(store, repo, fit.lanes.get(repo, "")):
+                print(f"    lane corrected from the card: {repo} "
+                      f"-> {fit.lanes[repo]}")
             # A thing that cannot run here is ANSWERED, so it is terminal and
             # never proposed again. "unknown" settles nothing, deliberately.
             outcome = {"fits": "queued", "unknown": ""}.get(fit.verdict, "declined")
@@ -810,6 +813,12 @@ def _report_inspect(a) -> int:
                     url=f"https://huggingface.co/{model_id}",
                     resolved=model_id, lane=fit.lanes.get(model_id, ""),
                     why=f"named by {repo}"))
+                # THE CARD OVERWRITES A GUESS. record() keeps the first
+                # non-empty lane; this one was read off the publisher's own
+                # task, so it outranks whatever the sweep inferred. #227.
+                if ms.set_lane(store, model_id, fit.lanes.get(model_id, "")):
+                    print(f"    lane corrected from the card: {model_id} "
+                          f"-> {fit.lanes[model_id]}")
                 ms.link(store, repo, model_id, "needs")
                 ms.decide(store, model_id, "queued", tier=ms.INSPECT,
                           detail=f"bytes={size} lane={fit.lanes.get(model_id) or '-'} "

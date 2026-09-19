@@ -10,6 +10,7 @@ is what happened. The graph is the foreign keys; traversal is a join.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -17,7 +18,7 @@ from pathlib import Path
 
 from harness import paths, store
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 #: Outcomes a proposal can reach. TERMINAL ones suppress re-proposal.
 VERDICTS = ("measured", "declined", "broken", "queued", "ignored", "screened")
@@ -193,6 +194,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         _retract_harness_refusals(conn)
     if have and have < 8:
         _retract_verdicts_with_no_control(conn)
+    if have and have < 9:
+        _relane_from_the_card(conn)
     conn.execute("INSERT OR REPLACE INTO meta VALUES ('schema', ?)",
                  (str(SCHEMA_VERSION),))
     conn.commit()
@@ -307,6 +310,58 @@ def _retract_verdicts_with_no_control(conn) -> None:
              "the verdict described a run in which nothing ran", now))
 
 
+#: How the inspect tier spells the registry's own task inside a description.
+_CARD_TASK = re.compile(r"task ([a-z0-9-]+)")
+
+
+def _relane_from_the_card(conn) -> None:
+    """Correct a lane the SOURCE supplied, using the candidate's own card.
+
+    A feed declares the subject area it covers; that was recorded as every
+    candidate's lane and never overwritten, so four video models sat in the
+    image lane and a TTS model in the code lane. Each was screened against
+    cases it could not pass and recorded `broken` -- terminal -- for a
+    mismatch this harness created.
+
+    Only rows whose card CONTRADICTS the recorded lane are touched. A lane
+    with no card to check stays put: it may be right, and guessing again
+    would be no better than the guess already there. #227.
+    """
+    from harness import inspect as ins
+    from harness import lanes
+
+    rows = conn.execute(
+        "SELECT id, name, lane, description FROM proposals "
+        "WHERE description <> ''").fetchall()
+    moved = []
+    for row in rows:
+        m = _CARD_TASK.search((row["description"] or "").lower())
+        card = ins.PIPELINE_LANES.get(m.group(1)) if m else None
+        if not card or lanes.canonical(row["lane"]) == card:
+            continue
+        conn.execute("UPDATE proposals SET lane = ? WHERE id = ?",
+                     (card, row["id"]))
+        moved.append((row["id"], row["name"], row["lane"], card))
+
+    # A terminal verdict reached in the WRONG LANE says nothing about the
+    # candidate: the screen built its spec from the lane and handed it cases
+    # from a modality it does not serve. Re-queued, not deleted.
+    now = time.time()
+    for pid, name, was, card in moved:
+        last = conn.execute(
+            "SELECT outcome FROM verdicts WHERE proposal_id = ? "
+            "ORDER BY id DESC LIMIT 1", (pid,)).fetchone()
+        if not last or last["outcome"] not in TERMINAL:
+            continue
+        conn.execute(
+            "INSERT INTO verdicts (proposal_id, tier, outcome, detail, "
+            "decided_at) VALUES (?, ?, 'queued', ?, ?)",
+            (pid, SCREEN,
+             f"retracted: settled in the {was or 'unknown'} lane, which came "
+             f"from the source rather than from {name}'s own card ({card})",
+             now))
+
+
 def _columns(conn, table: str) -> set[str]:
     """Column names of one table, asked of whichever backend this is."""
     if store.backend() == store.POSTGRES:
@@ -405,6 +460,30 @@ def record(conn: sqlite3.Connection, seen: Seen, at: float | None = None) -> int
         (pid, seen.source, seen.url, seen.why, seen.relevance, now))
     conn.commit()
     return pid
+
+
+def set_lane(conn, name: str, lane: str) -> bool:
+    """Record a lane READ FROM THE REGISTRY, overwriting a guess.
+
+    `record()` keeps the first non-empty lane, which is right for a value
+    nothing can improve on. A lane is not that: the sweep can only guess from
+    prose, and the inspect tier later reads the publisher's own task off the
+    card. Without a way to correct it, the guess is permanent -- which is how
+    four video models stayed in the image lane. #227.
+
+    Returns whether anything changed, so a caller can say so.
+    """
+    from harness import lanes
+
+    want = lanes.canonical(lane)
+    if not want:
+        return False
+    row = conn.execute("SELECT id, lane FROM proposals WHERE name = ?",
+                       (name,)).fetchone()
+    if not row or lanes.canonical(row["lane"]) == want:
+        return False
+    conn.execute("UPDATE proposals SET lane = ? WHERE id = ?", (want, row["id"]))
+    return True
 
 
 def decide(conn: sqlite3.Connection, name: str, outcome: str, *, tier: str = "",

@@ -1,0 +1,15 @@
+# What the judge should know when scoring for a machine that has llama.cpp.
+#
+# GGUF is a FORMAT and llama.cpp is what loads it, so this fragment applies
+# wherever that binary exists rather than to any one kind of hardware: a card
+# runs GGUF through llama.cpp as happily as a processor does. On a machine
+# without it, a GGUF does not run at all and inspect refuses it needs-llamacpp
+# before any weights are downloaded. Issue #228.
+what_scores_high:
+  - GGUF weights, or anything llama.cpp serves. This machine can load them.
+  - A quantisation published as GGUF for a model this project already runs,
+    where the point is the smaller working set rather than the format.
+
+what_scores_low:
+  - A GGUF re-upload of a model already served here in another format. The
+    format is not the finding; nothing is learned by running it again.

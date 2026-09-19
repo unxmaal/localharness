@@ -199,6 +199,11 @@ class Fit:
     #: `torch.cuda.is_available()` guard is compatible with running elsewhere.
     cuda_mentioned: list[str] = field(default_factory=list)
     mlx: bool = False
+    #: Its weights are GGUF, which only llama.cpp loads. A format is not a
+    #: runtime and this field is not one either: it is the evidence that the
+    #: `llamacpp` runtime is required, resolved against the machine in
+    #: decide(). Issue #228.
+    gguf: bool = False
     mps: bool = False
     cuda: list[str] = field(default_factory=list)
     entry_points: list[str] = field(default_factory=list)
@@ -432,6 +437,37 @@ _NOISE_TAGS = re.compile(
     r"has_space|model[-_]index|conversational|en|zh|multilingual)")
 
 
+#: How a repo says its weights are GGUF. The library and the tag are the
+#: registry's own answer; a `.gguf` file in the listing is the thing itself.
+#: The NAME is last and narrowest -- `-GGUF` or `_GGUF` as a suffix or segment
+#: -- because a substring match calls `org/ggufmaker-tools` a GGUF repo.
+_GGUF_NAME = re.compile(r"(^|[-_.])gguf($|[-_.])", re.I)
+
+#: llama.cpp's quantisation labels: Q4_K_M, Q8_0, Q1_0, IQ2_XS. Distinctive
+#: because MLX spells its quantisations `-4bit`, `-8bit`, `-bf16`, with no
+#: underscore. Across the whole store this matches exactly one repo, and that
+#: one is a GGUF whose name says so no other way.
+#:
+#: THE FREE-TEXT DESCRIPTION IS DELIBERATELY NOT READ. Matching `gguf` in
+#: prose flags `unslothai/unsloth`, a training tool that merely SUPPORTS GGUF
+#: export, and refusing a tool for the formats it can write is the opposite of
+#: the question. Only the registry's structured fields and the name.
+_GGUF_QUANT = re.compile(r"(^|[-_.])i?q[0-9]+_[0-9a-z]+", re.I)
+
+
+def is_gguf(model_id: str, data: dict) -> bool:
+    """Are this repo's weights GGUF, which only llama.cpp loads? #228."""
+    if (data.get("library_name") or "").strip().lower() == "gguf":
+        return True
+    if any(str(t).strip().lower() == "gguf" for t in (data.get("tags") or [])):
+        return True
+    if any(str(f.get("rfilename", "")).lower().endswith(".gguf")
+           for f in (data.get("siblings") or [])):
+        return True
+    name = model_id or ""
+    return bool(_GGUF_NAME.search(name) or _GGUF_QUANT.search(name))
+
+
 def card_description(data: dict) -> str:
     """What a model card says that bears on whether to measure this.
 
@@ -499,6 +535,7 @@ def inspect_model(model_id: str, *, data: dict | None = None, fetch=None,
         fit.lanes[model_id] = lane
     tags = [str(t).lower() for t in (data.get("tags") or [])]
     fit.mlx = (data.get("library_name") or "").lower() == "mlx" or "mlx" in tags
+    fit.gguf = is_gguf(model_id, data)
     fit.last_commit = (data.get("lastModified") or "").strip()
     fit.description = card_description(data)
     return decide(fit, ceiling=ceiling, dead_days=dead_days, machine=machine)
@@ -540,6 +577,8 @@ def decide(fit: Fit, ceiling: int | None = None, dead_days: int = DEAD_DAYS,
         offered.append("mlx")
     if fit.cuda:
         offered.append("cuda")
+    if fit.gguf:
+        offered.append("llamacpp")
 
     # A repo offering more than one runs wherever ONE of them lands. An MLX
     # import beside a CUDA pin is a project with two paths, and each machine
@@ -551,7 +590,8 @@ def decide(fit: Fit, ceiling: int | None = None, dead_days: int = DEAD_DAYS,
         # list read as "needs-mlx" beside a reason listing CUDA packages, which
         # is a verdict recorded as terminal in the store and never revisited.
         fit.verdict = machine.refuses(offered[0])
-        named = ", ".join(fit.cuda[:3]) if "cuda" in offered else "mlx"
+        named = (", ".join(fit.cuda[:3]) if "cuda" in offered
+                 else "GGUF weights" if offered[0] == "llamacpp" else "mlx")
         if len(offered) > 1:
             fit.why = (f"depends on {named}, and this machine has none of "
                        f"{', '.join(offered)}")
