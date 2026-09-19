@@ -1588,9 +1588,19 @@ def _measure_and_adopt(a, row: dict) -> int:
     rows = data.get("rows") or []
     inc_row = _summary_row(summary, incumbent)
     ch_row = _summary_row(summary, name)
-    if not inc_row or not ch_row:
-        return err(f"{name}: the run's summary names "
-                   f"{sorted(summary)!r}, so the pair cannot be compared")
+    if not inc_row:
+        # THE INCUMBENT IS THE CONTROL. A candidate measured beside a control
+        # that did not run says nothing about the candidate, which is the
+        # lesson the tts lane already paid for (#194/#195). Name it as the
+        # control rather than as a missing summary key: a 15-minute run that
+        # ends in "the summary names [...]" makes the reader go looking in the
+        # receipt for a spelling problem. Issue #214.
+        return err(f"{name}: the incumbent {incumbent} contributed no rows, so "
+                   f"this run has no control and nothing can be concluded from "
+                   f"it. The summary names {sorted(summary)!r}")
+    if not ch_row:
+        return err(f"{name}: the challenger contributed no rows. The summary "
+                   f"names {sorted(summary)!r}")
     verdict = adopt.decide(lane, inc_row, ch_row, rows)
     print(f"    {'ADOPTED' if verdict.adopt else 'kept the incumbent'}: "
           f"{verdict.why}")
