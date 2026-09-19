@@ -185,10 +185,36 @@ def rank(rows, *, serving=(), measured_lanes=(), ceiling_gib: float = 22.0,
         if screen.is_attachment(f"{row.get('name') or ''} "
                                 f"{row.get('description') or ''}"):
             continue
+        if unrunnable(row):
+            continue
         got, why = value(row, serving=serving, measured_lanes=measured,
                          ceiling_gib=ceiling_gib)
         out.append({**row, "value": got, "value_why": "; ".join(why)})
     return sorted(out, key=lambda r: (-r["value"], r["name"]))
+
+
+def unrunnable(row: dict, machine=None) -> str:
+    """The runtime this row needs that this machine lacks, or "".
+
+    DROPPED AT RANK TIME RATHER THAN SETTLED IN THE STORE, because the answer
+    is a fact about the MACHINE and the store is shared. 28 GGUF proposals sit
+    in the queue here, where the text lane is served by mlx_lm.server and
+    nothing loads a GGUF; on a machine that builds llama.cpp the same rows are
+    perfectly runnable, and writing `needs-llamacpp` into the store from here
+    would answer for that machine too.
+
+    The inspect tier records the requirement for rows it reads from now on
+    (#228). This catches the ones inspected before the probe existed, and
+    re-asks on every run rather than freezing the answer.
+    """
+    from harness import inspect as ins
+
+    if machine is None:
+        from harness import machine as _machine
+        machine = _machine.detect()
+    if ins.is_gguf(row.get("name") or "", {}):
+        return machine.refuses("llamacpp") or ""
+    return ""
 
 
 def wanted(rows, minimum: int = 2) -> list[dict]:

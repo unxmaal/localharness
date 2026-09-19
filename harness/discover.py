@@ -729,14 +729,19 @@ def from_feeds(sources=None, reader=None, verify=True,
                     # membership of a lane that does not exist, and since a
                     # recorded lane is never overwritten, the real one that the
                     # source tier reads off a model card could never land.
-                    # A SOURCE'S `all` IS ITS COVERAGE, NOT THE CANDIDATE'S
-                    # LANE, which lanes.ALIASES now says once. When the source
-                    # claims no lane, the proposal's own prose is asked: a
-                    # GitHub repo has no HuggingFace pipeline_tag, so the
-                    # registry route could never classify one and 48 of 48
-                    # crowd proposals sat laneless. #207.
-                    lane=(lanes.canonical(src.lane)
-                          or lanes.from_prose(f"{repo} {p.why}")),
+                    # A SOURCE'S LANE IS ITS COVERAGE, NEVER THE CANDIDATE'S.
+                    # #207 fixed this for `all` and left every other value,
+                    # which are the same claim: r/StableDiffusion declares
+                    # `image` because that is what the subreddit is about, not
+                    # because the next model posted to it makes pictures. The
+                    # recorded lane is never overwritten, so four video models
+                    # sat in the image lane and a TTS model in the code lane,
+                    # each screened against cases it could not pass and
+                    # recorded BROKEN for a mismatch we created. #227.
+                    #
+                    # The candidate's own prose answers instead, and the
+                    # registry's own task overwrites that later via set_lane.
+                    lane=lanes.from_prose(f"{repo} {p.why}"),
                     resolved=repo))
             if repo in settled:
                 suppressed += 1

@@ -131,6 +131,14 @@ RUNTIME_TERMS = {
     "cpu": re.compile(
         r"\b(gguf|llama[._ -]?cpp|ggml|cpu[- ]only|cpu inference|avx-?[0-9]*)\b",
         re.I),
+    # DELIBERATELY OVERLAPS `cpu`, because the two answer different questions.
+    # `cpu` asks what an accelerator-less machine should be SHOWN, and the
+    # answer really is GGUF work -- without those terms such a box scored
+    # every hardware-naming post negative. This asks which RUNTIME a candidate
+    # needs, and a GGUF needs llama.cpp wherever it runs: on a card through
+    # llama.cpp just as happily, and on a machine without it, not at all
+    # whatever the processor. #228.
+    "llamacpp": re.compile(r"\b(gguf|llama[._ -]?cpp|ggml)\b", re.I),
 }
 
 #: The Apple vocabulary under its old name, for callers that predate the rest.
