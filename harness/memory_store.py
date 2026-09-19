@@ -17,7 +17,7 @@ from pathlib import Path
 
 from harness import paths, store
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 #: Outcomes a proposal can reach. TERMINAL ones suppress re-proposal.
 VERDICTS = ("measured", "declined", "broken", "queued", "ignored", "screened")
@@ -189,7 +189,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if have and have < 5:
         _canonical_lanes(conn)
         _backfill_lanes(conn)
-    if have and have < 6:
+    if have and have < 7:
         _retract_harness_refusals(conn)
     conn.execute("INSERT OR REPLACE INTO meta VALUES ('schema', ?)",
                  (str(SCHEMA_VERSION),))
@@ -239,6 +239,10 @@ def _backfill_lanes(conn) -> None:
 def _retract_harness_refusals(conn) -> None:
     """Re-queue anything settled for a reason that was about US, not about it.
 
+    Every tier, not only the fetch: the screen recorded "no cases of a modality
+    it can run" as `broken` for a candidate whose weights were on disk and
+    whose lane has three cases.
+
     The fetch tier recorded "no measured size; inspect it first" as `declined`,
     which is TERMINAL, so 16 real candidates were suppressed from re-proposal
     forever because a size sat in a verdict row the reader did not look at.
@@ -249,24 +253,25 @@ def _retract_harness_refusals(conn) -> None:
     appended saying why, and the latest verdict is what every tier reads.
     Issues #211, #206.
     """
-    from harness import fetching
+    from harness import fetching, screen
     rows = conn.execute(
-        "SELECT p.id, p.name, v.detail FROM proposals p "
+        "SELECT p.id, p.name, v.detail, v.tier FROM proposals p "
         "JOIN verdicts v ON v.proposal_id = p.id "
         "WHERE v.id = (SELECT v2.id FROM verdicts v2 "
         "               WHERE v2.proposal_id = p.id ORDER BY v2.id DESC LIMIT 1) "
-        "  AND v.outcome = 'declined' AND v.tier = 'fetch'").fetchall()
+        "  AND v.outcome IN ('declined', 'broken')").fetchall()
     now = time.time()
     for row in rows:
-        pid, name, detail = row[0], row[1], row[2] or ""
-        phrase = fetching.refused_by_harness(detail)
+        pid, name, detail, tier = row[0], row[1], row[2] or "", row[3] or ""
+        phrase = (fetching.refused_by_harness(detail)
+                  or screen.refused_by_harness(detail))
         if not phrase:
             continue
         conn.execute(
             "INSERT INTO verdicts (proposal_id, tier, outcome, detail, "
-            "decided_at) VALUES (?, 'fetch', 'queued', ?, ?)",
-            (pid, f"retracted: {phrase!r} was a fact about this harness, "
-                  f"not a verdict on {name}", now))
+            "decided_at) VALUES (?, ?, 'queued', ?, ?)",
+            (pid, tier, f"retracted: {phrase!r} was a fact about this "
+                        f"harness, not a verdict on {name}", now))
 
 
 def _columns(conn, table: str) -> set[str]:

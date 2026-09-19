@@ -187,6 +187,13 @@ NOT_THE_CANDIDATE = (
     "gateway returned http 400",
     "is the gateway up",
     "connection refused",
+    # THIRD OCCURRENCE OF THE CLASS. The runner could not build a spec for this
+    # candidate, which is a gap in this harness, and it was recorded as BROKEN,
+    # which is terminal. ERROR #22 and #60 are this same message from the stt
+    # and tts lanes, so it has been settling real candidates falsely across
+    # three lanes. #213, after #206 and #211.
+    "no cases of a modality it can run",
+    "no candidate matched any case",
 )
 
 
