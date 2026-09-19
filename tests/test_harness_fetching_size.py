@@ -68,57 +68,43 @@ def test_the_plan_for_an_unsized_repo_still_refuses():
 
 
 # --- the scoped loop must scope the step that spends the disk ---------------
+#
+# A REAL STORE, NOT A FAKE CONNECTION. These used a stub whose execute()
+# returned an object with only fetchall(), which stopped working the moment
+# queued() asked the store a second question. A fake that models one call is a
+# test of that call, not of the function.
 
-def _store(rows):
-    """A store whose queued() returns `rows`, so the lane filter is the only
-    thing under test."""
-    import types
-    return types.SimpleNamespace(rows=rows)
+from harness import memory_store as ms       # noqa: E402
 
 
-def test_a_lane_scoped_fetch_leaves_the_other_lanes_alone(monkeypatch):
+def _seed(conn, name, lane, registry=ms.HUGGINGFACE, kind="candidate"):
+    ms.record(conn, ms.Seen(name=name, source="test", url="", why="",
+                            relevance=0, kind=kind, registry=registry,
+                            lane=lane, resolved=name))
+    ms.decide(conn, name, "queued", tier="inspect", detail="bytes=104857600")
+
+
+@pytest.fixture
+def store(tmp_path, monkeypatch):
+    monkeypatch.setattr(fetching, "have", lambda *a, **k: False)
+    monkeypatch.setattr("harness.rank.serving", lambda *a, **k: set())
+    monkeypatch.setattr("harness.rank.lanes_with_receipts", lambda *a, **k: set())
+    conn = ms.connect(tmp_path / "d.db")
+    yield conn
+    conn.close()
+
+
+def test_a_lane_scoped_fetch_leaves_the_other_lanes_alone(store):
     """The loop printed "(spending only on the image lane)" and then considered
     whisper-tiny, wav2vec2, gpt2 and vicuna. Issue #211."""
-    rows = [{"name": "org/img", "resolved": "org/img", "lane": "image",
-             "kind": "weights", "registry": "huggingface", "outcome": "queued",
-             "tier": "inspect", "detail": "bytes=100", "sized": "bytes=100",
-             "score": 0},
-            {"name": "org/asr", "resolved": "org/asr", "lane": "stt",
-             "kind": "weights", "registry": "huggingface", "outcome": "queued",
-             "tier": "inspect", "detail": "bytes=100", "sized": "bytes=100",
-             "score": 0}]
-
-    class _Conn:
-        def execute(self, *a, **k):
-            return _Rows(rows)
-
-    class _Rows:
-        def __init__(self, r):
-            self.r = r
-
-        def fetchall(self):
-            return self.r
-
-    monkeypatch.setattr(fetching, "have", lambda *a, **k: False)
-    got = fetching.queued(_Conn(), lane="image")
-    assert [r["name"] for r in got] == ["org/img"]
-    assert len(fetching.queued(_Conn())) == 2, "unscoped must keep both"
+    _seed(store, "org/img", "image")
+    _seed(store, "org/asr", "stt")
+    assert [r["name"] for r in fetching.queued(store, lane="image")] == ["org/img"]
+    assert len(fetching.queued(store)) == 2, "unscoped must keep both"
 
 
-def test_a_text_candidate_is_fetchable_for_the_web_lane(monkeypatch):
+def test_a_text_candidate_is_fetchable_for_the_web_lane(store):
     """lanes.serves, not equality, so #208 survives here too."""
-    rows = [{"name": "org/txt", "resolved": "org/txt", "lane": "code",
-             "kind": "weights", "registry": "huggingface", "outcome": "queued",
-             "tier": "inspect", "detail": "bytes=100", "sized": "bytes=100",
-             "score": 0}]
-
-    class _Conn:
-        def execute(self, *a, **k):
-            class R:
-                def fetchall(self_inner):
-                    return rows
-            return R()
-
-    monkeypatch.setattr(fetching, "have", lambda *a, **k: False)
-    assert len(fetching.queued(_Conn(), lane="web")) == 1
-    assert len(fetching.queued(_Conn(), lane="image")) == 0
+    _seed(store, "org/txt", "code")
+    assert len(fetching.queued(store, lane="web")) == 1
+    assert len(fetching.queued(store, lane="image")) == 0
