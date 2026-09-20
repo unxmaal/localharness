@@ -494,6 +494,43 @@ _HOW_BY_RUNTIME = {
 }
 
 
+def lane_reach(sources=None, machine=None) -> dict:
+    """lane -> which SOURCE FAMILIES could surface a candidate for it.
+
+    ACROSS EVERY FAMILY, because measuring one and calling it coverage is how
+    `lh discover --feeds` reported success while leaving the star graph nine
+    days stale (RULE #258). A lane with no feed but a registry query is
+    reachable; reporting it as a hole sends somebody hunting for a feed that
+    need not exist.
+
+    `music` is exactly that case. Its engine publishes a releases feed that
+    parses fine and cannot be used -- ACE-Step tags v0.1.8 while its package
+    is 1.5.0, so a drift comparison is False forever -- and the lane is
+    reached through the registry instead.
+
+    NOT harness/coverage.py, which asks whether a source ACTUALLY surfaced the
+    things this machine runs (zero of 31, #99). This asks the prior question:
+    could one reach the lane at all.
+    """
+    from harness import feeds, lanes as L
+    by_feed = feeds.reach(sources)
+    out = {}
+    for lane in L.ALL:
+        try:
+            queries = lane_queries(lane, machine=machine)
+        except ValueError:
+            queries = []
+        out[lane] = {"feeds": by_feed.get(lane, []),
+                     "registry": len(queries)}
+    return out
+
+
+def unreachable_lanes(sources=None, machine=None) -> list:
+    """Lanes NO source family can reach. Empty is the state worth holding."""
+    return [lane for lane, how in lane_reach(sources, machine).items()
+            if not how["feeds"] and not how["registry"]]
+
+
 def how_to_measure(lane: str, machine=None) -> str:
     """The command template for `lane` on this machine.
 

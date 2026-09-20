@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from harness import cli, discover, feeds
+from harness import cli, discover, feeds, lanes
 
 
 @pytest.mark.parametrize("how", [
@@ -48,6 +48,9 @@ def test_sources_json_reports_proposals_without_probing(monkeypatch, tmp_path, c
 
     monkeypatch.setattr(feeds, "probe", unexpected_probe)
     assert cli.main(["discover", "--sources", "--json"]) == 0
-    assert json.loads(capsys.readouterr().out) == {
-        "sources": [], "proposed": [vars(proposed)],
-    }
+    got = json.loads(capsys.readouterr().out)
+    assert got["sources"] == []
+    assert got["proposed"] == [vars(proposed)]
+    # Which lanes any source family could reach, so a lane with no reach is
+    # visible rather than looking like a lane nobody publishes for. #240.
+    assert set(got["reach"]) == set(lanes.ALL)
