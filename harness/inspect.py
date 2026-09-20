@@ -468,6 +468,50 @@ def is_gguf(model_id: str, data: dict) -> bool:
     return bool(_GGUF_NAME.search(name) or _GGUF_QUANT.search(name))
 
 
+#: Kernel and format words that mean NVIDIA hardware, whatever the card's
+#: `library_name` says. Deliberately NARROW: every one of these names a CUDA
+#: kernel or an NVIDIA-only numeric format, so a match is a fact about the
+#: weights rather than a guess.
+#:
+#: `awq` and `gptq` are DELIBERATELY ABSENT. They are quantisation formats with
+#: CUDA kernels in practice and implementations elsewhere, so refusing them
+#: would be predicting a failure rather than reading one.
+_NEEDS_CUDA = re.compile(
+    r"\b(cuda|tensorrt|gemlite|nvfp4|modelopt|marlin|exllama|bitsandbytes)\b",
+    re.I)
+
+#: The card's own `library_name`, which describes what SERVES the weights
+#: rather than what they are. `served by vllm` needs a vLLM server; that is a
+#: runtime a machine either has or does not, exactly like llamacpp.
+_SERVED_BY = re.compile(r"served by (\w[\w.-]*)", re.I)
+
+#: library_name -> the runtime this project probes for. Only the ones where
+#: the serving framework IS the runtime; `transformers` is absent because
+#: torch runs everywhere and the question it raises -- what conversion costs
+#: on this machine -- is a different one (#245).
+_SERVED_RUNTIME = {"vllm": "vllm"}
+
+
+def runtime_needed(description: str) -> str:
+    """The runtime this card says its weights need, or "".
+
+    READ FROM THE REGISTRY'S OWN TAGS, the same source screen.is_attachment
+    uses to answer "is this a model at all". This answers the next question:
+    is it a model THIS machine can run.
+
+    Returns a runtime name for machine.refuses() rather than a verdict, so the
+    answer stays a fact about the machine asking. The same gemlite weights are
+    perfectly runnable on a box with a card.
+    """
+    text = description or ""
+    if _NEEDS_CUDA.search(text):
+        return "cuda"
+    served = _SERVED_BY.search(text)
+    if served:
+        return _SERVED_RUNTIME.get(served.group(1).lower(), "")
+    return ""
+
+
 def screen_words(tag: str) -> bool:
     """Does this tag say the thing ATTACHES to a model rather than being one?
 

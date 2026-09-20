@@ -214,6 +214,14 @@ def unrunnable(row: dict, machine=None) -> str:
         machine = _machine.detect()
     if ins.is_gguf(row.get("name") or "", {}):
         return machine.refuses("llamacpp") or ""
+    # THE CARD SAYS WHAT IT NEEDS, and until #245 only GGUF was read. Four
+    # candidates tagged cuda, gemlite, nvfp4 and modelopt ranked, and would
+    # have been fetched and handed to a runner that cannot load them -- with
+    # the screen recording a verdict about the CANDIDATE. The same class as
+    # #228, whose fix was written for exactly one format.
+    needs = ins.runtime_needed(row.get("description") or "")
+    if needs:
+        return machine.refuses(needs) or ""
     return ""
 
 
