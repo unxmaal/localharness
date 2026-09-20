@@ -53,7 +53,15 @@ WAITING, NO_RUNNER, READY = "waiting-on-fetch", "no-runner", "ready"
 #: downloads gigabytes and then fails, recording a verdict that says nothing
 #: about the thing.
 NOT_A_MODEL = ("lora", "comfyui", "workflow", "adapter", "controlnet",
-               "textual_inversion", "embedding")
+               "textual_inversion", "embedding",
+               # A TOOL IS NOT A MODEL EITHER, and having a lane is not enough
+               # to be one. PoopMan333/Video_Tools ranked SECOND in the whole
+               # queue at 0.0 GiB, tagged `video, video-editing, image-editing,
+               # gif, browser, offline`. It is a browser utility. The laneless
+               # filter missed it because it HAS a lane, and the list above
+               # missed it because it attaches to nothing. #249.
+               "browser", "extension", "plugin", "gui", "toolkit",
+               "cli-tool", "video-editing", "image-editing")
 
 #: The one substring that is a model in its own right despite matching above.
 #: Kept as an enumerated exception so the list can be read rather than guessed.

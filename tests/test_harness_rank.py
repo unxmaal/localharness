@@ -143,9 +143,13 @@ def test_priority_never_outranks_teaching_nothing():
     """A requant of something already served teaches nothing whatever lane it
     is in. If priority could overcome that, the loop would spend its budget
     re-measuring what it already runs."""
+    # `svg` rather than `video`: video is PARKED (#249) and a parked lane now
+    # sinks below a served requant, correctly -- nothing will run it at all.
+    # The claim under test is about PRIORITY against lineage, so the fixture
+    # needs a low-priority lane that is still live.
     rows = [{"name": "org/requant", "lane": "image", "times": 1, "bytes": 0,
              "description": "built from org/served"},
-            {"name": "org/fresh", "lane": "video", "times": 1, "bytes": 0,
+            {"name": "org/fresh", "lane": "svg", "times": 1, "bytes": 0,
              "description": ""}]
     got = rank.rank(rows, serving={"org/served"}, measured_lanes=())
     assert [r["name"] for r in got] == ["org/fresh", "org/requant"], (
