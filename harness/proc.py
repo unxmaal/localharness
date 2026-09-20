@@ -9,6 +9,29 @@ The number reported is macOS's `phys_footprint`, via `/usr/bin/time -l`'s "peak
 memory footprint" line. It accounts for compressed and swapped pages and is
 what Activity Monitor shows.
 
+AND IT IS NOT RESIDENT SET SIZE, which on this platform is the BLIND one.
+Measured 2026-09-20, both numbers from one `/usr/bin/time -l` run so they
+describe the same process:
+
+    plain 2 GiB bytearray     rss 2.01 GiB   footprint 2.01 GiB   ratio  1.00
+    numpy 2 GiB               rss 2.02 GiB   footprint 2.02 GiB   ratio  1.00
+    mlx 2 GiB array           rss 0.03 GiB   footprint 2.02 GiB   ratio 62.80
+    torch mps 2 GiB           rss 0.21 GiB   footprint 2.16 GiB   ratio 10.05
+
+Where the truth is known the two agree. On a Metal allocation of the same
+size, rss sees almost nothing: unified-memory buffers are not in the resident
+set. Every MLX lane here would report a fraction of its real cost if this were
+"fixed" to use maxrss, and that fix looks like a correction.
+tests/test_harness_proc_instrument.py pins it.
+
+A FOOTPRINT CAN EXCEED PHYSICAL RAM, and that is not a fault. ACE-Step
+measured rss 11.26 GiB against footprint 36.27 GiB on a 32 GB machine: pages
+the kernel compressed or swapped are still in the footprint at their logical
+size. Read it as what the process asked this machine to hold, not as what was
+resident at any instant. Issue #238 was filed on the assumption that a number
+over 32 GiB had to be wrong; it was the smaller number that could not be
+trusted.
+
 NOT resource.getrusage(RUSAGE_CHILDREN).ru_maxrss: that is a monotone
 high-water mark across every child the process has ever waited on, so a
 before/after delta reads 0 for each child after the largest. A published "2x
