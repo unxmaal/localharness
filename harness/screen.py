@@ -233,6 +233,21 @@ NOT_THE_CANDIDATE = (
     # three lanes. #213, after #206 and #211.
     "no cases of a modality it can run",
     "no candidate matched any case",
+    # SEVENTH OCCURRENCE, and this one never reached a model at all. A loop
+    # run screened four freshly fetched candidates as BROKEN on:
+    #
+    #   ~/projects/.venv/bin/python: Error while finding module
+    #   specification for 'evals.run' (ModuleNotFoundError: No module named
+    #   'evals')
+    #
+    # The screen subprocess resolved the virtualenv of a PARENT directory --
+    # uv walks up to the nearest pyproject -- so our own eval package was
+    # absent. A screen that cannot import the suite has learned nothing about
+    # the candidate, and `broken` is terminal.
+    "no module named",
+    "error while finding module specification",
+    "command not found",
+    "no such file or directory",
 )
 
 
