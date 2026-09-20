@@ -96,3 +96,34 @@ def test_a_candidate_genuinely_absent_is_still_absent():
     from harness import cli
 
     assert cli._summary_row(ENGINE_SUMMARY, "mflux:qwen-image", "image") is None
+
+
+# --- a screen that never started says nothing about the candidate (#201) ---
+
+@pytest.mark.parametrize("detail", [
+    "~/.venv/bin/python: Error while finding module specification for "
+    "'evals.run' (ModuleNotFoundError: No module named 'evals')",
+    "bash: uv: command not found",
+    "No such file or directory: 'mflux-generate'",
+])
+def test_a_screen_that_could_not_start_is_requeued_not_broken(detail):
+    """SEVENTH OCCURRENCE of the class. A loop run screened four freshly
+    fetched candidates BROKEN because the subprocess resolved a PARENT
+    directory's virtualenv and could not import our own eval package.
+
+    `broken` is terminal. Four real models were declined forever for
+    something they never did.
+    """
+    from harness import screen
+    got, why = screen.outcome(1, None, detail=detail)
+    assert got == "queued", why
+    assert "says nothing about the candidate" in why
+
+
+def test_a_candidate_that_genuinely_failed_is_still_broken():
+    """THE NEGATIVE CONTROL. A guard that requeues every failure means no
+    candidate is ever answered and the queue never shrinks."""
+    from harness import screen
+    got, _ = screen.outcome(
+        1, None, detail="generated 0 of 3 cases; the model returned empty output")
+    assert got == "broken"

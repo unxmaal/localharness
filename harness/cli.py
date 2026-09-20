@@ -718,6 +718,15 @@ def _report_inspect(a) -> int:
             # than guesses at. See resolve_registry().
             work_items += [(n, "") for n in
                            ms.pending(store, limit=limit, registry="")]
+            # CONSUME IN THE CONSUMER'S ORDER. `pending` sorts by corroboration
+            # and recency; the fetch tier reads the same queue in rank order,
+            # by the value of the information a screen would buy. Two tiers
+            # ordering one queue by different keys means the producer sizes
+            # rows the consumer will never reach, and both halves look healthy
+            # -- RULE #275, and the reason a loop run sized 50 candidates and
+            # still fetched nothing. Rows the fetch tier cannot see keep their
+            # place at the back rather than being dropped.
+            work_items = _in_fetch_order(store, work_items)
         else:
             work_items = [(n.repo, ms.GITHUB) for n in
                           __import__("harness.neighbors", fromlist=["x"])
@@ -1234,7 +1243,15 @@ def _report_screen(a) -> int:
             print(f"   {got.upper()}: {why}")
             if proc.returncode != 0:
                 err(proc.stderr.strip()[-400:] or "no stderr")
-            ms.decide(store, r["name"], got, tier=ms.SCREEN, detail=why[:200])
+            # THE VERDICT CARRIES ITS EVIDENCE. Storing only `why` threw the
+            # stderr away, so "the screen exited 1" was all a later reader
+            # had -- and when NOT_THE_CANDIDATE grew a phrase, the retraction
+            # that derives from it could not tell whose fault the exit was.
+            # A terminal verdict whose evidence is gone cannot be re-judged.
+            evidence = " ".join((proc.stderr or "").split())[-300:]
+            detail = f"{why} || {evidence}" if evidence else why
+            ms.decide(store, r["name"], got, tier=ms.SCREEN,
+                      detail=detail[:600])
     finally:
         store.close()
     return 0
@@ -1550,6 +1567,32 @@ LOOP_STEPS = (("sweep", "sweep", False),
               ("inspect", "inspect", True),
               ("queue", "queue", False))
 
+#: How many queued candidates the loop's inspect step sizes, which is NOT
+#: `--top`. Those are two different questions and tying them together is what
+#: made the loop inert: `--top` is how many candidates to carry the whole way
+#: and spend disk on, so `--top 1` is a sensible thing to ask for, while
+#: inspecting one row of a 46-row queue leaves the other 45 unsized and the
+#: fetch tier refuses every one of them. Inspection downloads nothing.
+LOOP_INSPECT = 50
+
+
+def _in_fetch_order(store, work_items):
+    """Reorder inspect's work to match the order the fetch tier will read.
+
+    Returns the same items, never fewer: a name the fetch queue does not carry
+    is still worth inspecting, it simply goes last.
+    """
+    from harness import fetching
+    try:
+        ranked = fetching.in_rank_order(
+            fetching.queued(store, needs_lane=False), store)
+    except Exception:  # noqa: BLE001
+        # An ordering is an optimisation. Failing to compute one must not
+        # stop the tier that does the actual work.
+        return work_items
+    place = {r["name"]: i for i, r in enumerate(ranked)}
+    return sorted(work_items, key=lambda it: place.get(it[0], len(place)))
+
 
 def _report_loop(a) -> int:
     """Every step from a sweep to an adopted winner. Issue #201.
@@ -1572,7 +1615,17 @@ def _report_loop(a) -> int:
             continue
         print(f"\n=== {label} ===")
         flags = {f: f == attr for _, f, _ in LOOP_STEPS}
-        sub = _ap.Namespace(**{**vars(a), **flags, "loop": False})
+        extra = {}
+        if attr == "inspect":
+            # INSPECT WHAT THE SWEEP FOUND, not the crowd. cmd_inspect's own
+            # comment calls --from-store "the rung the ladder was missing",
+            # and the loop never passed it, so the loop inspected new GitHub
+            # sightings while the QUEUE stayed unsized. Every one of 46 queued
+            # candidates was then skipped by fetch with "no measured size;
+            # inspect it first", immediately after the loop's own inspect step
+            # had run. Two tiers in one command, reading different sources.
+            extra = {"from_store": True, "top": LOOP_INSPECT}
+        sub = _ap.Namespace(**{**vars(a), **flags, **extra, "loop": False})
         rc = cmd_discover(sub) or rc
 
     want = (getattr(a, "lane", "") or "").strip().lower()

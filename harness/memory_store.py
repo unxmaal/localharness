@@ -18,7 +18,7 @@ from pathlib import Path
 
 from harness import paths, store
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 #: Outcomes a proposal can reach. TERMINAL ones suppress re-proposal.
 VERDICTS = ("measured", "declined", "broken", "queued", "ignored", "screened")
@@ -198,6 +198,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
         _relane_from_the_card(conn)
     if have and have < 10:
         _retract_verdicts_from_runs_that_never_ran(conn)
+    if have and have < 11:
+        # The phrase list grew: a screen subprocess that resolved a PARENT
+        # directory's virtualenv could not import our own eval package, and
+        # four freshly fetched candidates were recorded BROKEN, which is
+        # terminal, for something they never did. The retraction is DERIVED
+        # from the current lists rather than naming rows, which is the lesson
+        # of #230 -- naming rows by hand missed the second member of the same
+        # class.
+        _retract_harness_refusals(conn)
     conn.execute("INSERT OR REPLACE INTO meta VALUES ('schema', ?)",
                  (str(SCHEMA_VERSION),))
     conn.commit()
@@ -243,6 +252,11 @@ def _backfill_lanes(conn) -> None:
             conn.execute("UPDATE proposals SET lane=? WHERE id=?", (lane, pid))
 
 
+#: "the screen exited 1" and nothing else: a refusal that discarded the
+#: stderr saying whose fault it was.
+_BARE_EXIT = re.compile(r"the screen exited \d+")
+
+
 def _retract_harness_refusals(conn) -> None:
     """Re-queue anything settled for a reason that was about US, not about it.
 
@@ -272,6 +286,14 @@ def _retract_harness_refusals(conn) -> None:
         pid, name, detail, tier = row[0], row[1], row[2] or "", row[3] or ""
         phrase = (fetching.refused_by_harness(detail)
                   or screen.refused_by_harness(detail))
+        # A TERMINAL VERDICT WITH NO EVIDENCE CANNOT BE RE-JUDGED. The screen
+        # stored only its own prose, so rows reading exactly "the screen
+        # exited N" discarded the stderr that says whose fault the exit was.
+        # Those are retracted too: an unjudgeable terminal verdict is settled
+        # on nothing, and this project has settled sixteen real candidates
+        # that way before. The screen now stores the evidence alongside.
+        if not phrase and _BARE_EXIT.fullmatch((detail or "").strip()):
+            phrase = "an exit code with no evidence recorded"
         if not phrase:
             continue
         conn.execute(
