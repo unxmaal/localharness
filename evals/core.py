@@ -23,6 +23,7 @@ from harness.checks import adherence as adherence_check
 from harness.checks import code as code_check
 from harness.checks import html as html_check
 from harness.checks import image as image_check
+from harness.checks import music as music_check
 from harness.checks import ocr as ocr_check
 from harness.checks import render as render_check
 from harness.checks import video as video_check
@@ -154,6 +155,31 @@ def _check_tts(artifact, case: Case, transcriber=None,
     return out
 
 
+def _check_music(artifact, case: Case, transcriber=None, **_) -> CheckResult:
+    """The lyrics that were asked for ARE the reference transcript.
+
+    The tts round-trip applied to singing, and the same joint measurement: the
+    rate covers the generator and the ear together.
+
+    `expect_vocals: false` inverts it. An instrumental case scores whether
+    anything was sung at all rather than whether the right words were, which
+    makes it both a real capability check and the lane's own negative control
+    -- the thing that makes a sung rate mean something instead of being a bare
+    number.
+    """
+    a = case.assertions
+    r = music_check.check(artifact,
+                          lyrics=str(case.params.get("lyrics", "")),
+                          max_wer=a.get("max_wer"),
+                          duration_s=case.params.get("duration"),
+                          expect_vocals=a.get("expect_vocals", True),
+                          transcriber=transcriber,
+                          language=case.language)
+    out = CheckResult(r.ok, r.reason, list(r.warnings))
+    out.metrics = r.metrics
+    return out
+
+
 def _check_stt(artifact, case: Case) -> CheckResult:
     """The mirror of tts, and the reason it is a better measurement.
 
@@ -239,6 +265,7 @@ def _check_web(artifact, case: Case) -> CheckResult:
 
 CHECKERS = {
     "svg": lambda a, c, **kw: _check_svg(a, c),
+    "music": _check_music,
     "web": lambda a, c, **kw: _check_web(a, c),
     "image": lambda a, c, **kw: _check_image(a, c, kw.get("adherence"),
                                             kw.get("expect_size")),
@@ -274,6 +301,14 @@ METRIC_DIRECTION = {
     # all: an intelligible clone in the wrong voice scores a perfect 0.
     "speaker_similarity": "higher",
     "tokens_per_s": "higher",
+    # How far a track missed the length it was asked for. The only music axis
+    # with a direction: it is a request the artifact either honoured or did
+    # not, and unlike a tempo estimate it has no prior to be dragged by.
+    "duration_error_s": "lower",
+    # NEUTRAL: reported, never ranked on. A 30s track is not better or worse
+    # than a 10s one -- the CASE decides the length -- so this is here to
+    # explain `duration_error_s` rather than to order anything.
+    "seconds": "neutral",
     # NEUTRAL: reported, never ranked on. More tokens is not better -- as
     # "higher" it would have put the most verbose candidate first. It is here
     # because it EXPLAINS a latency: q3-4b looked 4x slower than local-large
@@ -301,7 +336,13 @@ def direction_of(metric: str) -> str:
 # Generation knobs any engine might accept. Validated at load so `widht: 512`
 # costs nothing instead of silently generating at the default size and passing.
 PARAM_KEYS = {"width", "height", "steps", "seed", "guidance", "frames",
-              "seconds", "voice", "speed", "layers", "reuse", "ssd_streaming"}
+              "seconds", "voice", "speed", "layers", "reuse", "ssd_streaming",
+              # music: what the model is ASKED for, which is also what the
+              # checker holds it to. `duration` is a request here and a
+              # measurement in the receipt, and the gap between them is the
+              # adherence axis.
+              "lyrics", "bpm", "duration", "keyscale", "timesignature",
+              "instrumental"}
 # Assertions that need text to search. Declaring one on an image case can only
 # pass vacuously until the suite can OCR, so it is rejected rather than ignored.
 TEXT_ASSERTIONS = {"min_shapes", "must_contain", "must_not_contain"}
@@ -333,7 +374,11 @@ ASSERTION_KEYS = {"svg": TEXT_ASSERTIONS, "web": TEXT_ASSERTIONS,
                   # text to search, and that could only ever pass vacuously.
                   "image": {"text", "max_cer"},
                   "tts": {"max_wer"},
-                  "stt": {"max_wer"}}
+                  "stt": {"max_wer"},
+                  # `expect_vocals: false` inverts the question from "were the
+                  # right words sung" to "was anything sung at all", which is
+                  # both a capability check and the lane's own ceiling control.
+                  "music": {"max_wer", "expect_vocals", "duration_s"}}
 
 
 @dataclass

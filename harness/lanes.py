@@ -21,7 +21,12 @@ from __future__ import annotations
 #: Every lane, in the priority order this harness was given, then the ones
 #: nobody asked for. A directory under evals/cases must exist for each, and
 #: tests/test_harness_lanes.py asserts it.
-WANTED = ("image", "code", "web", "svg", "video")
+#:
+#: `music` is APPENDED rather than inserted. The five before it were ranked
+#: explicitly; music was asked for later and has never been ranked against
+#: them, so it is wanted and it is wanted last until somebody says otherwise.
+#: Issue #237.
+WANTED = ("image", "code", "web", "svg", "video", "music")
 
 #: Measured here, and not on the wanted list. `extract` has more cases than any
 #: lane but stt and is a text job; stt and tts have the most measurement
@@ -83,6 +88,11 @@ _PROSE = {
     "stt": r"\b(transcri\w+|speech recognition|asr|dictation)\b",
     "code": r"\b(code|coding|programming|language model|llms?|chat|"
             r"instruct\w*|reasoning|agentic|tokens?)\b",
+    # Names the OUTPUT, like the rest of this table. `audio` is deliberately
+    # absent: it covers tts, stt and music at once, so it would route speech
+    # models into the music lane.
+    "music": r"\b(music|songs?|instrumentals?|text[- ]to[- ]music|"
+             r"music generation|lyrics)\b",
 }
 
 

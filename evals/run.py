@@ -46,7 +46,7 @@ TEXT_MODALITIES = {"svg", "web", "code", "extract"}
 ALL_MODALITIES = sorted(MODALITIES)
 
 
-PROCESS_ENGINES = ("mflux", "h3")
+PROCESS_ENGINES = ("mflux", "h3", "acestep")
 #: The svg lane's second METHOD: draw a raster, then vectorize it. Written as
 #: `trace:<engine spec>` so the engine underneath stays the ordinary spec.
 TRACE_PREFIX = "trace"
@@ -411,7 +411,13 @@ def cases_for(candidate: str, cases: list[Case]) -> list[Case]:
 # repeating it burns time averaging three identical numbers. `extract` is
 # excluded for a different reason: the answer is one token and the whole point
 # of the lane is that it is cheap, so three samples of "137" buys nothing.
-STOCHASTIC_MODALITIES = {"image", "video", "svg", "web", "code"}
+#
+# `music` is here on MEASUREMENT rather than on principle: four runs of the
+# same case at a pinned seed scored wer 0.1515, 0.0000, 0.3333 and 0.1053,
+# because ACE-Step's 5Hz chain-of-thought samples at its own temperature and
+# `seed` only reaches the diffusion below it (RULE #280). Omitting it made
+# --repeat a silent no-op for the one lane that needs it most.
+STOCHASTIC_MODALITIES = {"image", "video", "svg", "web", "code", "music"}
 
 
 #: Screen settings: the smallest thing that still proves the pipeline ran.

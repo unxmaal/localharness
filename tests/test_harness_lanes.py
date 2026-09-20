@@ -92,8 +92,16 @@ def test_every_named_lane_can_be_screened_except_the_argued_ones():
 
 
 def test_the_wanted_order_is_the_one_that_was_asked_for():
-    """image, code, web, svg, video. tts and stt are deliberately absent."""
-    assert rank.LANE_PRIORITY == ("image", "code", "web", "svg", "video")
+    """image, code, web, svg, video, then music. tts and stt are deliberately
+    absent.
+
+    `music` is LAST and appended rather than inserted (#237): the five before
+    it were ranked explicitly and music was asked for afterwards, so it has
+    never been ranked against them. Moving it up is a decision somebody makes
+    out loud, not a tidy-up.
+    """
+    assert rank.LANE_PRIORITY == ("image", "code", "web", "svg", "video",
+                                  "music")
     assert not {"tts", "stt"} & set(rank.LANE_PRIORITY)
 
 

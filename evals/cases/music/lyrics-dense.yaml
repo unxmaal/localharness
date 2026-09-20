@@ -1,0 +1,28 @@
+# Twice the words in the same thirty seconds. Density is where intelligibility
+# should fail first: a model that has to fit more syllables per bar either
+# rushes them or drops them, and both are visible to a transcriber while
+# neither is visible to a duration check.
+id: lyrics-dense
+modality: music
+prompt: >-
+  An upbeat folk-pop song with a single clear female lead vocal well forward in
+  the mix, acoustic guitar and light percussion. Rapid, articulate delivery,
+  every word intended to be understood.
+params:
+  lyrics: |
+    [Verse]
+    We counted every quiet hour on the bridge above the water
+    And the lamps came on in order down the road beside the river
+    There were letters in the pocket of the coat you left behind you
+    And the paper had the weather and the time the train was leaving
+    [Chorus]
+    So we walked and kept on talking while the evening turned to morning
+    And the story got much longer every time we tried to tell it
+  bpm: 120
+  duration: 30
+  keyscale: G Major
+  timesignature: "4"
+  seed: 42
+assert:
+  max_wer: 0.60
+  duration_s: 30

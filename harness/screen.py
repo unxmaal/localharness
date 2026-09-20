@@ -36,6 +36,7 @@ from harness import lanes
 #: the harness could in fact have screened. Issue #207.
 LANE_CANDIDATE = {
     "image": "mflux:{model}",
+    "music": "acestep:{model}",
     "stt": "stt:{model}",
     "tts": "tts:{model}",
     **{lane: "{model}" for lane in lanes.TEXT_SERVED},

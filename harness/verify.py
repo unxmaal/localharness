@@ -22,6 +22,9 @@ from dataclasses import dataclass, field
 COST_S = {
     "extract": 20, "code": 60, "web": 120, "svg": 30,
     "tts": 30, "stt": 120, "image": 200, "video": 2700,
+    # 55s of model init then ~37s per 30s case, three cases. Measured
+    # 2026-09-20 on the M2 Pro, turbo at 8 steps.
+    "music": 180,
 }
 
 #: A lane nobody should start without meaning to. Video is ~40 minutes for ONE

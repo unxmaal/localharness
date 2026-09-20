@@ -39,6 +39,10 @@ from harness.engines import resolve
 
 DEFAULT_IMAGE_ENGINE = "mflux:flux2-klein-4b"
 DEFAULT_VIDEO_ENGINE = "h3"
+#: The music lane's incumbent. Turbo at 8 steps rather than the base model:
+#: it is what was measured on this machine (issue #236) and the base model's
+#: 32-100 steps have never been run here.
+DEFAULT_MUSIC_ENGINE = "acestep:acestep-v15-turbo"
 
 # Every evals/cases/{image,video}/*.yaml pins a resolution. The CLI did not, so
 # it inherited whatever each engine defaults to -- 1024 for mflux -- and ran a
@@ -1464,8 +1468,9 @@ def _report_sources(a) -> int:
 
     rows = feeds.staleness()
     proposed = discovery.feed_sources()
+    reachable = discovery.lane_reach()
     if a.json:
-        print(json.dumps({"sources": rows,
+        print(json.dumps({"sources": rows, "reach": reachable,
                           "proposed": [vars(c) for c in proposed]}, indent=2))
         return 0
     print(f"\ndiscovery sources (interval {feeds.interval_days()} days, "
@@ -1476,6 +1481,18 @@ def _report_sources(a) -> int:
         mark = "STALE" if r["stale"] else "ok   "
         print(f"  {mark} {r['name']:24} {age}")
         print(f"        {r['url']}")
+    # WHICH LANES CAN BE REACHED AT ALL. Three lanes had no source and nobody
+    # could see it, because nothing anywhere asked the question (#240). Read
+    # through lanes.serves(), so the four text-served lanes correctly inherit
+    # the text sources rather than reading as unreachable.
+    print("\nlanes discovery can reach:")
+    for lane, how in reachable.items():
+        parts = list(how["feeds"])
+        if how["registry"]:
+            parts.append(f"{how['registry']} registry queries")
+        print(f"  {'none ' if not parts else 'ok   '} {lane:8} "
+              f"{', '.join(parts) or 'NO SOURCE: this lane can never fill its queue'}")
+
     if proposed:
         print("\nsources these feeds point at that we do not read:")
         for c in proposed:

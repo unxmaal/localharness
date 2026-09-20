@@ -1,0 +1,27 @@
+# THE LANE'S OWN NEGATIVE CONTROL, and a real requirement in its own right.
+#
+# Two things at once. As a control it establishes what "no words present" looks
+# like to the same ear that scores the sung cases, so a sung WER means
+# something rather than being a bare number: in the spike the sung track
+# scored 0.091 against this shape scoring 1.000. As a capability check it is
+# ordinary: a model asked for an instrumental that sings anyway has not done
+# what was asked, and no duration or tempo check can see that.
+#
+# `expect_vocals: false` inverts the WER: here a HIGH error rate is the pass,
+# because the reference is the lyric line the model was told not to sing.
+id: instrumental
+modality: music
+prompt: >-
+  A calm instrumental piece for acoustic guitar and light strings. No singing,
+  no vocals, no spoken word of any kind.
+params:
+  instrumental: true
+  lyrics: "[Instrumental]"
+  bpm: 90
+  duration: 30
+  keyscale: C Major
+  timesignature: "4"
+  seed: 42
+assert:
+  expect_vocals: false
+  duration_s: 30

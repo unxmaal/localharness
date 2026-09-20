@@ -52,7 +52,19 @@ class Source:
     #: something already installed, where the useful signal is drift, not the
     #: repo name -- proposing `ml-explore/mlx` to a project built on MLX is noise.
     kind: str = "atom"
+    #: The lane a proposal from here is RECORDED under, and only that. "all"
+    #: means the source makes no claim, which `lanes.canonical` turns into no
+    #: lane so the candidate's own card decides. Recording a coverage claim as
+    #: a candidate's lane put 243 of 323 proposals in a lane that does not
+    #: exist (#207), so this field stays a single lane deliberately.
     lane: str = "all"
+    #: Lanes this source can SURFACE CANDIDATES FOR, when that is wider than
+    #: `lane`. A DIFFERENT QUESTION from the one above, which is why it is a
+    #: different field rather than a comma-separated spelling of that one:
+    #: mlx-audio is filed `tts` and serves the stt engine too, and putting
+    #: "tts,stt" in `lane` would send that string to the recorder. Empty means
+    #: "whatever `lane` reaches", which is the answer for every other source.
+    reaches: tuple = ()
     enabled: bool = True
     note: str = ""
 
@@ -88,9 +100,12 @@ DEFAULT_SOURCES = [
     Source("mlx-lm-releases", kind="releases",
            url="https://github.com/ml-explore/mlx-lm/releases.atom",
            lane="text", note="the text lane engine"),
+    # One server, two lanes. Kokoro speaks through it and parakeet listens
+    # through it, so filing it under `tts` alone made `stt` read as a lane
+    # with no source while its only source sat right here. #240.
     Source("mlx-audio-releases", kind="releases",
            url="https://github.com/Blaizzy/mlx-audio/releases.atom",
-           lane="tts", note="TTS and STT server"),
+           lane="tts", reaches=("tts", "stt"), note="TTS and STT server"),
     # Not a feed: read through the GitHub API by `lh discover --neighbors`.
     # It lives here so it shares the interval and shows up in --sources, rather
     # than being a source nobody remembers to run. Issue #58.
@@ -102,7 +117,75 @@ DEFAULT_SOURCES = [
            url="https://github.com/mflux-community/mflux/releases.atom",
            lane="image",
            note="image lane engine; moved from filipstrand, the old URL 301s"),
+    # NO acestep-releases, DELIBERATELY, and the reason is worth keeping.
+    # Its feed parses and carries 10 entries, so every check this project has
+    # would call it healthy. But a `releases` source reports DRIFT, and
+    # ACE-Step tags releases v0.1.8 while the package it installs is version
+    # 1.5.0 -- the app and the model generation are numbered separately. So
+    # `behind("0.1.8", "1.5.0")` is False forever and the source would propose
+    # nothing while looking fine. The music lane is reached through the
+    # REGISTRY instead: discover._LANE_QUERIES_ANY["music"]. #240.
+    # PROBED BEFORE BEING ADDED, 2026-09-20: 10 entries, whose titles name
+    # the coverage -- "New image and video pipelines", "New image and audio
+    # pipelines". It is the image AND video engine on the machines with a
+    # card, and `video` had no source of any kind before this. Drift is
+    # computable here: DIFFUSERS_PIN is in scripts/versions.sh, so
+    # installed_version answers 0.40.0 against the feed's 0.40.0. #240.
+    Source("diffusers-releases", kind="releases",
+           url="https://github.com/huggingface/diffusers/releases.atom",
+           lane="video", reaches=("video", "image"),
+           note="image and video engine wherever there is a card"),
 ]
+
+
+def source_lanes(source) -> tuple:
+    """Every lane `source` can surface candidates for.
+
+    ONE FUNCTION, because "what is this filed under" and "what can this find"
+    were being answered by reading one field and guessing. Empty means the
+    source makes no claim and reaches everything.
+    """
+    from harness import lanes as L
+    if source.reaches:
+        return tuple(L.canonical(x) for x in source.reaches)
+    lane = L.canonical(source.lane)
+    if not lane:
+        return ()
+    return L.testable_in(lane)
+
+
+def reach(sources=None) -> dict:
+    """lane -> the sources that could surface a candidate for it.
+
+    NOT `harness/coverage.py`, which asks whether a source ACTUALLY surfaced
+    the things this machine runs and answered zero of 31 (#99). This asks the
+    prior question: could a source reach this lane at all. Two questions, two
+    names, because calling both of them coverage is how this project ends up
+    filing the same defect five times under different names.
+
+    THROUGH lanes.serves(), which is the whole reason this is a function and
+    not a dict comprehension at the call site. One text model serves code,
+    web, svg and extract, so a text source covers four lanes; counting by the
+    filed lane alone reports web and svg as unreachable and sends somebody
+    hunting for feeds about vector graphics that do not exist. That is #207 in
+    a new costume.
+
+    A source claiming no lane is left OUT of every row rather than counted for
+    all of them: "reddit-sd-recap covers music" is true only in the sense that
+    anything might turn up anywhere, and a coverage report that says yes
+    everywhere answers nothing.
+    """
+    from harness import lanes as L
+    out = {}
+    for lane in L.ALL:
+        out[lane] = [s.name for s in (sources or load_sources())
+                     if s.enabled and lane in source_lanes(s)]
+    return out
+
+
+def unreachable(sources=None) -> list:
+    """Lanes no source can reach. Empty is the state worth holding."""
+    return [lane for lane, hits in reach(sources).items() if not hits]
 
 # The vocabulary each runtime is talked about in, and which one is foreign
 # depends on the machine asking. A post about a technique names the hardware it
@@ -562,6 +645,7 @@ TRACKS = {
     "mlx-lm-releases": "mlx-lm",
     "mlx-audio-releases": "mlx-audio",
     "mflux-releases": "mflux",
+    "diffusers-releases": "diffusers",
 }
 
 _VERSION = re.compile(r"(\d+\.\d+(?:\.\d+)*)")
