@@ -206,6 +206,23 @@ def test_every_music_case_routes_through_the_music_checker(tmp_path):
     assert out.metrics["wer"] == pytest.approx(0.0909, abs=0.001)
 
 
+def test_repeat_actually_repeats_a_music_case():
+    """--repeat was a SILENT NO-OP for music: STOCHASTIC_MODALITIES is an
+    enumerated set and a new lane is absent from it by default.
+
+    It matters more here than anywhere. Four runs of the same case at a pinned
+    seed scored 0.1515, 0.0000, 0.3333 and 0.1053, so a single music receipt
+    is one draw and cannot rank anything (RULE #280).
+    """
+    from evals.run import expand_cases
+    case = Case(id="lyrics-plain", modality="music", prompt="a song",
+                params={"lyrics": LYRICS, "seed": 42})
+    got = expand_cases([case], 3)
+    assert len(got) == 3, "a music case must be repeatable"
+    assert len({c.params["seed"] for c in got}) == 3, "each repeat needs its "\
+        "own seed, or three runs are three attempts at the same draw"
+
+
 # --- the engine -----------------------------------------------------------
 
 @pytest.fixture
