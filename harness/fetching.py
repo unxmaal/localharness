@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from harness import memory_store as ms
+from harness import screen
 
 GIB = 1024 ** 3
 #: Never fill the volume. A download that leaves no room is a download that
@@ -169,6 +170,10 @@ def queued(conn, tiers=FETCHABLE_TIERS, kind: str = FETCHABLE_KIND,
     """
     rows = conn.execute("""
         SELECT p.name, p.resolved, p.kind, p.lane, p.registry,
+               -- The registry's own card, so this tier can refuse an adapter
+               -- before spending gigabytes on it. It was absent, so the check
+               -- read None and never fired.
+               p.description,
                (SELECT v.outcome FROM verdicts v WHERE v.proposal_id = p.id
                  ORDER BY v.id DESC LIMIT 1) AS outcome,
                (SELECT v.tier FROM verdicts v WHERE v.proposal_id = p.id
@@ -363,6 +368,19 @@ def run(conn, sizes: dict[str, int], *, limit: int = 1, snapshot=None,
     for row in queued(conn, lane=lane):
         if not row.get("lane"):
             continue      # nothing here could measure it, so nothing fetches it
+        # AN ADAPTER IS NOT A CANDIDATE, and this tier is where that costs
+        # gigabytes. rank drops attachments so they never reach the top of the
+        # queue, but rank is an ORDERING and this is a SPEND: a LoRA that is
+        # merely sized would be downloaded and handed to a runner that cannot
+        # load it. `declined` rather than `queued`, because unlike "no measured
+        # size" this is a fact about the candidate and not about us.
+        attachment = screen.is_attachment(row.get("description") or "")
+        if attachment:
+            why = (f"{attachment} in its own card: this attaches to a model "
+                   f"rather than being one, and no lane can run it alone")
+            ms.decide(conn, row["name"], "declined", tier="fetch", detail=why)
+            done.append({"repo": row["name"], "ok": False, "why": why})
+            continue
         # `limit` bounds DOWNLOADS, not decisions. Counting refusals against it
         # let one unsized entry at the head of the queue consume the whole
         # budget, so nothing was ever fetched.

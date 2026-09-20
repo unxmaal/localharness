@@ -84,3 +84,66 @@ def test_an_unsized_row_is_not_charged_to_the_budget(store):
                        budget=int(12 * GIB))
     assert not got[0]["ok"]
     assert "no measured size" in got[0]["why"]
+
+
+# --- an adapter is not a candidate, and this tier is where that costs GiB ---
+
+def test_an_adapter_is_declined_rather_than_downloaded(tmp_path):
+    """rank drops attachments so they never reach the top of the queue, but
+    rank is an ORDERING and fetch is a SPEND. A sized LoRA would be downloaded
+    and handed to a runner that cannot load it.
+
+    `declined` and not `queued`: unlike "no measured size", which says the
+    store could not answer a question about itself, this is a fact about the
+    candidate.
+    """
+    from harness import fetching
+    from harness import memory_store as ms
+
+    conn = ms.connect(tmp_path / "s.db")
+    try:
+        ms.record(conn, ms.Seen(
+            name="org/style-lora", source="test", lane="image",
+            registry="huggingface", resolved="org/style-lora",
+            description="tagged lora, anime; adapter of org/base; "
+                        "0.2 GiB of weights"))
+        ms.decide(conn, "org/style-lora", "queued", tier="inspect",
+                  detail="bytes=209715200 fits")
+        got = fetching.run(conn, {"org/style-lora": 200 * 1024 ** 2}, limit=1,
+                           snapshot=lambda *a, **k: pytest.fail(
+                               "an adapter must never be downloaded"))
+        assert got and not got[0]["ok"]
+        assert "attaches to a model" in got[0]["why"]
+        last = conn.execute(
+            "SELECT v.outcome FROM verdicts v JOIN proposals p "
+            "ON p.id = v.proposal_id WHERE p.name = ? "
+            "ORDER BY v.id DESC LIMIT 1", ("org/style-lora",)).fetchone()
+        assert last["outcome"] == "declined", (
+            "an adapter is a fact about the candidate, not about this harness")
+    finally:
+        conn.close()
+
+
+def test_an_ordinary_model_is_not_refused_as_an_attachment(tmp_path):
+    """THE NEGATIVE CONTROL. A refusal that fires on everything empties the
+    queue and looks exactly like a queue that ran out."""
+    from harness import fetching
+    from harness import memory_store as ms
+
+    seen = []
+    conn = ms.connect(tmp_path / "s.db")
+    try:
+        ms.record(conn, ms.Seen(
+            name="org/real-model", source="test", lane="image",
+            registry="huggingface", resolved="org/real-model",
+            description="task text-to-image; served by mflux; "
+                        "built from org/base; 4.0 GiB of weights"))
+        ms.decide(conn, "org/real-model", "queued", tier="inspect",
+                  detail="bytes=4294967296 fits")
+        got = fetching.run(conn, {"org/real-model": 4 * 1024 ** 3}, limit=1,
+                           snapshot=lambda *a, **k: (seen.append(1),
+                                                     str(tmp_path))[1])
+        assert seen, f"an ordinary model was not fetched: {got}"
+        assert got and got[0]["ok"], got
+    finally:
+        conn.close()

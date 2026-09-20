@@ -1550,6 +1550,14 @@ LOOP_STEPS = (("sweep", "sweep", False),
               ("inspect", "inspect", True),
               ("queue", "queue", False))
 
+#: How many queued candidates the loop's inspect step sizes, which is NOT
+#: `--top`. Those are two different questions and tying them together is what
+#: made the loop inert: `--top` is how many candidates to carry the whole way
+#: and spend disk on, so `--top 1` is a sensible thing to ask for, while
+#: inspecting one row of a 46-row queue leaves the other 45 unsized and the
+#: fetch tier refuses every one of them. Inspection downloads nothing.
+LOOP_INSPECT = 50
+
 
 def _report_loop(a) -> int:
     """Every step from a sweep to an adopted winner. Issue #201.
@@ -1572,7 +1580,17 @@ def _report_loop(a) -> int:
             continue
         print(f"\n=== {label} ===")
         flags = {f: f == attr for _, f, _ in LOOP_STEPS}
-        sub = _ap.Namespace(**{**vars(a), **flags, "loop": False})
+        extra = {}
+        if attr == "inspect":
+            # INSPECT WHAT THE SWEEP FOUND, not the crowd. cmd_inspect's own
+            # comment calls --from-store "the rung the ladder was missing",
+            # and the loop never passed it, so the loop inspected new GitHub
+            # sightings while the QUEUE stayed unsized. Every one of 46 queued
+            # candidates was then skipped by fetch with "no measured size;
+            # inspect it first", immediately after the loop's own inspect step
+            # had run. Two tiers in one command, reading different sources.
+            extra = {"from_store": True, "top": LOOP_INSPECT}
+        sub = _ap.Namespace(**{**vars(a), **flags, **extra, "loop": False})
         rc = cmd_discover(sub) or rc
 
     want = (getattr(a, "lane", "") or "").strip().lower()
