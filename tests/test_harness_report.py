@@ -155,3 +155,45 @@ def test_the_funnel_orders_by_the_ladder_not_by_count(tmp_path):
         assert got == ["inspect", "screen", "adopt"]
     finally:
         conn.close()
+
+
+# --- what won a lane and when it last ran are different questions ---------
+
+def test_staleness_comes_from_the_newest_run_not_the_winning_one(tmp_path,
+                                                                 monkeypatch):
+    """`winners` answers "what WON this lane", which is the best receipt and
+    may be months old. Staleness asks "when was this lane LAST measured".
+
+    Reading the age off the winner reported svg and stt as 12 days stale
+    MINUTES after both had been re-run, because their best receipts are older
+    than their newest. Issue #234.
+    """
+    import os
+    import time
+
+    runs = tmp_path / "runs"
+    for name, age_days in (("legacy-ev-item2b", 30.0),
+                           ("20260919-204639-944-0000-svg", 0.0)):
+        d = runs / name
+        d.mkdir(parents=True)
+        (d / "results.json").write_text("{}", encoding="utf-8")
+        when = time.time() - age_days * 86400
+        os.utime(d, (when, when))
+    monkeypatch.setattr("harness.paths.home", lambda: tmp_path)
+
+    assert report._newest_run_for("svg") == "20260919-204639-944-0000-svg"
+    assert report._run_age_days(report._newest_run_for("svg"),
+                                time.time()) < 1.0
+
+
+def test_a_lane_with_no_run_directory_has_no_newest(tmp_path, monkeypatch):
+    monkeypatch.setattr("harness.paths.home", lambda: tmp_path)
+    assert report._newest_run_for("svg") == ""
+
+
+def test_a_directory_with_no_receipt_does_not_count_as_a_run(tmp_path,
+                                                             monkeypatch):
+    """A run that crashed before writing results is not a measurement."""
+    (tmp_path / "runs" / "20260919-000000-000-0000-svg").mkdir(parents=True)
+    monkeypatch.setattr("harness.paths.home", lambda: tmp_path)
+    assert report._newest_run_for("svg") == ""

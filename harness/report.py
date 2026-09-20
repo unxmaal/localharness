@@ -69,7 +69,14 @@ def lanes_state(conn) -> list[dict]:
     for lane in L.ALL:
         got = measured.get(lane) or {}
         run = got.get("run") or ""
-        age = _run_age_days(run, now) if run else None
+        # TWO DIFFERENT QUESTIONS. `winners` answers "what WON this lane",
+        # which is the best receipt and may be months old. Staleness asks
+        # "when was this lane LAST measured", which is the newest receipt
+        # whatever it scored. Reading the age off the winner reported svg and
+        # stt as 12 days stale minutes after they had both been re-run,
+        # because their best receipts are older than their newest. #234.
+        newest = _newest_run_for(lane)
+        age = _run_age_days(newest, now) if newest else None
         out.append({
             "lane": lane,
             "wanted": lane in L.WANTED,
@@ -84,13 +91,33 @@ def lanes_state(conn) -> list[dict]:
             "median_s": got.get("median_s"),
             "metrics": got.get("metrics") or {},
             "run": run,
+            "last_run": newest,
             "age_days": age,
             # NEVER MEASURED is not "stale". A lane with no receipt has no age
             # to report and quoting one would be a fabrication.
-            "unverified": not run,
+            # UNVERIFIED MEANS NOTHING HAS EVER RUN HERE. A lane with a newest
+            # receipt has been measured, even if nothing it produced won.
+            "unverified": not newest,
             "stale": bool(age is not None and age > STALE_LANE_DAYS),
         })
     return out
+
+
+def _newest_run_for(lane: str) -> str:
+    """The most recent run directory for this lane, by mtime.
+
+    By MTIME, not by name: a name is a timestamp only by convention and
+    `legacy-ev-item2b` follows no convention at all, which is #222's defect.
+    """
+    from harness import paths
+
+    root = paths.home() / "runs"
+    if not root.is_dir():
+        return ""
+    got = [d for d in root.iterdir()
+           if d.is_dir() and d.name.endswith(f"-{lane}")
+           and (d / "results.json").is_file()]
+    return max(got, key=lambda d: d.stat().st_mtime).name if got else ""
 
 
 def _run_age_days(run: str, now: float) -> float | None:
