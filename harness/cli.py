@@ -871,7 +871,14 @@ def cmd_verify(a) -> int:
     tasks = verify.plan(state["lanes"], only=getattr(a, "lane", ""),
                         force=getattr(a, "all", False))
     if not tasks:
-        print("every lane has a recent receipt on this machine")
+        # NOT "every lane has a receipt". A parked lane has none and is
+        # excluded from the plan by design, so saying so here would report a
+        # decision as a measurement -- the exact confusion #244 removed from
+        # the report a few lines away.
+        parked = [l for l in state["lanes"] if l.get("parked")]
+        print("every lane that should run here has a recent receipt")
+        for l in parked:
+            print(f"  {l['lane']} is parked and was not run: {l['parked']}")
         return 0
 
     runnable = [t for t in tasks if not t.skip]
@@ -939,6 +946,12 @@ def cmd_report(a) -> int:
     if unverified:
         print(f"  {len(unverified)} lane(s) with no receipt on this machine: "
               f"{', '.join(unverified)}")
+    # A PARKED LANE IS NOT A GAP. Reported separately so the two reasons for
+    # having no receipt do not read as one. #244.
+    for l in lanes:
+        if l.get("parked"):
+            print(f"  {l['lane']} is parked: {l['parked']}; "
+                  f"revisit when {l['parked_until']}")
     if stale:
         print(f"  {len(stale)} lane(s) not measured in "
               f"{report.STALE_LANE_DAYS:.0f} days: {', '.join(stale)}")

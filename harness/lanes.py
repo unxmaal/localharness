@@ -45,6 +45,31 @@ ALL = WANTED + UNWANTED
 #: it as one put 243 of 323 proposals in a lane that does not exist.
 ALIASES = {"text": "code", "all": ""}
 
+#: lane -> (why it is not run here, what would change that). A PARKED lane is
+#: a DECISION, not a gap, and the difference is the whole point of this table:
+#: `unverified` says nobody has got round to it and invites somebody to,
+#: whereas parked says somebody looked and chose, and names the condition
+#: under which the choice expires.
+#:
+#: `video` is NOT blocked on memory. RULE #172 measured h3.c generating on
+#: this machine at 9.48 GiB peak with zero swaps, superseding the earlier
+#: conclusion that local video needed the Studio. It is blocked on throughput:
+#: engines.py records 512x512x22 frames at 40.5 minutes, roughly 0.9 seconds
+#: of output per 40 minutes, and verify.COST_S puts it at 2700s against 180
+#: for music and 60 for code. So the Studio makes it faster, not newly
+#: possible. Issue #244.
+PARKED = {
+    "video": ("40.5 minutes for 22 frames at 512x512 on this machine, an "
+              "order of magnitude past every other lane",
+              "the Mac Studio arrives"),
+}
+
+
+def parked(lane) -> tuple[str, str]:
+    """(why, until) for a parked lane, or ("", "") for one that is not."""
+    return PARKED.get(canonical(lane), ("", ""))
+
+
 #: Lanes a text model serves through mlx_lm.server, which takes the request's
 #: `model` as a live repo id and swaps to it. One prompt, one completion, a
 #: structural check on the output. The four differ in what they ask for and not

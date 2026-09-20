@@ -70,6 +70,11 @@ def plan(lanes_state, *, only: str = "", include_stale: bool = True,
                          else f"last measured {lane['age_days']:.0f} days ago"))
         if not default:
             task.skip = "the lane names no default to run"
+        elif lane.get("parked") and not want:
+            # PARKED BEATS DELIBERATE as a reason. Both refuse to run it
+            # automatically; only one says somebody decided and why. #244.
+            task.skip = (f"parked: {lane['parked']}. Revisit when "
+                         f"{lane.get('parked_until') or 'the reason changes'}")
         elif name in DELIBERATE and not want:
             # Nameable, never automatic: --lane video opts in explicitly.
             task.skip = (f"~{COST_S.get(name, 0) // 60} minutes for one case; "
