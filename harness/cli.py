@@ -848,6 +848,68 @@ def _report_inspect(a) -> int:
     return 0
 
 
+def cmd_verify(a) -> int:
+    """Establish that each lane works, by running its own default. #234."""
+    import subprocess
+
+    from harness import report, verify
+
+    state = report.state()
+    tasks = verify.plan(state["lanes"], only=getattr(a, "lane", ""),
+                        force=getattr(a, "all", False))
+    if not tasks:
+        print("every lane has a recent receipt on this machine")
+        return 0
+
+    runnable = [t for t in tasks if not t.skip]
+    budget = sum(t.cost_s for t in runnable)
+    print(f"\n{len(runnable)} lane(s) to verify, roughly {budget // 60}m "
+          f"{budget % 60}s in total:\n")
+    for t in tasks:
+        print(f"  {t.lane:8} {t.candidate[:40]:40} "
+              f"{t.skip or f'~{t.cost_s}s'}")
+        print(f"           {t.why}")
+    if not getattr(a, "run", False):
+        print("\n--run to spend it. Nothing is downloaded either way.")
+        return 0
+
+    rc = 0
+    results = []
+    for t in runnable:
+        print(f"\n=== {t.lane} ===\n    {' '.join(t.argv)}", flush=True)
+        proc = subprocess.run(t.argv, capture_output=True, text=True)
+        data = report._load_state(_newest_receipt_for(t.lane))
+        got = verify.verdict(data) if proc.returncode == 0 else "broken"
+        line = (verify.summarise(t.lane, data) if proc.returncode == 0
+                else (proc.stderr.strip().splitlines() or ["no stderr"])[-1])
+        results.append((t.lane, got, line))
+        print(f"    {got.upper()}: {line[:150]}")
+        if got == "broken":
+            rc = 1
+    print("\n=== what the lanes do ===")
+    for lane, got, _ in results:
+        print(f"  {got:8} {lane}")
+    return rc
+
+
+def _newest_receipt_for(lane: str):
+    """The directory the run just wrote. Newest by MTIME, not by name.
+
+    A name is a timestamp by convention and `legacy-ev-small-code` outranks
+    every real one alphabetically, which is #222. mtime is the filesystem's
+    own answer and needs no convention.
+    """
+    from harness import paths
+
+    root = paths.home() / "runs"
+    got = [d for d in root.iterdir()
+           if d.is_dir() and d.name.endswith(f"-{lane}")
+           and (d / "results.json").exists()] if root.is_dir() else []
+    if not got:
+        return root / "absent" / "results.json"
+    return max(got, key=lambda d: d.stat().st_mtime) / "results.json"
+
+
 def cmd_report(a) -> int:
     """Write the status page. Issue #231."""
     from harness import report
@@ -2221,6 +2283,16 @@ def build_parser() -> argparse.ArgumentParser:
     rep.add_argument("--out", default="",
                      help="where to write it (default: $LOCALHARNESS_HOME/report.html)")
     rep.set_defaults(func=cmd_report)
+
+    ver = sub.add_parser(
+        "verify",
+        help="run each lane's OWN default, to find out whether the lane works")
+    ver.add_argument("--lane", default="", help="only this lane")
+    ver.add_argument("--run", action="store_true",
+                     help="actually run; without it, only says what it would")
+    ver.add_argument("--all", action="store_true",
+                     help="every lane, not only the unverified and stale ones")
+    ver.set_defaults(func=cmd_verify)
 
     sens = sub.add_parser(
         "sensitivity",
