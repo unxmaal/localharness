@@ -18,7 +18,7 @@ from pathlib import Path
 
 from harness import paths, store
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 #: Outcomes a proposal can reach. TERMINAL ones suppress re-proposal.
 VERDICTS = ("measured", "declined", "broken", "queued", "ignored", "screened")
@@ -196,6 +196,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         _retract_verdicts_with_no_control(conn)
     if have and have < 9:
         _relane_from_the_card(conn)
+    if have and have < 10:
+        _retract_verdicts_from_runs_that_never_ran(conn)
     conn.execute("INSERT OR REPLACE INTO meta VALUES ('schema', ?)",
                  (str(SCHEMA_VERSION),))
     conn.commit()
@@ -360,6 +362,71 @@ def _relane_from_the_card(conn) -> None:
              f"retracted: settled in the {was or 'unknown'} lane, which came "
              f"from the source rather than from {name}'s own card ({card})",
              now))
+
+
+def _retract_verdicts_from_runs_that_never_ran(conn) -> None:
+    """Undo a verdict whose challenger never reached a model.
+
+    DERIVED FROM THE RECEIPTS, not from a list of names. The schema 8
+    retraction named one row because I had verified it by hand, and missed the
+    second member of the same class: mlx-community/Qwen3-8B-4bit sat
+    `declined` from two runs that were pure HTTP 400 routing failures, 0 of 27
+    at 11ms a case. Naming rows does not scale past the ones you happened to
+    look at. #230.
+
+    A receipt is only evidence against a verdict when EVERY row for that
+    candidate is a refusal this harness produced. One row that reached a model
+    means the candidate really was measured and its score is its own.
+    """
+    import json
+
+    from harness import cli, paths
+
+    runs = paths.home() / "runs"
+    if not runs.is_dir():
+        return
+    never_ran = set()
+    for d in sorted(runs.iterdir()):
+        f = d / "results.json"
+        if not f.is_file():
+            continue
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        rows = data.get("rows") or []
+        for key, got in (data.get("summary") or {}).items():
+            if got.get("passed") or not got.get("total"):
+                continue
+            why = cli._all_refused(rows, key)
+            if why and why != cli.NO_ROWS_FOR_CANDIDATE:
+                never_ran.add((key, why))
+
+    now = time.time()
+    for key, why in sorted(never_ran):
+        # AN ENGINE RECEIPT KEY WRAPS THE PROPOSAL NAME: `org/pic` is measured
+        # as `mflux/org/pic-q8`, so the name is the MIDDLE, neither the head
+        # nor the tail. Matching either end finds nothing for the image lane.
+        # Containment is guarded by requiring the name to carry a `/`, so a
+        # one-word proposal cannot match every key that happens to spell it.
+        rows = conn.execute(
+            "SELECT p.id, p.name FROM proposals p JOIN verdicts v "
+            "ON v.proposal_id = p.id "
+            "WHERE v.id = (SELECT v2.id FROM verdicts v2 "
+            "               WHERE v2.proposal_id = p.id "
+            "               ORDER BY v2.id DESC LIMIT 1) "
+            "  AND v.tier = 'adopt' AND v.outcome IN ('declined', 'broken') "
+            "  AND (p.name = ? "
+            "       OR (instr(p.name, '/') > 0 AND instr(?, p.name) > 0))",
+            (key, key)).fetchall()
+        for row in rows:
+            conn.execute(
+                "INSERT INTO verdicts (proposal_id, tier, outcome, detail, "
+                "decided_at) VALUES (?, ?, 'queued', ?, ?)",
+                (row[0], SCREEN,
+                 f"retracted: every case was refused before it reached a "
+                 f"model ({why}), so the verdict described a run in which "
+                 f"nothing ran", now))
 
 
 def _columns(conn, table: str) -> set[str]:
