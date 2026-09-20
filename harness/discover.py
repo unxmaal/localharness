@@ -417,6 +417,13 @@ _LANE_QUERIES = {
 #: incumbent's family can never find the thing that beats it.
 _LANE_QUERIES_ANY = {
     "svg": ["starvector", "OmniSVG"],
+    # Music is served by the same tool on every machine here -- ACE-Step runs
+    # under MLX on the Mac and torch elsewhere -- so the question does not vary
+    # by runtime the way the image and video questions do. Families rather than
+    # one name: a lane whose only query is the incumbent's family can never
+    # find the thing that beats it, which is why the losing svg models are
+    # still in the row above.
+    "music": ["ACE-Step", "YuE", "DiffRhythm", "musicgen", "stable-audio"],
 }
 
 #: Every lane discovery can search, whichever machine is asking. `code`, `web`,
@@ -467,6 +474,7 @@ _HOW = {
     "svg": "--modality svg --candidates {id}",
     "image": "--modality image --candidates <needs an engine>",
     "video": "--modality video --candidates <needs a runner>",
+    "music": "--modality music --candidates acestep:{id}",
 }
 
 #: runtime -> the lanes whose engine that runtime provides. Overrides _HOW for

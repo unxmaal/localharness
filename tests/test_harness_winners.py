@@ -114,7 +114,7 @@ def test_a_different_version_is_not_the_same_model():
 def test_every_typed_default_declares_which_family_it_belongs_to():
     assert set(winners.typed()) <= set(winners.FAMILIES)
     assert set(winners.typed()) == {"svg", "web", "code", "extract", "image",
-                                    "video", "tts", "stt"}
+                                    "video", "music", "tts", "stt"}
 
 
 # --- the lane's own metric decides, not a statistic blind to it -----------

@@ -47,7 +47,7 @@ def is_plain_model(candidate: str) -> bool:
 #: rather than a mismatch to smooth over.
 FAMILIES = {
     "svg": "alias", "web": "alias", "code": "alias", "extract": "alias",
-    "image": "engine", "video": "engine",
+    "image": "engine", "video": "engine", "music": "engine",
     "tts": "speech", "stt": "speech",
 }
 
@@ -176,6 +176,7 @@ def typed() -> dict[str, str]:
             "extract": cli.DEFAULT_EXTRACT_MODEL,
             "image": cli.DEFAULT_IMAGE_ENGINE,
             "video": cli.DEFAULT_VIDEO_ENGINE,
+            "music": cli.DEFAULT_MUSIC_ENGINE,
             "tts": audio.DEFAULT_TTS_MODEL, "stt": audio.DEFAULT_STT_MODEL}
 
 

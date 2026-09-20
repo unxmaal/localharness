@@ -46,7 +46,7 @@ TEXT_MODALITIES = {"svg", "web", "code", "extract"}
 ALL_MODALITIES = sorted(MODALITIES)
 
 
-PROCESS_ENGINES = ("mflux", "h3")
+PROCESS_ENGINES = ("mflux", "h3", "acestep")
 #: The svg lane's second METHOD: draw a raster, then vectorize it. Written as
 #: `trace:<engine spec>` so the engine underneath stays the ordinary spec.
 TRACE_PREFIX = "trace"

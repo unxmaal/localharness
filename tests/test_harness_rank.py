@@ -112,9 +112,14 @@ def test_serving_is_read_from_the_gateway_config_not_a_list():
 # ---- the lanes are not equally wanted (2026-09-18) ------------------------
 
 def test_the_priority_order_is_the_one_that_was_asked_for():
-    """image, code, web, svg, video. Pinned because a reordering here silently
-    changes what the loop spends its download budget on."""
-    assert rank.LANE_PRIORITY == ("image", "code", "web", "svg", "video")
+    """image, code, web, svg, video, then music. Pinned because a reordering
+    here silently changes what the loop spends its download budget on.
+
+    `music` is last and appended, never inserted: it was asked for after the
+    other five were ranked and has never been ranked against them (#237).
+    """
+    assert rank.LANE_PRIORITY == ("image", "code", "web", "svg", "video",
+                                  "music")
     got = [rank.priority_of(l) for l in rank.LANE_PRIORITY]
     assert got == sorted(got, reverse=True), "priority must fall down the list"
 

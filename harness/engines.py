@@ -25,7 +25,8 @@ from harness import env
 
 Argv = Callable[[str, Path, dict], list[str]]
 
-GRAMMAR = "engine:model[,key=value,...]  (engines: mflux, h3, diffusers, diffusers-video)"
+GRAMMAR = ("engine:model[,key=value,...]  "
+           "(engines: mflux, h3, diffusers, diffusers-video, acestep)")
 
 
 def spec_error(spec: str) -> str:
@@ -339,9 +340,107 @@ def _diffusers_video(spec: str, model: str, options: dict) -> Engine:
                   timeout=6 * 3600.0, stream=True)
 
 
+# ---- acestep (the music lane) --------------------------------------------
+
+_ACESTEP_OPTIONS = {"steps", "guidance", "lm", "root",
+                    "lm_temperature", "lm_top_p"}
+
+ACESTEP_SCRIPT = str(
+    Path(__file__).resolve().parent.parent / "scripts" / "acestep_generate.py")
+
+#: ACE-Step pins torch, mlx and transformers in its own virtualenv, so it is
+#: run THROUGH that environment rather than imported into this one. The
+#: checkout is named by $ACESTEP_ROOT, the pattern $LLAMACPP_BIN already uses.
+ACESTEP_ROOT_ENV = "ACESTEP_ROOT"
+
+
+def acestep_python(root) -> str:
+    """The interpreter inside the ACE-Step checkout, NOT `uv run`.
+
+    `uv run --project X python ...` is the obvious spelling and it silently
+    destroys the memory measurement. proc.run measures peak on macOS with
+    `/usr/bin/time -l`, which reports `phys_footprint` for the process it
+    wraps; uv FORKS python rather than exec'ing it, so the footprint recorded
+    is uv's own. Demonstrated: a child allocating 400 MB through `uv run`
+    reports maximum resident set size 433455104 and peak memory footprint
+    14270992. The music lane's first receipt duly said 0.0 GiB for a process
+    independently measured at 13.82 GiB.
+
+    RULE #225 is the same defect on Linux, where os.wait4's ru_maxrss reports
+    the forking parent. One process for the instrument to measure, always.
+    """
+    if not root:
+        # Defaulting to "." would pick up whichever virtualenv the caller
+        # happened to be standing in -- this repo's own, most of the time --
+        # and run the generator against an environment with no acestep in it.
+        raise ValueError(
+            f"the music lane needs the ACE-Step checkout: set "
+            f"${ACESTEP_ROOT_ENV} or pass root=<path> in the engine spec")
+    base = Path(root)
+    for relative in ("bin/python", "Scripts/python.exe"):
+        candidate = base / ".venv" / relative
+        if candidate.exists():
+            return str(candidate)
+    # Naming the fix beats falling back to `uv run` and recording a peak that
+    # is wrong by three orders of magnitude.
+    raise ValueError(
+        f"no virtualenv in the ACE-Step checkout at {base}; run `uv sync` "
+        f"there, or point {ACESTEP_ROOT_ENV} at a checkout that has one")
+
+
+def _acestep(spec: str, model: str, options: dict) -> Engine:
+    """Music, through the ACE-Step checkout named by $ACESTEP_ROOT.
+
+    `model` is the checkpoint config and is passed through UNTOUCHED. It names
+    a directory under `checkpoints/` for the shipped configs and a repo id for
+    anything discovery proposes, and this cannot tell the two apart without a
+    table of known names -- which is exactly the validator that refuses
+    everything discovery finds (RULE #271). Let ACE-Step reject what it cannot
+    load, and record that as a fact about the candidate.
+    """
+    if not model:
+        raise ValueError(
+            f"{spec_error(spec)}: acestep needs a model, e.g. "
+            f"acestep:acestep-v15-turbo")
+    _check_options(options, _ACESTEP_OPTIONS, spec)
+    defaults = dict(options)
+
+    def argv(prompt: str, out: Path, params: dict) -> list[str]:
+        p = {**defaults, **{k: v for k, v in params.items() if v is not None}}
+        # Read at call time so a test or a second checkout can move it without
+        # reloading the module.
+        root = p.get("root") or os.environ.get(ACESTEP_ROOT_ENV, "")
+        cmd = [acestep_python(root), ACESTEP_SCRIPT,
+               "--root", str(root or "."),
+               "--out", str(out), "--caption", prompt]
+        # Lyrics carry newlines and go through argv intact; a temporary file
+        # would be one more thing to clean up on a crash.
+        _flag(cmd, "--lyrics", p.get("lyrics"))
+        for name in ("bpm", "duration", "keyscale", "timesignature",
+                     "seed", "steps", "guidance", "lm"):
+            _flag(cmd, f"--{name}", p.get(name))
+        # Spelled with dashes on the command line, underscores in a spec.
+        _flag(cmd, "--lm-temperature", p.get("lm_temperature"))
+        _flag(cmd, "--lm-top-p", p.get("lm_top_p"))
+        _flag(cmd, "--language", p.get("language"))
+        _flag(cmd, "--config", model)
+        if str(p.get("instrumental", False)).lower() in ("true", "1", "yes"):
+            cmd.append("--instrumental")
+        return cmd
+
+    return Engine(name=f"acestep/{model.rsplit('/', 1)[-1]}", spec=spec,
+                  argv=argv, modality="music", output_suffix=".wav",
+                  # Measured 2026-09-20 on the M2 Pro: 55s of model init then
+                  # 37.5s for a 30s track. The ceiling is 600s of audio, and a
+                  # first run downloads ~6 GB, so this is generous on purpose
+                  # without reaching video's six hours.
+                  timeout=1800.0, stream=True)
+
+
 _BUILDERS: dict[str, Callable[[str, str, dict], Engine]] = {
     "mflux": _mflux,
     "h3": _h3,
     "diffusers": _diffusers,
     "diffusers-video": _diffusers_video,
+    "acestep": _acestep,
 }

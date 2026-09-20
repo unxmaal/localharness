@@ -1,0 +1,25 @@
+# The case the spike ran, kept verbatim so the lane's first number has a
+# predecessor to be compared against. Plain words and no proper nouns: the
+# point is whether a transcriber can hear SINGING, so the vocabulary must not
+# be the hard part. Measured 2026-09-20 at wer 0.091 through parakeet.
+id: lyrics-plain
+modality: music
+prompt: >-
+  A clean mid-tempo pop song with a clear male lead vocal in the foreground,
+  simple acoustic guitar, light drums and bass. Uncluttered arrangement,
+  diction is crisp and easy to understand.
+params:
+  lyrics: |
+    [Verse]
+    The morning light is on the open road
+    I hold the wheel and let the river flow
+    We drive all day and watch the city glow
+    The radio is playing soft and low
+  bpm: 90
+  duration: 30
+  keyscale: C Major
+  timesignature: "4"
+  seed: 42
+assert:
+  max_wer: 0.35
+  duration_s: 30

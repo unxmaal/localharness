@@ -39,6 +39,10 @@ from harness.engines import resolve
 
 DEFAULT_IMAGE_ENGINE = "mflux:flux2-klein-4b"
 DEFAULT_VIDEO_ENGINE = "h3"
+#: The music lane's incumbent. Turbo at 8 steps rather than the base model:
+#: it is what was measured on this machine (issue #236) and the base model's
+#: 32-100 steps have never been run here.
+DEFAULT_MUSIC_ENGINE = "acestep:acestep-v15-turbo"
 
 # Every evals/cases/{image,video}/*.yaml pins a resolution. The CLI did not, so
 # it inherited whatever each engine defaults to -- 1024 for mflux -- and ran a
