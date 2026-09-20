@@ -848,6 +848,28 @@ def _report_inspect(a) -> int:
     return 0
 
 
+def cmd_report(a) -> int:
+    """Write the status page. Issue #231."""
+    from harness import report
+
+    if getattr(a, "json", False):
+        print(json.dumps(report.state(), indent=1, default=str))
+        return 0
+    out = report.write(getattr(a, "out", "") or None)
+    state = report._load_state(out.with_suffix(".json"))
+    lanes = state.get("lanes") or []
+    unverified = [l["lane"] for l in lanes if l.get("unverified")]
+    stale = [l["lane"] for l in lanes if l.get("stale")]
+    print(f"\n{out}")
+    if unverified:
+        print(f"  {len(unverified)} lane(s) with no receipt on this machine: "
+              f"{', '.join(unverified)}")
+    if stale:
+        print(f"  {len(stale)} lane(s) not measured in "
+              f"{report.STALE_LANE_DAYS:.0f} days: {', '.join(stale)}")
+    return 0
+
+
 def cmd_fetch(a) -> int:
     """Download what the inspect tier queued. Issue #62."""
     from harness import fetching, inspect as ins
@@ -2192,6 +2214,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="how many to fetch. One at a time by default: this "
                         "machine holds one working set")
     f.set_defaults(func=cmd_fetch)
+
+    rep = sub.add_parser(
+        "report",
+        help="one self-contained HTML page showing where the harness stands")
+    rep.add_argument("--out", default="",
+                     help="where to write it (default: $LOCALHARNESS_HOME/report.html)")
+    rep.set_defaults(func=cmd_report)
 
     sens = sub.add_parser(
         "sensitivity",
