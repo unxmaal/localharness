@@ -153,3 +153,56 @@ def test_the_migration_leaves_an_agreeing_row_alone(tmp_path):
             "a verdict reached in the RIGHT lane stays settled")
     finally:
         conn.close()
+
+
+# --- a card's decisive tag must survive the summary (#201) ----------------
+
+def test_a_lora_tag_survives_the_six_tag_cap():
+    """Xanthius/Ace-Step-1.5-XL-Concept-Sliders ranked TOP OF THE QUEUE at
+    +5.3 and is an adapter. HF tagged it `lora` plainly -- and `lora` was the
+    seventh tag, so `plain[:6]` dropped the one word that decides whether a
+    runner can load it at all.
+
+    A summary may drop what a reader would merely like to know. It may not
+    drop what the next decision is made on.
+    """
+    from harness import inspect as ins, screen
+    data = {"tags": ["music", "audio", "sound", "singing", "concepts",
+                     "slider", "lora"],
+            "siblings": [{"size": 700 * 1024 ** 2}]}
+    assert screen.is_attachment(ins.card_description(data)) == "lora"
+
+
+def test_the_base_model_relation_type_travels_with_the_id():
+    """HF types the lineage -- base_model:adapter:X against
+    base_model:finetune:X -- and describe() kept only the id. That threw away
+    the field separating a thing that runs from a thing that attaches to
+    something that runs."""
+    from harness import inspect as ins, screen
+    adapter = {"tags": ["base_model:adapter:ACE-Step/acestep-v15-xl-base"],
+               "siblings": [{"size": 700 * 1024 ** 2}]}
+    got = ins.card_description(adapter)
+    assert "adapter of ACE-Step/acestep-v15-xl-base" in got
+    assert screen.is_attachment(got)
+
+
+def test_a_genuine_finetune_is_not_called_an_attachment():
+    """THE NEGATIVE CONTROL, and the half that matters most. A finetune
+    declares a base model too and IS runnable; refusing those would empty the
+    queue of exactly the candidates worth screening."""
+    from harness import inspect as ins, screen
+    finetune = {"tags": ["text-generation", "mlx",
+                         "base_model:finetune:Qwen/Qwen3-4B"],
+                "pipeline_tag": "text-generation",
+                "siblings": [{"size": 4 * 1024 ** 3}]}
+    got = ins.card_description(finetune)
+    assert "built from Qwen/Qwen3-4B" in got
+    assert not screen.is_attachment(got)
+
+
+def test_an_ordinary_model_card_is_untouched():
+    from harness import inspect as ins, screen
+    plain = {"tags": ["text-generation", "mlx", "qwen", "chat", "instruct"],
+             "pipeline_tag": "text-generation", "library_name": "mlx",
+             "siblings": [{"size": 4 * 1024 ** 3}]}
+    assert not screen.is_attachment(ins.card_description(plain))

@@ -468,6 +468,17 @@ def is_gguf(model_id: str, data: dict) -> bool:
     return bool(_GGUF_NAME.search(name) or _GGUF_QUANT.search(name))
 
 
+def screen_words(tag: str) -> bool:
+    """Does this tag say the thing ATTACHES to a model rather than being one?
+
+    Asks screen.NOT_A_MODEL rather than keeping a second copy of it: two lists
+    of what an adapter looks like is the defect this project has filed under
+    other names six times.
+    """
+    from harness import screen
+    return bool(screen.is_attachment(tag))
+
+
 def card_description(data: dict) -> str:
     """What a model card says that bears on whether to measure this.
 
@@ -494,11 +505,25 @@ def card_description(data: dict) -> str:
     if data.get("library_name"):
         bits.append(f"served by {data['library_name']}")
     if plain:
-        bits.append("tagged " + ", ".join(plain[:6]))
+        # A TAG THAT DECIDES WHETHER THIS IS A MODEL AT ALL SURVIVES THE CAP.
+        # `Xanthius/Ace-Step-1.5-XL-Concept-Sliders` is tagged music, audio,
+        # sound, singing, concepts, slider, LORA -- and `lora` is the seventh,
+        # so plain[:6] dropped the only word that mattered. It then ranked top
+        # of the queue at +5.3 and would have spent a fetch and a screen on an
+        # adapter no runner can load.
+        decisive = [t for t in plain if screen_words(t)]
+        rest = [t for t in plain if t not in decisive]
+        bits.append("tagged " + ", ".join(decisive + rest[:6]))
     if lineage:
-        # Only the ids, not the "base_model:finetune:" prefixes.
+        # THE RELATION TYPE IS THE DISCRIMINATOR, so it travels with the id.
+        # HF types these -- base_model:adapter:X, :finetune:X, :quantized:X --
+        # and stripping the prefix threw away the one field that separates a
+        # thing that runs from a thing that attaches to something that runs.
         parents = sorted({t.split(":")[-1] for t in lineage})
-        bits.append("built from " + ", ".join(parents[:3]))
+        kinds = {t.lower().split(":")[1] for t in lineage
+                 if t.lower().count(":") >= 2}
+        how = "adapter of" if "adapter" in kinds else "built from"
+        bits.append(f"{how} " + ", ".join(parents[:3]))
     total = sum(s.get("size") or 0 for s in (data.get("siblings") or []))
     if total > 0:
         bits.append(f"{total / GIB:.1f} GiB of weights")
