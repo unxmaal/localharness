@@ -222,6 +222,13 @@ RUNTIME_TERMS = {
     # llama.cpp just as happily, and on a machine without it, not at all
     # whatever the processor. #228.
     "llamacpp": re.compile(r"\b(gguf|llama[._ -]?cpp|ggml)\b", re.I),
+    # A SERVING RUNTIME, not hardware, which is why it is its own row rather
+    # than part of `cuda`: vllm-mlx exists, so "needs a vLLM server" and
+    # "needs a card" are independent questions. Narrow on purpose -- "serving"
+    # and "inference" are not runtimes and would score every post about
+    # deployment. #245.
+    "vllm": re.compile(r"\b(vllm|v-llm|paged[- ]attention|continuous "
+                       r"batching)\b", re.I),
 }
 
 #: The Apple vocabulary under its old name, for callers that predate the rest.

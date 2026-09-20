@@ -206,3 +206,52 @@ def test_an_ordinary_model_card_is_untouched():
              "pipeline_tag": "text-generation", "library_name": "mlx",
              "siblings": [{"size": 4 * 1024 ** 3}]}
     assert not screen.is_attachment(ins.card_description(plain))
+
+
+# --- registry over registry, before registry over prose (#246) ------------
+
+REAL_OMNISVG = {"pipeline_tag": "text-generation",
+                "tags": ["pytorch", "qwen2_5_vl", "SVG", "Image-to-SVG",
+                         "Text-to-SVG", "text-generation", "en", "zh"]}
+
+
+def test_a_supertype_pipeline_tag_yields_to_a_specific_one():
+    """OmniSVG1.1_8B declares `text-generation` and is tagged SVG three times.
+    It was filed under `code`, where the lane hands a candidate to
+    mlx_lm.server -- a path that cannot run it, so the screen would have
+    recorded a verdict about the candidate.
+
+    The publisher is not wrong: a text-to-SVG model IS a text-generation
+    model. `text-generation` is simply the supertype of four lanes at once.
+    """
+    from harness import inspect as ins
+    assert ins.lane_for(REAL_OMNISVG) == "svg"
+
+
+def test_an_ordinary_text_model_still_lands_in_code():
+    """THE NEGATIVE CONTROL. This is a routing change, and routing changes are
+    how lanes get poisoned: if incidental tags could move a candidate, the
+    code lane would empty into whatever its cards happen to mention."""
+    from harness import inspect as ins
+    assert ins.lane_for({"pipeline_tag": "text-generation",
+                         "tags": ["qwen3", "text-generation", "chat",
+                                  "conversational", "reasoning"]}) == "code"
+
+
+def test_tags_naming_two_lanes_leave_the_publishers_answer_standing():
+    """Ambiguity is not a tiebreak -- the rule lanes.from_prose already
+    follows. With the tags disagreeing among themselves, pipeline_tag is a
+    better fallback than a coin flip."""
+    from harness import inspect as ins
+    assert ins.lane_for({"pipeline_tag": "text-generation",
+                         "tags": ["text-to-svg", "tts"]}) == "code"
+
+
+def test_a_specific_pipeline_tag_is_never_overruled():
+    """Only `text-generation` is a supertype. Every other PIPELINE_LANES entry
+    already names exactly one lane."""
+    from harness import inspect as ins
+    assert ins.lane_for({"pipeline_tag": "text-to-speech",
+                         "tags": ["tts", "text-to-image"]}) == "tts"
+    assert ins.lane_for({"pipeline_tag": "text-to-image",
+                         "tags": ["diffusion", "svg"]}) == "image"

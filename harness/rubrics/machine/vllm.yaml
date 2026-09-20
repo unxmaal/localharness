@@ -1,0 +1,15 @@
+# What the judge should know when scoring for a machine that serves vLLM.
+#
+# vLLM is a SERVING RUNTIME rather than a kind of hardware, which is why this
+# is a fragment of its own rather than part of the cuda one: a card without a
+# vLLM server cannot load a `served by vllm` card, and vllm-mlx exists, so the
+# two are genuinely independent axes. On a machine without it, such a card is
+# refused needs-vllm before any weights are downloaded. Issue #245.
+what_scores_high:
+  - Weights whose card names vLLM as what serves them. This machine has one.
+  - A model published for continuous batching or paged attention, where the
+    serving path is the point rather than the weights.
+
+what_scores_low:
+  - A vLLM re-publication of a model already served here another way. The
+    serving framework is not the finding.

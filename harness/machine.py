@@ -55,6 +55,22 @@ def _has_rocm() -> bool:
     return shutil.which("rocm-smi") is not None or shutil.which("rocminfo") is not None
 
 
+def _has_vllm() -> bool:
+    """A vLLM server, which some cards name as what serves them.
+
+    Probed rather than assumed absent: without this, `machine.refuses("vllm")`
+    would answer "needs-vllm" on the box that HAS one, which is the mirror of
+    the mistake #228 made about GGUF.
+    """
+    if shutil.which("vllm"):
+        return True
+    try:
+        import importlib.util
+        return importlib.util.find_spec("vllm") is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _has_llamacpp() -> bool:
     """What loads a GGUF. Nothing else here does.
 
@@ -77,6 +93,7 @@ def _has_llamacpp() -> bool:
 #: a machine may have several.
 _RUNTIME_PROBES = {
     "mlx": _has_mlx,
+    "vllm": _has_vllm,
     "llamacpp": _has_llamacpp,
     "cuda": _has_cuda,
     "rocm": _has_rocm,

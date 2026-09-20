@@ -102,7 +102,20 @@ PIPELINE_LANES = {
 }
 TAG_LANES = {"asr": "stt", "speech-recognition": "stt", "stt": "stt",
              "tts": "tts", "text-to-speech": "tts",
-             "text-to-image": "image", "diffusion": "image"}
+             "text-to-image": "image", "diffusion": "image",
+             # A text-to-SVG model IS a text-generation model, so its
+             # pipeline_tag is honest and useless for routing. #246.
+             "svg": "svg", "text-to-svg": "svg", "image-to-svg": "svg",
+             "text-to-music": "music", "music": "music"}
+
+#: The one pipeline_tag that is a SUPERTYPE of other lanes, so a more specific
+#: tag on the same card may overrule it.
+#:
+#: `text-generation` covers code, web, svg and extract at once -- they are all
+#: one prompt to a text model -- so a publisher naming it is telling the truth
+#: and telling us nothing. Every other entry in PIPELINE_LANES already names
+#: exactly one lane and is never overridden. #246.
+GENERIC_PIPELINE = "text-generation"
 
 
 def lane_for(meta: dict, prose: str = "") -> str:
@@ -118,12 +131,28 @@ def lane_for(meta: dict, prose: str = "") -> str:
     where both speak, they agree 34 times. #207.
     """
     tag = (meta.get("pipeline_tag") or "").strip().lower()
+    from_tags = {TAG_LANES[t] for t in
+                 (str(x).strip().lower() for x in (meta.get("tags") or []))
+                 if t in TAG_LANES}
     if tag in PIPELINE_LANES:
-        return PIPELINE_LANES[tag]
-    for t in (meta.get("tags") or []):
-        got = TAG_LANES.get(str(t).strip().lower())
-        if got:
-            return got
+        lane = PIPELINE_LANES[tag]
+        # REGISTRY OVER REGISTRY, BEFORE REGISTRY OVER PROSE. `text-generation`
+        # is a supertype: OmniSVG1.1_8B declares it and is tagged SVG,
+        # Image-to-SVG and Text-to-SVG, and was filed under `code`, where the
+        # lane would hand it to mlx_lm.server. The publisher is not wrong; the
+        # specific answer is simply elsewhere on the same card.
+        #
+        # ONE specific lane overrules, several do not: tags naming two lanes
+        # is the ambiguity lanes.from_prose already refuses to resolve, and
+        # the publisher's own answer is a better fallback than a coin flip.
+        specific = from_tags - {lane}
+        if tag == GENERIC_PIPELINE and len(specific) == 1:
+            return specific.pop()
+        return lane
+    if len(from_tags) == 1:
+        return from_tags.pop()
+    if from_tags:
+        return ""      # several lanes named and none of them the publisher's
     return lanes.from_prose(prose)
 
 #: Imports and pins that mean it will not run on this machine at all.
@@ -466,6 +495,50 @@ def is_gguf(model_id: str, data: dict) -> bool:
         return True
     name = model_id or ""
     return bool(_GGUF_NAME.search(name) or _GGUF_QUANT.search(name))
+
+
+#: Kernel and format words that mean NVIDIA hardware, whatever the card's
+#: `library_name` says. Deliberately NARROW: every one of these names a CUDA
+#: kernel or an NVIDIA-only numeric format, so a match is a fact about the
+#: weights rather than a guess.
+#:
+#: `awq` and `gptq` are DELIBERATELY ABSENT. They are quantisation formats with
+#: CUDA kernels in practice and implementations elsewhere, so refusing them
+#: would be predicting a failure rather than reading one.
+_NEEDS_CUDA = re.compile(
+    r"\b(cuda|tensorrt|gemlite|nvfp4|modelopt|marlin|exllama|bitsandbytes)\b",
+    re.I)
+
+#: The card's own `library_name`, which describes what SERVES the weights
+#: rather than what they are. `served by vllm` needs a vLLM server; that is a
+#: runtime a machine either has or does not, exactly like llamacpp.
+_SERVED_BY = re.compile(r"served by (\w[\w.-]*)", re.I)
+
+#: library_name -> the runtime this project probes for. Only the ones where
+#: the serving framework IS the runtime; `transformers` is absent because
+#: torch runs everywhere and the question it raises -- what conversion costs
+#: on this machine -- is a different one (#245).
+_SERVED_RUNTIME = {"vllm": "vllm"}
+
+
+def runtime_needed(description: str) -> str:
+    """The runtime this card says its weights need, or "".
+
+    READ FROM THE REGISTRY'S OWN TAGS, the same source screen.is_attachment
+    uses to answer "is this a model at all". This answers the next question:
+    is it a model THIS machine can run.
+
+    Returns a runtime name for machine.refuses() rather than a verdict, so the
+    answer stays a fact about the machine asking. The same gemlite weights are
+    perfectly runnable on a box with a card.
+    """
+    text = description or ""
+    if _NEEDS_CUDA.search(text):
+        return "cuda"
+    served = _SERVED_BY.search(text)
+    if served:
+        return _SERVED_RUNTIME.get(served.group(1).lower(), "")
+    return ""
 
 
 def screen_words(tag: str) -> bool:
