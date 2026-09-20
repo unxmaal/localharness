@@ -115,3 +115,39 @@ def test_the_summary_line_names_the_candidate_and_its_metric():
                                         "metrics": {"ink": 0.29}}}}
     line = verify.summarise("svg", data)
     assert "local-large 8/9" in line and "ink 0.290" in line
+
+
+# --- parked is a decision, unverified is a gap (#244) ---------------------
+
+def test_a_parked_lane_is_not_reported_as_unverified():
+    """`video` read UNVERIFIED on every page this report has ever produced.
+    Both mean "no receipt" and they want opposite things from a reader:
+    unverified invites somebody to run it, parked says somebody decided not
+    to and names what would change that."""
+    from harness import lanes as L
+    from harness import report
+
+    why, until = L.parked("video")
+    assert why and until, "video must carry a reason and an expiry condition"
+    state = {l["lane"]: l for l in report.state()["lanes"]}
+    assert state["video"]["parked"] == why
+    assert not state["video"]["unverified"]
+
+
+def test_an_ordinary_lane_is_not_parked():
+    """THE NEGATIVE CONTROL. If every lane could be parked, the status page
+    would stop reporting gaps at all."""
+    from harness import lanes as L
+    for lane in ("image", "code", "web", "svg", "music", "tts", "stt",
+                 "extract"):
+        assert L.parked(lane) == ("", "")
+
+
+def test_a_parked_lane_is_never_planned_automatically():
+    from harness import verify
+    state = [{"lane": "video", "unverified": True, "stale": False,
+              "serves": "h3", "age_days": None, "parked": "too slow here",
+              "parked_until": "the Studio arrives"}]
+    tasks = verify.plan(state, force=True)
+    assert tasks and tasks[0].skip.startswith("parked:")
+    assert not tasks[0].argv, "a parked lane must not carry a command to run"

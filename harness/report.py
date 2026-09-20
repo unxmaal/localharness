@@ -97,8 +97,16 @@ def lanes_state(conn) -> list[dict]:
             # to report and quoting one would be a fabrication.
             # UNVERIFIED MEANS NOTHING HAS EVER RUN HERE. A lane with a newest
             # receipt has been measured, even if nothing it produced won.
-            "unverified": not newest,
-            "stale": bool(age is not None and age > STALE_LANE_DAYS),
+            # PARKED IS NOT UNVERIFIED. Both mean "no receipt", and they want
+            # opposite things from a reader: unverified invites somebody to
+            # run it, parked says somebody already decided not to and names
+            # what would change that. `video` read UNVERIFIED on every page
+            # this report has ever produced. #244.
+            "unverified": not newest and not L.parked(lane)[0],
+            "parked": L.parked(lane)[0],
+            "parked_until": L.parked(lane)[1],
+            "stale": bool(age is not None and age > STALE_LANE_DAYS
+                          and not L.parked(lane)[0]),
         })
     return out
 
