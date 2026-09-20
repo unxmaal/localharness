@@ -254,3 +254,56 @@ def test_a_speech_candidate_does_not_leak_into_the_wanted_lanes():
     for lane in ("stt", "tts"):
         assert lanes.testable_in(lane) == (lane,)
         assert not any(lanes.serves(lane, w) for w in lanes.WANTED)
+
+
+# --- a parked lane does not rank, and a tool is not a model (#249) --------
+
+def test_a_parked_lanes_candidates_sink_below_the_laneless():
+    """#244 taught the report and verify that parking is a decision. It never
+    reached the ranking, so four of the top twelve were video candidates for a
+    lane nothing will run, and `--loop --run --top 4` would have downloaded
+    16.2 GiB for it.
+
+    Below laneless on purpose: a laneless candidate might get a lane tomorrow,
+    a parked one is waiting on hardware.
+    """
+    parked, _ = rank.value(_row("org/v", lane="video"), measured_lanes=set())
+    laneless, _ = rank.value(_row("org/n", lane=""), measured_lanes=set())
+    assert parked < laneless
+
+
+def test_a_parked_candidate_stays_in_the_queue():
+    """Ranked down, never dropped. When the Studio arrives the lane un-parks
+    and these candidates must still be here with their recurrence intact,
+    which is why this is a ranking answer and never a stored verdict."""
+    rows = [_row("org/v", lane="video", description="a text-to-video model"),
+            _row("org/i", lane="image", description="a text-to-image model")]
+    got = [r["name"] for r in rank.rank(rows, serving=(), measured_lanes=())]
+    assert set(got) == {"org/v", "org/i"}, "a parked candidate was discarded"
+    assert got[-1] == "org/v", "a parked candidate must rank last"
+
+
+def test_the_reason_a_candidate_sank_names_the_condition():
+    """A score with no explanation is a number somebody has to re-derive."""
+    _, why = rank.value(_row("org/v", lane="video"), measured_lanes=set())
+    assert any("parked" in w for w in why)
+    assert any("Studio" in w for w in why), "say what would change it"
+
+
+def test_a_browser_tool_with_a_lane_is_not_a_model():
+    """PoopMan333/Video_Tools ranked SECOND in the whole queue at 0.0 GiB,
+    tagged `video, video-editing, image-editing, gif, browser, offline`. The
+    laneless filter missed it because it HAS a lane, and the attachment list
+    missed it because it attaches to nothing."""
+    assert screen.is_attachment(
+        "tagged video, video-editing, image-editing, gif, browser, offline")
+
+
+def test_a_real_model_is_not_refused_as_a_tool():
+    """THE NEGATIVE CONTROL. These words appear in ordinary cards, and a
+    filter that fires on them empties the queue."""
+    for desc in ("task text-to-video; served by diffusers; tagged video, "
+                 "text-to-video, diffusion",
+                 "task text-to-image; tagged image, diffusion, sdxl",
+                 "task text-generation; served by mlx; tagged qwen3, chat"):
+        assert not screen.is_attachment(desc), desc

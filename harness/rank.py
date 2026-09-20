@@ -46,6 +46,13 @@ RECURRENCE = 2.0
 OPEN_LANE = 3.0
 KNOWN_LINEAGE = -4.0
 NO_LANE = -6.0
+#: A lane somebody decided not to run here. BELOW no-lane on purpose: a
+#: laneless candidate might get a lane tomorrow, while a parked one is waiting
+#: on hardware. #244 taught the report and verify about parking and never
+#: reached the ranking, so four of the top twelve were video candidates for a
+#: lane nothing will run, and `--loop --run --top 4` would have downloaded
+#: 16.2 GiB for it.
+PARKED_LANE = -8.0
 CHEAP = 1.0
 
 #: A card says what it was built from as `base_model:...`, sometimes several
@@ -88,6 +95,15 @@ def value(row: dict, *, serving: set[str] = frozenset(),
         # gap in this harness and sometimes the work worth doing.
         score += NO_LANE
         why.append("no lane can measure it")
+    elif lanes.parked(lane)[0]:
+        # NOT DROPPED FROM THE QUEUE. When the Studio arrives the lane
+        # un-parks and these candidates should still be here with their
+        # recurrence intact, so this is a ranking answer and never a stored
+        # verdict -- the same reasoning that keeps unrunnable() out of the
+        # store, because the answer is a fact about this machine.
+        score += PARKED_LANE
+        why.append(f"the {lane} lane is parked: {lanes.parked(lane)[1]} "
+                   f"would change that")
     elif lane not in measured_lanes:
         score += OPEN_LANE
         why.append(f"no run receipt in the {lane} lane")
