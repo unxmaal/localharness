@@ -449,6 +449,8 @@ def cmd_discover(a) -> int:
         return _report_recurrence(a)
     if getattr(a, "revisit", False):
         return _report_revisit(a)
+    if getattr(a, "evidence", False):
+        return _report_evidence(a)
     if getattr(a, "sources", False):
         return _report_sources(a)
     if getattr(a, "feeds", False):
@@ -614,6 +616,39 @@ def _report_revisit(a) -> int:
               f"{(r['detail'] or '')[:70]}")
         print(f"           waiting on {r['until']}, which this machine meets")
     print("\nRetract one by re-queueing it: a verdict is never deleted.")
+    return 0
+
+
+def _report_evidence(a) -> int:
+    """Verdicts whose receipt is no longer on disk.
+
+    A verdict whose evidence is gone cannot be re-judged. Schema 10 exists
+    because verdicts were recorded from runs that never reached a model, and
+    undoing those required READING the runs back. That migration ran once and
+    nothing has checked since.
+    """
+    from harness import memory_store as ms
+
+    store = ms.connect()
+    try:
+        gone = ms.dangling_receipts(store)
+        total = store.execute(
+            "SELECT COUNT(*) c FROM verdicts WHERE run_path != ''"
+        ).fetchone()["c"]
+    finally:
+        store.close()
+    if not gone:
+        print(f"every one of the {total} verdicts that names a run can still "
+              f"reach it.")
+        return 0
+    print(f"{len(gone)} of {total} verdicts name a run that is no longer on "
+          f"disk, so they cannot be re-judged:\n")
+    for r in sorted(gone, key=lambda r: r["name"]):
+        print(f"  {r['outcome']:9} {r['tier']:8} {r['name']}")
+        print(f"            {r['run_path']}")
+    print("\nThese are not deleted: a verdict is a record. They are reported "
+          "so a re-judgement is known to be impossible rather than assumed "
+          "to be available.")
     return 0
 
 
@@ -833,6 +868,7 @@ def _report_inspect(a) -> int:
             outcome = {"fits": "queued", "unknown": ""}.get(fit.verdict, "declined")
             if outcome:
                 ms.decide(store, repo, outcome, tier=ms.INSPECT,
+                          size_bytes=fit.largest if fit.verdict == "fits" else 0,
                           detail=f"{fit.verdict}: {fit.why}"[:200])
             # The WEIGHTS are what a download queue can act on. The repo is
             # something to install and screen, and the two are not the same
@@ -873,6 +909,7 @@ def _report_inspect(a) -> int:
                           f"-> {fit.lanes[model_id]}")
                 ms.link(store, repo, model_id, "needs")
                 ms.decide(store, model_id, "queued", tier=ms.INSPECT,
+                          size_bytes=size,
                           detail=f"bytes={size} lane={fit.lanes.get(model_id) or '-'} "
                                  f"named by {repo}")
     finally:
@@ -2387,6 +2424,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "the store already knows. Arithmetic, not a judge")
     d.add_argument("--recurrence", action="store_true",
                    help="what keeps coming back, from the discovery store")
+    d.add_argument("--evidence", action="store_true",
+                   help="verdicts whose run receipt is no longer on disk, so "
+                        "nothing can re-judge them")
     d.add_argument("--revisit", action="store_true",
                    help="candidates another machine refused whose reason no "
                         "longer applies here. A verdict is a fact about the "

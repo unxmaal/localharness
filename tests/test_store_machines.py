@@ -179,3 +179,75 @@ def test_an_old_store_is_attributed_and_says_it_was_inferred(tmp_path):
         assert unattributed == 0
     finally:
         conn.close()
+
+
+# --- the measured size, which code reads back -----------------------------
+
+def test_a_measured_size_is_a_column_not_a_sentence(store):
+    """It lived in `detail` as `bytes=N`, then as `weights from 5.5 to 8.9
+    GiB` when the tier was reworded, and fetching.size_of parses BOTH with
+    regexes because the rewording silently broke the numeric read: every
+    candidate came back unsized and was declined TERMINALLY for a size sitting
+    in the row above (#211)."""
+    from harness import fetching
+
+    ms.decide(store, "org/c", "queued", tier="inspect",
+              detail="fits: MLX-native", size_bytes=5_500_000_000)
+    row = store.execute(
+        "SELECT size_bytes FROM verdicts ORDER BY id DESC LIMIT 1").fetchone()
+    assert row["size_bytes"] == 5_500_000_000
+    assert fetching.size_of(dict(row)) == 5_500_000_000
+
+
+def test_the_prose_is_still_read_when_the_column_is_empty(store):
+    """A row the migration could not parse still has its size in the
+    sentence. Dropping the regexes would re-lose exactly the rows size_of was
+    written for."""
+    from harness import fetching
+
+    assert fetching.size_of({"detail": "bytes=1234", "size_bytes": 0}) == 1234
+    assert fetching.size_of(
+        {"detail": "fits: weights from 0.1 to 8.9 GiB"}) == int(8.9 * 1024 ** 3)
+
+
+def test_the_column_wins_over_the_prose(store):
+    """Both present and disagreeing is the state every row is in right after
+    the migration, since the prose is left alone. The column is the authority
+    or there was no point moving it."""
+    from harness import fetching
+
+    assert fetching.size_of({"detail": "bytes=1", "size_bytes": 99}) == 99
+
+
+# --- evidence -------------------------------------------------------------
+
+def test_a_verdict_whose_run_is_gone_is_reported(store):
+    ms.decide(store, "org/c", "measured", tier="measure",
+              run_path="/nowhere/runs/gone")
+    got = ms.dangling_receipts(store, exists=lambda p: False)
+    assert [r["run_path"] for r in got] == ["/nowhere/runs/gone"]
+
+
+def test_a_relative_run_path_is_resolved_before_it_is_called_missing(store):
+    """THE FINDER'S OWN VERSION OF THE DEFECT IT FINDS. This first reported 7
+    of 55 receipts gone; six were `runs/cycle-screen` and friends, relative to
+    paths.home() and present. Reading them against the process cwd made a
+    healthy store look half-rotten."""
+    from harness import paths
+
+    ms.decide(store, "org/c", "screened", tier="screen",
+              run_path="runs/cycle-screen")
+    home = str(paths.home() / "runs/cycle-screen")
+    assert not ms.dangling_receipts(store, exists=lambda p: p == home), (
+        "a receipt that exists under the project home was called missing")
+    assert ms.dangling_receipts(store, exists=lambda p: False)
+
+
+def test_a_run_path_that_is_not_a_path_is_refused(store):
+    """One row in the real store holds `ok`, because a snapshot stand-in
+    returned that string and the column took it. A verdict claiming evidence
+    it cannot produce is worse than one claiming none."""
+    with pytest.raises(ValueError, match="is not a path"):
+        ms.decide(store, "org/c", "queued", tier="fetch", run_path="ok")
+    ms.decide(store, "org/c", "queued", tier="fetch", run_path="runs/a")
+    ms.decide(store, "org/c", "queued", tier="fetch", run_path="/abs/b")

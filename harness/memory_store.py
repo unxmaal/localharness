@@ -18,7 +18,7 @@ from pathlib import Path
 
 from harness import paths, store
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 #: Outcomes a proposal can reach. TERMINAL ones suppress re-proposal.
 VERDICTS = ("measured", "declined", "broken", "queued", "ignored", "screened")
@@ -101,6 +101,14 @@ CREATE TABLE IF NOT EXISTS verdicts (
     -- Windows -- two rigs this project's own comparable() already refuses to
     -- pool. Issue #266.
     machine_id  INTEGER REFERENCES machines(id),
+    -- THE MEASURED SIZE, WHICH CODE READS BACK. It lived in `detail` as
+    -- `bytes=N`, then as `weights from 5.5 to 8.9 GiB` when the tier was
+    -- reworded -- and fetching.size_of() parses BOTH with regexes because the
+    -- rewording silently broke the numeric read. Every candidate came back
+    -- unsized and was declined TERMINALLY for a size sitting in the row
+    -- above (#211). A text column any code parses is a schema whose format
+    -- nobody wrote down. 0 means not measured. Issue #266.
+    size_bytes  INTEGER NOT NULL DEFAULT 0,
     -- WHAT WOULD MAKE THIS WORTH ASKING AGAIN, in the machine's terms. A
     -- ceiling refusal expires when a bigger machine arrives, and until now
     -- nothing could find those rows: the reason was prose. Same shape as
@@ -201,6 +209,55 @@ def connect(path: Path | None = None):
     return conn
 
 
+def dangling_receipts(conn: sqlite3.Connection, exists=None) -> list:
+    """Verdicts citing a run that is no longer on disk.
+
+    A VERDICT WHOSE EVIDENCE IS GONE CANNOT BE RE-JUDGED. Schema 10 exists
+    because verdicts were recorded from runs that never reached a model, and
+    the fix required reading those runs back -- which is impossible once the
+    directory is deleted. That migration ran once; nothing has checked since,
+    and 7 of the 55 verdicts that name a run already point at nothing.
+
+    A RELATIVE PATH IS RESOLVED BEFORE IT IS CALLED MISSING. Six of the seven
+    rows this first reported as gone are `runs/cycle-screen` and friends,
+    which are relative to paths.home() and exist. Reading them against the
+    process's cwd made a healthy store look half-rotten -- the same class of
+    error as every defect this function exists to find, committed by the
+    finder. The column holds both spellings because nothing ever normalised
+    it; resolving here is what makes the answer true rather than tidy.
+
+    `exists` is injected so this is testable without staging a filesystem.
+    """
+    exists = exists if exists is not None else (lambda p: Path(p).exists())
+    rows = conn.execute(
+        "SELECT v.id, v.outcome, v.tier, v.run_path, p.name "
+        "FROM verdicts v JOIN proposals p ON p.id = v.proposal_id "
+        "WHERE v.run_path != ''").fetchall()
+    out = []
+    for r in rows:
+        if any(exists(c) for c in resolved_run_paths(r["run_path"])):
+            continue
+        out.append(dict(r))
+    return out
+
+
+def resolved_run_paths(run_path: str) -> list[str]:
+    """Every place `run_path` could mean, most likely first.
+
+    The column mixes absolute paths with paths relative to the project home,
+    because nothing ever normalised it and both spellings were written by
+    code that was correct from where it stood.
+    """
+    from harness import paths
+
+    raw = (run_path or "").strip()
+    if not raw:
+        return []
+    if Path(raw).is_absolute():
+        return [raw]
+    return [raw, str(paths.home() / raw)]
+
+
 def until_met(until: str, facts: dict | None = None) -> bool:
     """Whether `facts` satisfies the condition a verdict is waiting on.
 
@@ -261,6 +318,25 @@ def revisitable(conn: sqlite3.Connection, facts: dict | None = None) -> list:
 _UNTIL_FROM_DETAIL = tuple(
     (f"needs-{rt}", f"runtime:{rt}")
     for rt in ("cuda", "rocm", "vllm", "mlx", "llamacpp"))
+
+
+def _lift_sizes_out_of_prose(conn: sqlite3.Connection) -> None:
+    """Move 728 measured sizes from `detail` into a column.
+
+    READ WITH THE SAME CODE THE TIER READS WITH. Writing a second parser here
+    would give the migration its own idea of what the prose meant, and the
+    whole defect is that the prose had two meanings already. fetching.size_of
+    is the authority and knows about both spellings and which to prefer.
+    """
+    from harness import fetching
+
+    for vid, detail in conn.execute(
+            "SELECT id, detail FROM verdicts WHERE size_bytes = 0 "
+            "AND (detail LIKE '%bytes=%' OR detail LIKE '%GiB%')").fetchall():
+        size = fetching.size_of({"detail": detail or ""})
+        if size > 0:
+            conn.execute("UPDATE verdicts SET size_bytes = ? WHERE id = ?",
+                         (size, vid))
 
 
 def _attribute_old_verdicts(conn: sqlite3.Connection) -> None:
@@ -344,6 +420,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if col not in _columns(conn, "verdicts"):
                 conn.execute(f"ALTER TABLE verdicts ADD COLUMN {col} {ddl}")
         _attribute_old_verdicts(conn)
+    if have and have < 13:
+        if "size_bytes" not in _columns(conn, "verdicts"):
+            conn.execute("ALTER TABLE verdicts "
+                         "ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0")
+        _lift_sizes_out_of_prose(conn)
     conn.execute("INSERT OR REPLACE INTO meta VALUES ('schema', ?)",
                  (str(SCHEMA_VERSION),))
     conn.commit()
@@ -790,7 +871,8 @@ def remember_machine(conn: sqlite3.Connection, facts: dict | None = None) -> int
 def decide(conn: sqlite3.Connection, name: str, outcome: str, *, tier: str = "",
            detail: str = "", issue: int | None = None, run_path: str = "",
            score: float | None = None, rubric: str = "", judge: str = "",
-           at: float | None = None, until: str = "") -> int:
+           at: float | None = None, until: str = "",
+           size_bytes: int = 0) -> int:
     """Record what happened to a proposal.
 
     Verdicts accumulate rather than replace: a screen verdict and a later
@@ -811,6 +893,16 @@ def decide(conn: sqlite3.Connection, name: str, outcome: str, *, tier: str = "",
     if outcome not in VERDICTS:
         raise ValueError(f"unknown outcome {outcome!r}; "
                          f"known: {', '.join(VERDICTS)}")
+    # A RUN PATH THAT IS NOT A PATH IS NOT EVIDENCE. One row in the real store
+    # holds `ok`, because a snapshot stand-in returned that string and the
+    # column took it. A verdict claiming evidence it cannot produce is worse
+    # than one claiming none, so this refuses rather than storing it. #266.
+    if run_path and not (Path(run_path).is_absolute() or "/" in run_path
+                         or "\\" in run_path):
+        raise ValueError(
+            f"run_path {run_path!r} is not a path. It names the run whose "
+            f"receipt backs this verdict, and a verdict whose evidence cannot "
+            f"be found again cannot be re-judged.")
     row = conn.execute("SELECT id FROM proposals WHERE name = ?",
                        (name,)).fetchone()
     if not row:
@@ -838,11 +930,11 @@ def decide(conn: sqlite3.Connection, name: str, outcome: str, *, tier: str = "",
     machine_id = remember_machine(conn)
     vid = conn.execute(
         "INSERT INTO verdicts (proposal_id, outcome, tier, detail, issue, "
-        "run_path, score, rubric, judge, decided_at, machine_id, until) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        "run_path, score, rubric, judge, decided_at, machine_id, until, "
+        "size_bytes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (row["id"], outcome, tier, detail, issue, run_path, score, rubric,
-         judge, time.time() if at is None else at, machine_id,
-         until)).lastrowid
+         judge, time.time() if at is None else at, machine_id, until,
+         int(size_bytes or 0))).lastrowid
     conn.commit()
     return vid
 

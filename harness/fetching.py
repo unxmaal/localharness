@@ -188,6 +188,12 @@ def queued(conn, tiers=FETCHABLE_TIERS, kind: str = FETCHABLE_KIND,
                (SELECT v.detail FROM verdicts v WHERE v.proposal_id = p.id
                  AND (v.detail LIKE '%bytes=%' OR v.detail LIKE '%GiB%')
                  ORDER BY v.id DESC LIMIT 1) AS sized,
+               -- Same question asked of the COLUMN, which is the authority
+               -- since schema 13. Same shape as `sized` above: the newest row
+               -- that HAS one, because a later refusal carries no size.
+               (SELECT v.size_bytes FROM verdicts v WHERE v.proposal_id = p.id
+                 AND v.size_bytes > 0
+                 ORDER BY v.id DESC LIMIT 1) AS size_bytes,
                -- The judge scores REPOS; the queue holds WEIGHTS, and a weight
                -- is never judged (judging a model id in isolation is the
                -- copywriting problem the rubric exists to avoid). So a weight
@@ -283,6 +289,14 @@ def size_of(row: dict) -> int:
     largest of the individual files, so the upper bound is taken: over-
     estimating a budget refuses a fetch, and under-estimating fills a disk.
     """
+    # THE COLUMN FIRST. Since schema 13 the tier writes the number into
+    # `size_bytes` and the prose is a note again. The two parsers below stay
+    # because a row whose wording the migration could not read still has its
+    # size in the sentence, and dropping them would re-lose exactly the rows
+    # this function was written for. #266.
+    sized = int(row.get("size_bytes") or 0)
+    if sized > 0:
+        return sized
     for detail in (row.get("sized") or "", row.get("detail") or ""):
         m = _BYTES.search(detail)
         if m:
