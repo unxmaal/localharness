@@ -188,6 +188,12 @@ def queued(conn, tiers=FETCHABLE_TIERS, kind: str = FETCHABLE_KIND,
                (SELECT v.detail FROM verdicts v WHERE v.proposal_id = p.id
                  AND (v.detail LIKE '%bytes=%' OR v.detail LIKE '%GiB%')
                  ORDER BY v.id DESC LIMIT 1) AS sized,
+               -- Same question asked of the COLUMN, which is the authority
+               -- since schema 13. Same shape as `sized` above: the newest row
+               -- that HAS one, because a later refusal carries no size.
+               (SELECT v.size_bytes FROM verdicts v WHERE v.proposal_id = p.id
+                 AND v.size_bytes > 0
+                 ORDER BY v.id DESC LIMIT 1) AS size_bytes,
                -- The judge scores REPOS; the queue holds WEIGHTS, and a weight
                -- is never judged (judging a model id in isolation is the
                -- copywriting problem the rubric exists to avoid). So a weight
@@ -283,6 +289,14 @@ def size_of(row: dict) -> int:
     largest of the individual files, so the upper bound is taken: over-
     estimating a budget refuses a fetch, and under-estimating fills a disk.
     """
+    # THE COLUMN FIRST. Since schema 13 the tier writes the number into
+    # `size_bytes` and the prose is a note again. The two parsers below stay
+    # because a row whose wording the migration could not read still has its
+    # size in the sentence, and dropping them would re-lose exactly the rows
+    # this function was written for. #266.
+    sized = int(row.get("size_bytes") or 0)
+    if sized > 0:
+        return sized
     for detail in (row.get("sized") or "", row.get("detail") or ""):
         m = _BYTES.search(detail)
         if m:
@@ -344,10 +358,17 @@ def refused_by_harness(why: str) -> str:
 
 
 def machine_id() -> str:
-    """This machine, named so a shared store stays legible from another."""
-    from harness import machine as _machine
+    """This machine, named so a shared store stays legible from another.
+
+    THE ACCELERATOR NAME IS NOT A MACHINE. This returned `arm64`, which is an
+    architecture: the RTX 4070 box under Linux and the same box under Windows
+    both answer `x86_64`, and comparable() already refuses to pool those two
+    because they measure with different instruments. The store's own
+    fingerprint is hw_model/os/arch and separates them. Issue #266.
+    """
+    from harness import memory_store as _ms
     try:
-        return _machine.detect().accelerator.name or "this machine"
+        return _ms.this_machine()["fingerprint"]
     except Exception:  # noqa: BLE001
         return "this machine"
 
@@ -396,7 +417,14 @@ def run(conn, sizes: dict[str, int], *, limit: int = 1, snapshot=None,
         if needs:
             why = (f"{needs} on {machine_id()}: this machine has no runtime "
                    f"that can load these weights")
-            ms.decide(conn, row["name"], "declined", tier="fetch", detail=why)
+            # AND WHAT WOULD END THE WAIT, as a predicate. `needs-cuda` is
+            # `unrunnable`'s own spelling, so the condition derives from it
+            # rather than being a second list to keep in step. Without this
+            # the row is a dead end: 34 rows in the real store were declined
+            # here and runnable on the box with the card, and nothing could
+            # find them. Issue #266.
+            ms.decide(conn, row["name"], "declined", tier="fetch", detail=why,
+                      until=f"runtime:{needs.removeprefix('needs-')}")
             done.append({"repo": row["name"], "ok": False, "why": why})
             continue
         # A LANE HAVING A RUNNER IS NOT A RUNNER TAKING THIS MODEL, and this
