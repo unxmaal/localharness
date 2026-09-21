@@ -44,7 +44,24 @@ WHY = {
     "openbmb/MiniCPM5-1B":
         "an ordinary card with none of the above, so a filter that fires on "
         "it is firing on everything",
+    "Wan-AI/Wan2.2-TI2V-5B-Diffusers":
+        "the video lane had NO spelling at all, and `h3:{model}` -- the "
+        "obvious fix -- silently discards the repo id (#264)",
+    "nvidia/parakeet-tdt-0.6b-v2":
+        "the stt lane's own incumbent, so a filter that refuses it is "
+        "refusing the thing this machine already runs (#264)",
+    "hexgrad/Kokoro-82M":
+        "the tts lane's incumbent, and the upstream of the repo the lane "
+        "actually serves, so the card is a requant's parent (#264)",
 }
+
+#: Lanes no recorded card can ever land in, and why that is not a gap.
+#: lane_for reads ONE lane off a card, and a text model reads as `code`, so a
+#: `web` or `extract` fixture cannot exist. Demanding one would re-create
+#: RULE #269 exactly: one engine serving four lanes makes three look empty,
+#: and I reported that as a discovery hole once already before measuring it.
+#: These lanes are covered through the text-served path instead.
+SERVED_NOT_SIGHTED = ("web", "extract")
 
 
 def card(model_id: str) -> dict:

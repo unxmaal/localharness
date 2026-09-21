@@ -1,0 +1,108 @@
+{
+ "id": "Wan-AI/Wan2.2-TI2V-5B-Diffusers",
+ "pipeline_tag": "text-to-video",
+ "tags": [
+  "diffusers",
+  "safetensors",
+  "text-to-video",
+  "en",
+  "zh",
+  "arxiv:2503.20314",
+  "license:apache-2.0",
+  "diffusers:WanPipeline",
+  "region:us"
+ ],
+ "library_name": "diffusers",
+ "cardData": {
+  "license": "apache-2.0",
+  "language": [
+   "en",
+   "zh"
+  ],
+  "pipeline_tag": "text-to-video"
+ },
+ "siblings": [
+  {
+   "rfilename": ".gitattributes",
+   "size": null
+  },
+  {
+   "rfilename": "README.md",
+   "size": null
+  },
+  {
+   "rfilename": "assets/comp_effic.png",
+   "size": null
+  },
+  {
+   "rfilename": "assets/logo.png",
+   "size": null
+  },
+  {
+   "rfilename": "assets/moe_2.png",
+   "size": null
+  },
+  {
+   "rfilename": "assets/moe_arch.png",
+   "size": null
+  },
+  {
+   "rfilename": "assets/performance.png",
+   "size": null
+  },
+  {
+   "rfilename": "assets/vae.png",
+   "size": null
+  },
+  {
+   "rfilename": "examples/i2v_input.JPG",
+   "size": null
+  },
+  {
+   "rfilename": "model_index.json",
+   "size": null
+  },
+  {
+   "rfilename": "scheduler/scheduler_config.json",
+   "size": null
+  },
+  {
+   "rfilename": "text_encoder/config.json",
+   "size": null
+  },
+  {
+   "rfilename": "text_encoder/model-00001-of-00003.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "text_encoder/model-00002-of-00003.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "text_encoder/model-00003-of-00003.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "text_encoder/model.safetensors.index.json",
+   "size": null
+  },
+  {
+   "rfilename": "tokenizer/special_tokens_map.json",
+   "size": null
+  },
+  {
+   "rfilename": "tokenizer/spiece.model",
+   "size": null
+  },
+  {
+   "rfilename": "tokenizer/tokenizer.json",
+   "size": null
+  },
+  {
+   "rfilename": "tokenizer/tokenizer_config.json",
+   "size": null
+  }
+ ],
+ "lastModified": "2025-08-09T03:35:40.000Z",
+ "downloads": 166448
+}

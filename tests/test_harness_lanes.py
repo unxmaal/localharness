@@ -76,10 +76,18 @@ def test_every_named_lane_can_be_searched_for():
             f"nothing to ask a registry for lane {lane!r}")
 
 
-#: The one lane that can be measured and searched for and NOT screened, with
-#: the reason, so the exception can be challenged rather than discovered. An
+#: Lanes that can be measured and searched for and NOT screened, with the
+#: reason, so the exception can be challenged rather than discovered. An
 #: allowlist that outlives its reason is how a check rots.
-NO_RUNNER = {"video": "no per-model video runner: discover._HOW says so too"}
+#:
+#: EMPTY AS OF #264, AND THE ENTRY IT HELD DID ITS JOB. `video` was excepted
+#: on "no per-model video runner", which was true of h3 -- h3 reads one fixed
+#: checkpoint directory -- and had stopped being true of diffusers-video,
+#: which takes a repo id and was already spelled that way in discover._HOW for
+#: the cuda and rocm machines. This assertion is what caught the change and
+#: sent somebody to read the argument, which is the whole point of writing the
+#: reason down beside the exception.
+NO_RUNNER: dict[str, str] = {}
 
 
 def test_every_named_lane_can_be_screened_except_the_argued_ones():

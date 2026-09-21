@@ -48,6 +48,11 @@ from harness import lanes
 #: listed gets it.
 LANE_CANDIDATES = {
     "image": ("mflux:{model}", "diffusers:{model}"),
+    # NOT `h3:{model}`. h3 reads one fixed checkpoint directory and takes no
+    # repo id, so that spelling would have run MiniMax-H3 against every
+    # discovered candidate and recorded the result under the candidate's name.
+    # h3 is the lane's incumbent, spelled `h3` with nothing after it.
+    "video": ("diffusers-video:{model}",),
     "music": ("acestep:{model}",),
     "stt": ("stt:{model}",),
     "tts": ("tts:{model}",),

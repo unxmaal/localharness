@@ -1,0 +1,278 @@
+{
+ "id": "nvidia/parakeet-tdt-0.6b-v2",
+ "pipeline_tag": "automatic-speech-recognition",
+ "tags": [
+  "nemo",
+  "automatic-speech-recognition",
+  "speech",
+  "audio",
+  "Transducer",
+  "TDT",
+  "FastConformer",
+  "Conformer",
+  "pytorch",
+  "NeMo",
+  "hf-asr-leaderboard",
+  "en",
+  "dataset:nvidia/Granary",
+  "dataset:nvidia/nemo-asr-set-3.0",
+  "arxiv:2305.05084",
+  "arxiv:2304.06795",
+  "arxiv:2406.00899",
+  "arxiv:2410.01036",
+  "arxiv:2505.13404",
+  "license:cc-by-4.0",
+  "model-index",
+  "eval-results",
+  "deploy:azure",
+  "region:us"
+ ],
+ "library_name": "nemo",
+ "cardData": {
+  "license": "cc-by-4.0",
+  "language": [
+   "en"
+  ],
+  "pipeline_tag": "automatic-speech-recognition",
+  "library_name": "nemo",
+  "datasets": [
+   "nvidia/Granary",
+   "nvidia/nemo-asr-set-3.0"
+  ],
+  "thumbnail": null,
+  "tags": [
+   "automatic-speech-recognition",
+   "speech",
+   "audio",
+   "Transducer",
+   "TDT",
+   "FastConformer",
+   "Conformer",
+   "pytorch",
+   "NeMo",
+   "hf-asr-leaderboard"
+  ],
+  "widget": [
+   {
+    "example_title": "Librispeech sample 1",
+    "src": "https://cdn-media.huggingface.co/speech_samples/sample1.flac"
+   },
+   {
+    "example_title": "Librispeech sample 2",
+    "src": "https://cdn-media.huggingface.co/speech_samples/sample2.flac"
+   }
+  ],
+  "model-index": [
+   {
+    "name": "parakeet-tdt-0.6b-v2",
+    "results": [
+     {
+      "task": {
+       "name": "Automatic Speech Recognition",
+       "type": "automatic-speech-recognition"
+      },
+      "dataset": {
+       "name": "AMI (Meetings test)",
+       "type": "edinburghcstr/ami",
+       "config": "ihm",
+       "split": "test",
+       "args": {
+        "language": "en"
+       }
+      },
+      "metrics": [
+       {
+        "name": "Test WER",
+        "type": "wer",
+        "value": 11.16,
+        "verified": false
+       }
+      ]
+     },
+     {
+      "task": {
+       "name": "Automatic Speech Recognition",
+       "type": "automatic-speech-recognition"
+      },
+      "dataset": {
+       "name": "Earnings-22",
+       "type": "revdotcom/earnings22",
+       "split": "test",
+       "args": {
+        "language": "en"
+       }
+      },
+      "metrics": [
+       {
+        "name": "Test WER",
+        "type": "wer",
+        "value": 11.15,
+        "verified": false
+       }
+      ]
+     },
+     {
+      "task": {
+       "name": "Automatic Speech Recognition",
+       "type": "automatic-speech-recognition"
+      },
+      "dataset": {
+       "name": "GigaSpeech",
+       "type": "speechcolab/gigaspeech",
+       "split": "test",
+       "args": {
+        "language": "en"
+       }
+      },
+      "metrics": [
+       {
+        "name": "Test WER",
+        "type": "wer",
+        "value": 9.74,
+        "verified": false
+       }
+      ]
+     },
+     {
+      "task": {
+       "name": "Automatic Speech Recognition",
+       "type": "automatic-speech-recognition"
+      },
+      "dataset": {
+       "name": "LibriSpeech (clean)",
+       "type": "librispeech_asr",
+       "config": "other",
+       "split": "test",
+       "args": {
+        "language": "en"
+       }
+      },
+      "metrics": [
+       {
+        "name": "Test WER",
+        "type": "wer",
+        "value": 1.69,
+        "verified": false
+       }
+      ]
+     },
+     {
+      "task": {
+       "name": "Automatic Speech Recognition",
+       "type": "automatic-speech-recognition"
+      },
+      "dataset": {
+       "name": "LibriSpeech (other)",
+       "type": "librispeech_asr",
+       "config": "other",
+       "split": "test",
+       "args": {
+        "language": "en"
+       }
+      },
+      "metrics": [
+       {
+        "name": "Test WER",
+        "type": "wer",
+        "value": 3.19,
+        "verified": false
+       }
+      ]
+     },
+     {
+      "task": {
+       "type": "Automatic Speech Recognition",
+       "name": "automatic-speech-recognition"
+      },
+      "dataset": {
+       "name": "SPGI Speech",
+       "type": "kensho/spgispeech",
+       "config": "test",
+       "split": "test",
+       "args": {
+        "language": "en"
+       }
+      },
+      "metrics": [
+       {
+        "name": "Test WER",
+        "type": "wer",
+        "value": 2.17,
+        "verified": false
+       }
+      ]
+     },
+     {
+      "task": {
+       "type": "Automatic Speech Recognition",
+       "name": "automatic-speech-recognition"
+      },
+      "dataset": {
+       "name": "tedlium-v3",
+       "type": "LIUM/tedlium",
+       "config": "release1",
+       "split": "test",
+       "args": {
+        "language": "en"
+       }
+      },
+      "metrics": [
+       {
+        "name": "Test WER",
+        "type": "wer",
+        "value": 3.38,
+        "verified": false
+       }
+      ]
+     },
+     {
+      "task": {
+       "name": "Automatic Speech Recognition",
+       "type": "automatic-speech-recognition"
+      },
+      "dataset": {
+       "name": "Vox Populi",
+       "type": "facebook/voxpopuli",
+       "config": "en",
+       "split": "test",
+       "args": {
+        "language": "en"
+       }
+      },
+      "metrics": [
+       {
+        "name": "Test WER",
+        "type": "wer",
+        "value": 5.95,
+        "verified": false
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "metrics": [
+   "wer"
+  ]
+ },
+ "siblings": [
+  {
+   "rfilename": ".eval_results/open_asr_leaderboard.yaml",
+   "size": null
+  },
+  {
+   "rfilename": ".gitattributes",
+   "size": null
+  },
+  {
+   "rfilename": "README.md",
+   "size": null
+  },
+  {
+   "rfilename": "parakeet-tdt-0.6b-v2.nemo",
+   "size": null
+  }
+ ],
+ "lastModified": "2026-06-29T19:00:21.000Z",
+ "downloads": 190819
+}
