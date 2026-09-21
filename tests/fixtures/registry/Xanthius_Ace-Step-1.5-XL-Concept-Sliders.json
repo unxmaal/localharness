@@ -1,0 +1,115 @@
+{
+ "id": "Xanthius/Ace-Step-1.5-XL-Concept-Sliders",
+ "pipeline_tag": null,
+ "tags": [
+  "music",
+  "audio",
+  "sound",
+  "singing",
+  "concepts",
+  "slider",
+  "lora",
+  "base_model:ACE-Step/acestep-v15-xl-base",
+  "base_model:adapter:ACE-Step/acestep-v15-xl-base",
+  "region:us"
+ ],
+ "library_name": null,
+ "cardData": {
+  "base_model": [
+   "ACE-Step/acestep-v15-xl-base"
+  ],
+  "tags": [
+   "music",
+   "audio",
+   "sound",
+   "singing",
+   "concepts",
+   "slider",
+   "lora"
+  ]
+ },
+ "siblings": [
+  {
+   "rfilename": ".gitattributes",
+   "size": null
+  },
+  {
+   "rfilename": "README.md",
+   "size": null
+  },
+  {
+   "rfilename": "ace-step_1-5_xl_age_slider.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "ace-step_1-5_xl_aggressive-gentle_slider.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "ace-step_1-5_xl_bass_slider.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "ace-step_1-5_xl_choir-solo_slider.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "ace-step_1-5_xl_closeness_slider.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "ace-step_1-5_xl_danceability_slider.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "ace-step_1-5_xl_deepvoice_slider.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "ace-step_1-5_xl_digital-acoustic_slider.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "ace-step_1-5_xl_drum_slider.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "ace-step_1-5_xl_energetic-calm_slider.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "ace-step_1-5_xl_happiness_slider.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "ace-step_1-5_xl_male-female_slider.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "ace-step_1-5_xl_oldradio_slider.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "ace-step_1-5_xl_reverb_slider.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "ace-step_1-5_xl_soft-projected_slider.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "ace-step_1-5_xl_studio-lofi_slider.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "ace-step_1-5_xl_talking-singing_slider.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "ace-step_1-5_xl_tempo_slider.safetensors",
+   "size": null
+  }
+ ],
+ "lastModified": "2026-05-11T02:25:09.000Z",
+ "downloads": 0
+}

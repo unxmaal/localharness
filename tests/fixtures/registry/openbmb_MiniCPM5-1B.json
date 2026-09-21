@@ -1,0 +1,106 @@
+{
+ "id": "openbmb/MiniCPM5-1B",
+ "pipeline_tag": "text-generation",
+ "tags": [
+  "transformers",
+  "safetensors",
+  "llama",
+  "text-generation",
+  "minicpm",
+  "minicpm5",
+  "long-context",
+  "tool-calling",
+  "on-device",
+  "edge-ai",
+  "conversational",
+  "en",
+  "zh",
+  "dataset:openbmb/Ultra-FineWeb",
+  "dataset:openbmb/Ultra-FineWeb-L3",
+  "dataset:openbmb/UltraData-Math",
+  "dataset:openbmb/UltraData-SFT-2605",
+  "arxiv:2506.07900",
+  "arxiv:2602.09003",
+  "arxiv:2512.16649",
+  "arxiv:2604.13016",
+  "license:apache-2.0",
+  "text-generation-inference",
+  "endpoints_compatible",
+  "deploy:sagemaker",
+  "region:us"
+ ],
+ "library_name": "transformers",
+ "cardData": {
+  "license": "apache-2.0",
+  "language": [
+   "en",
+   "zh"
+  ],
+  "library_name": "transformers",
+  "pipeline_tag": "text-generation",
+  "tags": [
+   "minicpm",
+   "minicpm5",
+   "llama",
+   "text-generation",
+   "long-context",
+   "tool-calling",
+   "on-device",
+   "edge-ai"
+  ],
+  "datasets": [
+   "openbmb/Ultra-FineWeb",
+   "openbmb/Ultra-FineWeb-L3",
+   "openbmb/UltraData-Math",
+   "openbmb/UltraData-SFT-2605"
+  ]
+ },
+ "siblings": [
+  {
+   "rfilename": ".gitattributes",
+   "size": null
+  },
+  {
+   "rfilename": "README-cn.md",
+   "size": null
+  },
+  {
+   "rfilename": "README.md",
+   "size": null
+  },
+  {
+   "rfilename": "chat_template.jinja",
+   "size": null
+  },
+  {
+   "rfilename": "config.json",
+   "size": null
+  },
+  {
+   "rfilename": "generation_config.json",
+   "size": null
+  },
+  {
+   "rfilename": "model-00000-of-00001.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "model.safetensors.index.json",
+   "size": null
+  },
+  {
+   "rfilename": "special_tokens_map.json",
+   "size": null
+  },
+  {
+   "rfilename": "tokenizer.json",
+   "size": null
+  },
+  {
+   "rfilename": "tokenizer_config.json",
+   "size": null
+  }
+ ],
+ "lastModified": "2026-08-17T09:59:02.000Z",
+ "downloads": 599263
+}
