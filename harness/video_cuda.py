@@ -98,22 +98,26 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
     import torch
-    if torch.cuda.is_available():
-        device = "cuda"
-    elif args.allow_cpu:
+    from harness.torch_device import HALF, accelerator
+
+    device = accelerator(torch)
+    if not device:
+        if not args.allow_cpu:
+            print("video-diffusers: no cuda device and no mps device. A video "
+                  "on the CPU is hours rather than minutes and would read as "
+                  "a slow model rather than a machine without an accelerator; "
+                  "pass --allow-cpu to do it anyway.", file=sys.stderr)
+            return 2
         device = "cpu"
-    else:
-        print("video-cuda: no CUDA device. A video on the CPU is hours rather "
-              "than minutes and would read as a slow model rather than a "
-              "machine without a card; pass --allow-cpu to do it anyway.",
-              file=sys.stderr)
-        return 2
 
     from diffusers import DiffusionPipeline
 
     pipe = DiffusionPipeline.from_pretrained(
         args.model,
-        torch_dtype=torch.bfloat16 if device == "cuda" else torch.float32)
+        torch_dtype=torch.bfloat16 if device in HALF else torch.float32)
+    # cpu offload is a CUDA facility. On Metal the whole pipeline goes to the
+    # device or nowhere, which is the reason video is parked here: see
+    # lanes.PARKED.
     if device == "cuda" and not args.no_offload:
         pipe.enable_model_cpu_offload()
     else:

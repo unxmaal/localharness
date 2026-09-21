@@ -224,6 +224,19 @@ H3_DEFAULT_MODEL_DIR = os.environ.get("H3_MODEL_DIR") or str(env.beside() / "Min
 
 
 def _h3(spec: str, model: str, options: dict) -> Engine:
+    # A MODEL IT WOULD IGNORE IS REFUSED RATHER THAN DROPPED. h3 reads its
+    # weights from $H3_MODEL_DIR and has no use for a repo id, so
+    # `h3:someorg/whatever` used to resolve to plain `h3/minimax-h3` and run
+    # MiniMax-H3 -- producing a receipt for an experiment that never happened,
+    # under a spec naming a candidate that never executed. The image lane's
+    # equivalent failure at least failed loudly. This one would have been a
+    # plausible number. Issue #264.
+    if model:
+        raise ValueError(
+            f"{spec_error(spec)}: h3 runs the checkpoint at $H3_MODEL_DIR and "
+            f"cannot load {model!r}. It takes no model, so a spec that names "
+            f"one would silently measure MiniMax-H3 instead. For a discovered "
+            f"video candidate use diffusers-video:{model}")
     _check_options(options, _H3_OPTIONS, spec)
     defaults = dict(options)
 

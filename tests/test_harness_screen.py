@@ -27,9 +27,16 @@ def test_a_candidate_whose_weights_are_absent_is_waiting_not_failed():
     assert "lh fetch" in got["why_not"]
 
 
-def test_a_lane_with_no_runner_is_named_rather_than_dropped():
+def test_a_lane_with_no_runner_is_named_rather_than_dropped(monkeypatch):
     """A queue that silently drops what it cannot run looks like a queue that
-    ran out."""
+    ran out.
+
+    `video` was the live example until #264 gave it diffusers-video, so the
+    lane is pinned to nothing here rather than the test being deleted: the
+    behaviour is still required and every lane happening to have a runner
+    today is not a reason to stop checking it.
+    """
+    monkeypatch.delitem(screen.LANE_CANDIDATES, "video")
     got = screen.plan(rows(("org/v", "video")), missing=lambda n: [])[0]
     assert got["state"] == screen.NO_RUNNER
     assert "video" in got["why_not"]

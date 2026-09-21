@@ -1,0 +1,110 @@
+{
+ "id": "hexgrad/Kokoro-82M",
+ "pipeline_tag": "text-to-speech",
+ "tags": [
+  "text-to-speech",
+  "en",
+  "arxiv:2306.07691",
+  "arxiv:2203.02395",
+  "base_model:yl4579/StyleTTS2-LJSpeech",
+  "base_model:finetune:yl4579/StyleTTS2-LJSpeech",
+  "doi:10.57967/hf/4329",
+  "license:apache-2.0",
+  "region:us"
+ ],
+ "library_name": null,
+ "cardData": {
+  "license": "apache-2.0",
+  "language": [
+   "en"
+  ],
+  "base_model": [
+   "yl4579/StyleTTS2-LJSpeech"
+  ],
+  "pipeline_tag": "text-to-speech"
+ },
+ "siblings": [
+  {
+   "rfilename": ".gitattributes",
+   "size": null
+  },
+  {
+   "rfilename": "DONATE.md",
+   "size": null
+  },
+  {
+   "rfilename": "EVAL.md",
+   "size": null
+  },
+  {
+   "rfilename": "README.md",
+   "size": null
+  },
+  {
+   "rfilename": "SAMPLES.md",
+   "size": null
+  },
+  {
+   "rfilename": "VOICES.md",
+   "size": null
+  },
+  {
+   "rfilename": "config.json",
+   "size": null
+  },
+  {
+   "rfilename": "eval/ArtificialAnalysis-2025-02-26.jpeg",
+   "size": null
+  },
+  {
+   "rfilename": "eval/TTS_Arena-2025-02-26.jpeg",
+   "size": null
+  },
+  {
+   "rfilename": "eval/TTS_Spaces_Arena-2025-02-26.jpeg",
+   "size": null
+  },
+  {
+   "rfilename": "kokoro-v1_0.pth",
+   "size": null
+  },
+  {
+   "rfilename": "samples/HEARME.wav",
+   "size": null
+  },
+  {
+   "rfilename": "samples/af_heart_0.wav",
+   "size": null
+  },
+  {
+   "rfilename": "samples/af_heart_1.wav",
+   "size": null
+  },
+  {
+   "rfilename": "samples/af_heart_2.wav",
+   "size": null
+  },
+  {
+   "rfilename": "samples/af_heart_3.wav",
+   "size": null
+  },
+  {
+   "rfilename": "samples/af_heart_4.wav",
+   "size": null
+  },
+  {
+   "rfilename": "samples/af_heart_5.wav",
+   "size": null
+  },
+  {
+   "rfilename": "voices/af_alloy.pt",
+   "size": null
+  },
+  {
+   "rfilename": "voices/af_aoede.pt",
+   "size": null
+  }
+ ],
+ "lastModified": "2025-04-10T18:12:48.000Z",
+ "downloads": 11652756
+}

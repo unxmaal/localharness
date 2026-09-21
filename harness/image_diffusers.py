@@ -28,6 +28,8 @@ import json
 import sys
 from pathlib import Path
 
+from harness.torch_device import HALF, accelerator
+
 #: Steps a turbo model wants. SDXL-Turbo is trained for 1 to 4 and produces
 #: mush at 30, which is the opposite of the usual more-is-better assumption.
 DEFAULT_STEPS = 4
@@ -53,23 +55,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-#: The accelerators this can use, in the order they are preferred. `cpu` is
-#: absent on purpose: it is reachable only through --allow-cpu.
-def accelerator(torch) -> str:
-    """The device to generate on, or "" when there is no accelerator.
-
-    mps IS AN ACCELERATOR HERE. Asking only about cuda made "no card" and "no
-    Apple GPU" the same answer, which is how a Mac ended up with one image
-    engine. Split out so a test can pin it: torch.cuda.is_available() reads the
-    machine, and a verdict test that reads the machine tests the machine.
-    """
-    if torch.cuda.is_available():
-        return "cuda"
-    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-        return "mps"
-    return ""
-
-
 def _pipeline(model: str, device: str):
     import torch
     from diffusers import AutoPipelineForText2Image
@@ -79,7 +64,7 @@ def _pipeline(model: str, device: str):
     # doubles the working set for no gain. `variant="fp16"` is a request for a
     # separate set of files that many repos do not publish, so it stays cuda-
     # only rather than becoming a download that 404s.
-    half = device in ("cuda", "mps")
+    half = device in HALF
     pipe = AutoPipelineForText2Image.from_pretrained(
         model,
         torch_dtype=torch.float16 if half else torch.float32,
