@@ -13,6 +13,7 @@ thing that has never happened: THE LANE SERVES SOMETHING DIFFERENT AFTERWARDS.
 Where the ladder is still broken these tests say so as xfail(strict=True), so
 the day a fix lands the mark fails and gets deleted rather than rotting.
 """
+import re
 import sys
 from pathlib import Path
 
@@ -261,31 +262,22 @@ def test_a_periodic_job_is_scheduled_not_kept_alive():
     not a property of the system: what it protects against is precisely the
     passage of unattended time.
 
-    KeepAlive on a job that RUNS AND EXITS restarts a finished sweep at once
-    and the machine discovers in a tight loop, so the two keys must not be
-    confused. Read from the generator rather than from an installed plist,
-    which would make this a test of the developer's machine.
+    READ, NOT RUN. The first version executed launchd.sh, which is WinError
+    193 on Windows -- and the plist SHAPE is already asserted by
+    test_launchd.py, gated to macOS because launchd is macOS. What belongs
+    here is the part that is true everywhere: the sweep is a service the
+    generator knows about, and it is one of the ones that runs and exits.
     """
-    import subprocess
-    import tempfile
-
-    repo = Path(__file__).resolve().parents[1]
-    with tempfile.TemporaryDirectory() as tmp:
-        subprocess.run([str(repo / "scripts" / "launchd.sh"), "generate", tmp],
-                       check=True, capture_output=True, text=True)
-        plists = {p.stem.rsplit(".", 1)[-1]: p.read_text(encoding="utf-8")
-                  for p in Path(tmp).glob("*.plist")}
-
-    assert "discover" in plists, (
+    gen = (Path(__file__).resolve().parents[1]
+           / "scripts" / "launchd.sh").read_text(encoding="utf-8")
+    services = re.search(r'^SERVICES="([^"]+)"', gen, re.M).group(1).split()
+    periodic = re.search(r"^declare -a PERIODIC=\(([^)]*)\)", gen, re.M)
+    assert "discover" in services, (
         f"no agent runs discovery, so the loop turns only when somebody types "
-        f"the command. Generated: {sorted(plists)}")
-    sweep = plists["discover"]
-    assert "StartInterval" in sweep and "KeepAlive" not in sweep, sweep
-
-    # THE NEGATIVE CONTROL: a server must still be kept alive, or this fix
-    # trades a sweep that never runs for model servers that never restart.
-    assert "KeepAlive" in plists["mlx"]
-    assert "StartInterval" not in plists["mlx"]
+        f"the command. Generated: {services}")
+    assert periodic and "discover" in periodic.group(1), (
+        f"KeepAlive on a job that RUNS AND EXITS restarts a finished sweep at "
+        f"once and the machine discovers in a tight loop: {gen[:0] or periodic}")
 
 
 def test_the_scheduled_sweep_bounds_what_it_spends():
