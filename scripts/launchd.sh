@@ -183,9 +183,10 @@ MSG
 #: hits an already-loaded label and fails with "Bootstrap failed: 5: Input/
 #: output error", which names neither the service nor the cause.
 _await_unload() {
-  local label="$1" i
-  for i in $(seq 1 50); do
+  local label="$1" left=50
+  while [ "$left" -gt 0 ]; do
     launchctl print "gui/$UID/$label" >/dev/null 2>&1 || return 0
+    left=$((left - 1))
     sleep 0.2
   done
   return 1
