@@ -1,0 +1,125 @@
+{
+ "id": "prism-ml/bonsai-image-binary-4B-gemlite-1bit",
+ "pipeline_tag": "text-to-image",
+ "tags": [
+  "diffusers",
+  "safetensors",
+  "1-bit",
+  "gemlite",
+  "hqq",
+  "cuda",
+  "text-to-image",
+  "diffusion",
+  "flux",
+  "prismml",
+  "bonsai",
+  "base_model:prism-ml/bonsai-image-binary-4B-unpacked",
+  "base_model:finetune:prism-ml/bonsai-image-binary-4B-unpacked",
+  "license:apache-2.0",
+  "diffusers:Flux2KleinPipeline",
+  "region:us"
+ ],
+ "library_name": "diffusers",
+ "cardData": {
+  "license": "apache-2.0",
+  "pipeline_tag": "text-to-image",
+  "tags": [
+   "1-bit",
+   "gemlite",
+   "hqq",
+   "cuda",
+   "text-to-image",
+   "diffusion",
+   "flux",
+   "prismml",
+   "bonsai"
+  ],
+  "base_model": [
+   "prism-ml/bonsai-image-binary-4B-unpacked"
+  ]
+ },
+ "siblings": [
+  {
+   "rfilename": ".gitattributes",
+   "size": null
+  },
+  {
+   "rfilename": "LICENSE",
+   "size": null
+  },
+  {
+   "rfilename": "NOTICE.md",
+   "size": null
+  },
+  {
+   "rfilename": "README.md",
+   "size": null
+  },
+  {
+   "rfilename": "assets/bonsai-logo.svg",
+   "size": null
+  },
+  {
+   "rfilename": "manifest.json",
+   "size": null
+  },
+  {
+   "rfilename": "model_index.json",
+   "size": null
+  },
+  {
+   "rfilename": "text_encoder-hqq-4bit/config.json",
+   "size": null
+  },
+  {
+   "rfilename": "text_encoder-hqq-4bit/qmodel.pt",
+   "size": null
+  },
+  {
+   "rfilename": "text_encoder-hqq-4bit/tokenizer/added_tokens.json",
+   "size": null
+  },
+  {
+   "rfilename": "text_encoder-hqq-4bit/tokenizer/chat_template.jinja",
+   "size": null
+  },
+  {
+   "rfilename": "text_encoder-hqq-4bit/tokenizer/merges.txt",
+   "size": null
+  },
+  {
+   "rfilename": "text_encoder-hqq-4bit/tokenizer/special_tokens_map.json",
+   "size": null
+  },
+  {
+   "rfilename": "text_encoder-hqq-4bit/tokenizer/tokenizer.json",
+   "size": null
+  },
+  {
+   "rfilename": "text_encoder-hqq-4bit/tokenizer/tokenizer_config.json",
+   "size": null
+  },
+  {
+   "rfilename": "text_encoder-hqq-4bit/tokenizer/vocab.json",
+   "size": null
+  },
+  {
+   "rfilename": "transformer-gemlite-int1/config.json",
+   "size": null
+  },
+  {
+   "rfilename": "transformer-gemlite-int1/gemlite_autotune.json",
+   "size": null
+  },
+  {
+   "rfilename": "transformer-gemlite-int1/quantization_config.json",
+   "size": null
+  },
+  {
+   "rfilename": "transformer-gemlite-int1/state_dict.pt",
+   "size": null
+  }
+ ],
+ "lastModified": "2026-06-01T22:12:51.000Z",
+ "downloads": 87
+}

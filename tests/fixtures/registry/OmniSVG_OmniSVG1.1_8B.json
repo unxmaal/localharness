@@ -1,0 +1,64 @@
+{
+ "id": "OmniSVG/OmniSVG1.1_8B",
+ "pipeline_tag": "text-generation",
+ "tags": [
+  "pytorch",
+  "qwen2_5_vl",
+  "SVG",
+  "Image-to-SVG",
+  "Text-to-SVG",
+  "text-generation",
+  "en",
+  "zh",
+  "dataset:OmniSVG/MMSVG-Icon",
+  "dataset:OmniSVG/MMSVG-Illustration",
+  "dataset:OmniSVG/MMSVGBench",
+  "arxiv:2504.06263",
+  "base_model:Qwen/Qwen2.5-VL-7B-Instruct",
+  "base_model:finetune:Qwen/Qwen2.5-VL-7B-Instruct",
+  "license:apache-2.0",
+  "region:us"
+ ],
+ "library_name": null,
+ "cardData": {
+  "license": "apache-2.0",
+  "datasets": [
+   "OmniSVG/MMSVG-Icon",
+   "OmniSVG/MMSVG-Illustration",
+   "OmniSVG/MMSVGBench"
+  ],
+  "language": [
+   "en",
+   "zh"
+  ],
+  "base_model": [
+   "Qwen/Qwen2.5-VL-7B-Instruct"
+  ],
+  "pipeline_tag": "text-generation",
+  "tags": [
+   "SVG",
+   "Image-to-SVG",
+   "Text-to-SVG"
+  ]
+ },
+ "siblings": [
+  {
+   "rfilename": ".gitattributes",
+   "size": null
+  },
+  {
+   "rfilename": "README.md",
+   "size": null
+  },
+  {
+   "rfilename": "config.json",
+   "size": null
+  },
+  {
+   "rfilename": "pytorch_model.bin",
+   "size": null
+  }
+ ],
+ "lastModified": "2026-03-30T10:01:42.000Z",
+ "downloads": 155
+}

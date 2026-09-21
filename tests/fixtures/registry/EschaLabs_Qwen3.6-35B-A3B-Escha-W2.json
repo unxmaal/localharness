@@ -1,0 +1,284 @@
+{
+ "id": "EschaLabs/Qwen3.6-35B-A3B-Escha-W2",
+ "pipeline_tag": "text-generation",
+ "tags": [
+  "mlx",
+  "safetensors",
+  "qwen3_5_moe",
+  "mixture-of-experts",
+  "moe",
+  "qwen3",
+  "2-bit",
+  "quantization",
+  "eschamoe",
+  "sglang",
+  "zml",
+  "apple-silicon",
+  "macos",
+  "metal",
+  "code",
+  "reasoning",
+  "conversational",
+  "text-generation",
+  "en",
+  "base_model:Qwen/Qwen3.6-35B-A3B",
+  "base_model:quantized:Qwen/Qwen3.6-35B-A3B",
+  "license:apache-2.0",
+  "model-index",
+  "region:us"
+ ],
+ "library_name": "mlx",
+ "cardData": {
+  "license": "apache-2.0",
+  "base_model": [
+   "Qwen/Qwen3.6-35B-A3B"
+  ],
+  "base_model_relation": "quantized",
+  "pipeline_tag": "text-generation",
+  "language": [
+   "en"
+  ],
+  "tags": [
+   "mixture-of-experts",
+   "moe",
+   "qwen3",
+   "2-bit",
+   "quantization",
+   "eschamoe",
+   "sglang",
+   "zml",
+   "mlx",
+   "apple-silicon",
+   "macos",
+   "metal",
+   "code",
+   "reasoning",
+   "conversational"
+  ],
+  "metrics": [
+   "accuracy",
+   "code_eval"
+  ],
+  "model-index": [
+   {
+    "name": "Qwen3.6-35B-A3B-Escha-W2",
+    "results": [
+     {
+      "task": {
+       "type": "text-generation",
+       "name": "Code Generation"
+      },
+      "dataset": {
+       "type": "evalplus/humanevalplus",
+       "name": "HumanEval+"
+      },
+      "metrics": [
+       {
+        "type": "pass@1",
+        "value": 92.07,
+        "name": "pass@1 (greedy",
+        "thinking-off)": null,
+        "verified": false
+       }
+      ]
+     },
+     {
+      "task": {
+       "type": "text-generation",
+       "name": "Code Reasoning"
+      },
+      "dataset": {
+       "type": "cruxeval",
+       "name": "CRUXEval-O"
+      },
+      "metrics": [
+       {
+        "type": "accuracy",
+        "value": 61.75,
+        "name": "acc (n=800)",
+        "verified": false
+       }
+      ]
+     },
+     {
+      "task": {
+       "type": "text-generation",
+       "name": "Code Generation"
+      },
+      "dataset": {
+       "type": "livecodebench",
+       "name": "LiveCodeBench v6 (release_v6",
+       "N=182 subset)": null
+      },
+      "metrics": [
+       {
+        "type": "pass@1",
+        "value": 62.64,
+        "name": "pass@1 (subset \u2014 retention vs FP8)",
+        "verified": false
+       }
+      ]
+     },
+     {
+      "task": {
+       "type": "text-generation",
+       "name": "Commonsense Reasoning"
+      },
+      "dataset": {
+       "type": "commonsense",
+       "name": "Commonsense-6 (avg)"
+      },
+      "metrics": [
+       {
+        "type": "accuracy",
+        "value": 76.06,
+        "name": "avg acc (thinking-off)",
+        "verified": false
+       }
+      ]
+     },
+     {
+      "task": {
+       "type": "text-generation",
+       "name": "Knowledge & Reasoning"
+      },
+      "dataset": {
+       "type": "TIGER-Lab/MMLU-Pro",
+       "name": "MMLU-Pro"
+      },
+      "metrics": [
+       {
+        "type": "accuracy",
+        "value": 80.9,
+        "name": "acc (5-shot CoT",
+        "thinking-on)": null,
+        "verified": false
+       }
+      ]
+     },
+     {
+      "task": {
+       "type": "text-generation",
+       "name": "Math Reasoning"
+      },
+      "dataset": {
+       "type": "math-500",
+       "name": "MATH-500"
+      },
+      "metrics": [
+       {
+        "type": "accuracy",
+        "value": 93.8,
+        "name": "acc (thinking-on",
+        "budget-capped)": null,
+        "verified": false
+       }
+      ]
+     },
+     {
+      "task": {
+       "type": "text-generation",
+       "name": "Graduate-level Science"
+      },
+      "dataset": {
+       "type": "gpqa",
+       "name": "GPQA-Diamond"
+      },
+      "metrics": [
+       {
+        "type": "accuracy",
+        "value": 77.8,
+        "name": "acc (thinking-on)",
+        "verified": false
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "siblings": [
+  {
+   "rfilename": ".gitattributes",
+   "size": null
+  },
+  {
+   "rfilename": "LICENSE",
+   "size": null
+  },
+  {
+   "rfilename": "README.md",
+   "size": null
+  },
+  {
+   "rfilename": "THIRD_PARTY_LICENSES/Qwen-LICENSE.txt",
+   "size": null
+  },
+  {
+   "rfilename": "chat_template.jinja",
+   "size": null
+  },
+  {
+   "rfilename": "config.json",
+   "size": null
+  },
+  {
+   "rfilename": "generation_config.json",
+   "size": null
+  },
+  {
+   "rfilename": "kld_corpus_v1.json",
+   "size": null
+  },
+  {
+   "rfilename": "kld_corpus_v1.pt",
+   "size": null
+  },
+  {
+   "rfilename": "merges.txt",
+   "size": null
+  },
+  {
+   "rfilename": "model-00001-of-00003.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "model-00002-of-00003.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "model-00003-of-00003.safetensors",
+   "size": null
+  },
+  {
+   "rfilename": "model.safetensors.index.json",
+   "size": null
+  },
+  {
+   "rfilename": "opencode.json",
+   "size": null
+  },
+  {
+   "rfilename": "preprocessor_config.json",
+   "size": null
+  },
+  {
+   "rfilename": "quantize_config.json",
+   "size": null
+  },
+  {
+   "rfilename": "tokenizer.json",
+   "size": null
+  },
+  {
+   "rfilename": "tokenizer_config.json",
+   "size": null
+  },
+  {
+   "rfilename": "video_preprocessor_config.json",
+   "size": null
+  }
+ ],
+ "lastModified": "2026-08-09T13:51:50.000Z",
+ "downloads": 2669
+}
