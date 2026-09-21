@@ -34,12 +34,24 @@ from harness import lanes
 #: every lane in lanes.TEXT_SERVED and only `code` was listed, so `web` and
 #: `svg` -- the 3rd and 4th priorities -- reported `no-runner` for a candidate
 #: the harness could in fact have screened. Issue #207.
-LANE_CANDIDATE = {
-    "image": "mflux:{model}",
-    "music": "acestep:{model}",
-    "stt": "stt:{model}",
-    "tts": "tts:{model}",
-    **{lane: "{model}" for lane in lanes.TEXT_SERVED},
+#:
+#: A LANE HOLDS MORE THAN ONE ENGINE, in preference order. It held exactly one
+#: until 2026-09-21, and that single entry was doing the job of an adoption:
+#: `mflux` was the image lane because it had been typed here, and since
+#: mflux.ENTRY_POINTS is an enumerated table of families that no discovered
+#: repo id is ever in, every challenger the loop found was refused before it
+#: could be measured. The incumbent had never won anything. RULE #271's third
+#: occurrence and the only one whose fix is not another per-lane patch.
+#:
+#: The order is INCUMBENT FIRST, which is a claim that measurement can settle
+#: and currently has not: when both engines can run a model, the first one
+#: listed gets it.
+LANE_CANDIDATES = {
+    "image": ("mflux:{model}", "diffusers:{model}"),
+    "music": ("acestep:{model}",),
+    "stt": ("stt:{model}",),
+    "tts": ("tts:{model}",),
+    **{lane: ("{model}",) for lane in lanes.TEXT_SERVED},
 }
 
 #: Why a row cannot be screened. Reported per row rather than filtered away: a
@@ -84,7 +96,17 @@ def is_attachment(description: str) -> str:
 
 
 def candidate_for(lane: str, model: str, description: str = "") -> str:
-    """The candidate spec for this lane, or "" when nothing here can run it.
+    """The best spelling of `model` for this lane, or "" when it has none.
+
+    THE FIRST ENGINE THAT CAN ACTUALLY RUN IT WINS, not simply the first one
+    listed. A lane with two engines whose first entry refuses most of what
+    discovery finds would otherwise be a lane with one engine and a longer
+    table.
+
+    When NO engine takes it, the first spelling comes back anyway rather than
+    "": the caller needs a spec to report the gap against, and `no_runner`
+    holds the reason. "" is reserved for the two cases where there is nothing
+    to spell at all -- no lane, or an attachment.
 
     ALREADY-SPELLED SPECS PASS THROUGH. A challenger arrives from the store as
     a bare repo id and is wrapped once; the INCUMBENT arrives from
@@ -97,13 +119,18 @@ def candidate_for(lane: str, model: str, description: str = "") -> str:
     """
     if is_attachment(description):
         return ""
-    spec = LANE_CANDIDATE.get(lanes.canonical(lane), "")
-    if not spec:
+    specs = LANE_CANDIDATES.get(lanes.canonical(lane), ())
+    if not specs:
         return ""
-    prefix = spec.split("{model}", 1)[0]
-    if prefix and model.startswith(prefix):
-        return model
-    return spec.format(model=model)
+    for spec in specs:
+        prefix = spec.split("{model}", 1)[0]
+        if prefix and model.startswith(prefix):
+            return model
+    built = [spec.format(model=model) for spec in specs]
+    for spec in built:
+        if not no_runner(spec):
+            return spec
+    return built[0]
 
 
 def no_runner(spec: str) -> str:

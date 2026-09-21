@@ -159,8 +159,8 @@ def test_the_diffusers_generator_is_a_path_not_a_name(monkeypatch, tmp_path):
     """Same reason H3_BIN is overridable: this one is a script in the checkout
     rather than something installed onto PATH, and a test or another machine
     has to be able to point it elsewhere."""
-    fake = tmp_path / "image-cuda.sh"
-    monkeypatch.setenv("IMAGE_CUDA_BIN", str(fake))
+    fake = tmp_path / "image-diffusers.sh"
+    monkeypatch.setenv("IMAGE_DIFFUSERS_BIN", str(fake))
     _, a = argv("diffusers:stabilityai/sdxl-turbo")
     assert a[0] == str(fake)
 

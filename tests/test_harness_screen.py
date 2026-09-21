@@ -152,15 +152,17 @@ def test_a_real_model_is_still_a_candidate():
     """The negative half. A filter that refuses everything screens nothing."""
     assert screen.is_attachment("task text-to-image; served by mlx; "
                                 "tagged mlx, mflux, text-to-image") == ""
+    # The ENGINE is not the assertion. The image lane holds two, and which one
+    # spells a given model is settled by which one can run it.
     assert screen.candidate_for("image", "org/base",
-                                "tagged mlx, mflux") == "mflux:org/base"
+                                "tagged mlx, mflux").endswith(":org/base")
 
 
 def test_a_candidate_with_no_description_is_not_assumed_to_be_an_adapter():
     """Most rows carry no description. Treating silence as an adapter would
     empty the queue."""
     assert screen.is_attachment("") == ""
-    assert screen.candidate_for("image", "org/x") == "mflux:org/x"
+    assert screen.candidate_for("image", "org/x").endswith(":org/x")
 
 
 def test_an_enumerated_exception_survives():

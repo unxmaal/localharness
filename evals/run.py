@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 
 from harness import audio, completion, env, paths
-from harness.engines import Engine, parse_options, resolve
+from harness.engines import Engine, names as engine_names, parse_options, resolve
 
 from dataclasses import replace
 
@@ -46,7 +46,14 @@ TEXT_MODALITIES = {"svg", "web", "code", "extract"}
 ALL_MODALITIES = sorted(MODALITIES)
 
 
-PROCESS_ENGINES = ("mflux", "h3", "acestep")
+#: READ FROM THE BUILDER TABLE, not restated. This was a hand-written tuple of
+#: three and `diffusers` was not in it, so kind_of("diffusers:org/m") answered
+#: `gateway` and an image spec was routed to the TEXT gateway. The engine has
+#: been registered in harness/engines.py since the CUDA machine was brought up
+#: and had never once reached a ProcessRunner, on any machine. Fourth copy of
+#: "which engines exist" in this repo; RULE #237 says the fix is a read, not
+#: more care.
+PROCESS_ENGINES = tuple(sorted(engine_names()))
 #: The svg lane's second METHOD: draw a raster, then vectorize it. Written as
 #: `trace:<engine spec>` so the engine underneath stays the ordinary spec.
 TRACE_PREFIX = "trace"

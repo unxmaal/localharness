@@ -291,25 +291,31 @@ def test_the_scheduled_sweep_bounds_what_it_spends():
 
 # --- a lane's runner must take THIS model, asked before the disk is spent ---
 
-def test_a_model_no_runner_can_load_never_reaches_a_download(store, tmp_path):
+def test_a_model_no_runner_can_load_never_reaches_a_download(
+        store, tmp_path, monkeypatch):
     """FOUND IN THE FIRST SCHEDULED SWEEP, which is the point of scheduling it.
 
-    Both image candidates were downloaded, handed to evals.run, refused with
+    Two image candidates were downloaded, handed to evals.run, refused with
     "no cases of a modality it can run", and re-queued -- correctly, since
     that refusal is about the harness and not about the candidate. So they
-    came back on the next sweep, and would have forever: the image lane could
-    never screen anything the loop found, and every sweep spent the disk again
-    to rediscover it.
+    came back on the next sweep, and would have forever.
 
-    `screen.candidate_for` only proved the LANE has a spec template.
-    `mflux:SupraLabs/Supra-A2A-Nano-Exp` is a well-formed spec that no mflux
-    entry point serves.
+    THE LANE IS PINNED TO ONE ENGINE HERE, which is the state it was actually
+    in when this happened. Since then the image lane grew a second engine that
+    takes any repo id, so today nothing in it can be refused before a download
+    -- and no other lane has a strict engine either, acestep passing its model
+    through by design. Left reading the live table, this test would assert
+    nothing and say so by passing. The guard is still the right question the
+    moment any lane's only engine enumerates what it accepts, which is the
+    normal shape: mflux has to, because every mflux binary shares one argument
+    parser.
     """
-    from harness import fetching, memory_store as ms
+    from harness import fetching, screen
 
-    # NOT A REAL REPO. The two candidates this was found on are already in
-    # the developer's HF cache, so `queued` skipped them as present and the
-    # test passed for no reason. RULE #249: pin the ambient fact.
+    monkeypatch.setitem(screen.LANE_CANDIDATES, "image", ("mflux:{model}",))
+    # NOT A REAL REPO. The candidate this was found on is now in the
+    # developer's HF cache, so `queued` skipped it as present and the test
+    # passed for no reason. RULE #249: pin the ambient fact.
     name = "org/supra-a2a-nano-exp-notreal"
     fakes.seeded_store(store, [(name, "image", 1.2, 2)])
     downloads = fakes.Downloads(tmp_path / "hub")
@@ -348,36 +354,80 @@ def test_a_model_a_runner_can_load_is_still_fetched(store, tmp_path):
     assert downloads.asked == [name], downloads.asked
 
 
-def test_a_runner_gap_is_reported_to_a_person(store):
+def test_a_runner_gap_is_reported_to_a_person(monkeypatch):
     """An engine entry cannot be invented -- a guessed mflux binary rejects
     the model several seconds into loading, which is why that table is
     enumerated. So the gap is surfaced rather than worked around, the same as
-    a laneless candidate."""
-    from harness import rank
+    a laneless candidate. Pinned to one engine for the reason above."""
+    from harness import rank, screen
 
+    monkeypatch.setitem(screen.LANE_CANDIDATES, "image", ("mflux:{model}",))
     rows = [{"name": "SupraLabs/Supra-A2A-Nano-Exp", "lane": "image",
              "description": ""},
-            {"name": "filipstrand/Z-Image-Turbo-mflux-4bit", "lane": "image",
-             "description": ""}]
+            {"name": "flux2-klein-4b", "lane": "image", "description": ""}]
     got = rank.runnerless(rows)
-    assert [r["name"] for r in got] == ["SupraLabs/Supra-A2A-Nano-Exp"]
+    assert [r["name"] for r in got] == ["SupraLabs/Supra-A2A-Nano-Exp"], got
     assert "unknown mflux model" in got[0]["why_not"]
 
 
-def test_the_screen_never_hands_a_runnerless_model_to_a_run():
-    """THE LIVE REPRODUCTION, and the one that matters: these weights are
-    already on disk, so no fetch-tier guard can reach them.
-
-    `SupraLabs/Supra-A2A-Nano-Exp` and `Danrisi/UltraReal_FineTune_Anima_base1_v3`
-    were both planned `ready`, run, and refused with "no cases of a modality it
-    can run" -- a refusal about the harness, correctly non-terminal, so both
-    were re-queued and came back on the next sweep forever.
-    """
+def test_the_engine_that_forced_all_this_still_refuses_what_it_cannot_run():
+    """The load-bearing fact under the second engine. If mflux ever started
+    accepting arbitrary repo ids, the fallback would be unnecessary and the
+    two tests above would be testing a fiction."""
     from harness import screen
+
+    assert screen.no_runner("mflux:SupraLabs/Supra-A2A-Nano-Exp")
+    assert not screen.no_runner("mflux:flux2-klein-4b")
+
+
+def test_the_screen_never_hands_a_runnerless_model_to_a_run():
+    """THE LIVE REPRODUCTION. Both these candidates were planned `ready`, run,
+    refused with "no cases of a modality it can run" -- a refusal about the
+    harness, correctly non-terminal -- and re-queued, forever.
+
+    THEY ARE `ready` AGAIN NOW, AND THAT IS THE FIX RATHER THAN A REGRESSION.
+    The image lane has a second engine that takes an arbitrary repo id, so
+    these reach a runner instead of a refusal. What must not come back is the
+    spec that NOTHING resolves: `mflux:` was chosen for them because it was
+    the lane's only spelling, and engines.resolve raises on it.
+    """
+    from harness import engines, screen
 
     rows = [{"name": "SupraLabs/Supra-A2A-Nano-Exp", "lane": "image",
              "description": ""},
             {"name": "Danrisi/UltraReal_FineTune_Anima_base1_v3",
              "lane": "image", "description": ""}]
-    states = {r["name"]: r["state"] for r in screen.plan(rows)}
-    assert set(states.values()) == {screen.NO_RUNNER}, states
+    for row in screen.plan(rows):
+        assert row["state"] != screen.NO_RUNNER, row
+        engines.resolve(row["candidate"])      # raises if it is unrunnable
+
+
+def test_the_image_lane_can_spell_more_than_one_engine():
+    """#263. LANE_CANDIDATES held one template per lane, so `mflux` was the
+    image engine because it had been TYPED there rather than because it had
+    won anything -- and since its entry points are an enumerated table of
+    families, every challenger discovery found was refused before it could be
+    measured. The incumbent had never faced one.
+
+    An mflux family still goes to mflux: a second engine that swallowed the
+    incumbent's own models would change the lane by accident.
+    """
+    from harness import screen
+
+    assert screen.candidate_for("image", "flux2-klein-4b") == \
+        "mflux:flux2-klein-4b"
+    assert screen.candidate_for("image", "stabilityai/sdxl-turbo") == \
+        "diffusers:stabilityai/sdxl-turbo"
+
+
+def test_every_engine_reaches_a_process_runner():
+    """`diffusers` was absent from evals.run.PROCESS_ENGINES, a hand-written
+    tuple of three, so kind_of("diffusers:org/m") answered `gateway` and an
+    image spec was routed to the TEXT gateway. It had been registered in
+    harness/engines.py since the CUDA machine was brought up and had never
+    once reached a ProcessRunner, on any machine."""
+    from evals.run import kind_of
+    from harness import engines
+
+    for name in engines.names():
+        assert kind_of(f"{name}:whatever") == "process", name

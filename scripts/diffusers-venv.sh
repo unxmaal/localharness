@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# The environment the CUDA generators run in. Sourced by image-cuda.sh and
+# The environment the diffusers generators run in. Sourced by image-diffusers.sh and
 # video-cuda.sh; never run directly. Sets $PY to the interpreter to use.
 #
 # ONE venv for both lanes. They want the same torch and the same diffusers, and
@@ -23,12 +23,24 @@ _diffusers_python() {
   fi
 }
 
+# TORCH COMES FROM A DIFFERENT PLACE ON EACH MACHINE. `torch==2.6.0+cu124` is
+# published only on PyTorch's own index and does not exist for macOS arm64 at
+# all, while Metal support ships in the ordinary PyPI wheel. Installing the
+# CUDA pin unconditionally is why this venv had never been built on the Mac.
+_install_torch() {
+  if [ "$(uname -s)" = "Darwin" ]; then
+    VIRTUAL_ENV="$DIFFUSERS_VENV" uv pip install "$TORCH_MPS_PIN" >&2
+  else
+    VIRTUAL_ENV="$DIFFUSERS_VENV" uv pip install \
+      --index-url "$TORCH_CUDA_INDEX" "$TORCH_CUDA_PIN" >&2
+  fi
+}
+
 PY="$(_diffusers_python)"
 if [ -z "$PY" ]; then
   echo "diffusers: building the generators' environment in $DIFFUSERS_VENV" >&2
   uv venv --python 3.12 "$DIFFUSERS_VENV" >&2
-  VIRTUAL_ENV="$DIFFUSERS_VENV" uv pip install \
-    --index-url "$TORCH_CUDA_INDEX" "$TORCH_CUDA_PIN" >&2
+  _install_torch
   VIRTUAL_ENV="$DIFFUSERS_VENV" uv pip install "$DIFFUSERS_PIN" \
     "$TRANSFORMERS_PIN" "$ACCELERATE_PIN" "$SAFETENSORS_PIN" "$PILLOW_PIN" >&2
   PY="$(_diffusers_python)"
