@@ -12,13 +12,14 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from datetime import datetime, timezone
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from harness import paths, store
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 #: Outcomes a proposal can reach. TERMINAL ones suppress re-proposal.
 VERDICTS = ("measured", "declined", "broken", "queued", "ignored", "screened")
@@ -114,12 +115,13 @@ CREATE TABLE IF NOT EXISTS verdicts (
     -- is the answer for almost every row and must stay distinguishable from
     -- "nobody asked". Issue #268.
     attaches_to TEXT NOT NULL DEFAULT '',
-    -- HOW STALE THE SOURCE WAS WHEN THIS WAS DECIDED, in days. The tier wrote
-    -- `last commit 2.9 years ago`, which is a number a reader acts on and a
-    -- number no query can reach. 0 means not measured -- an upstream that
-    -- committed today is 0.0 days stale and also the only case where the
-    -- distinction does not matter, since nothing declines a fresh repo.
-    stale_days  REAL NOT NULL DEFAULT 0,
+    -- DAYS SINCE THE CANDIDATE'S UPSTREAM LAST COMMITTED, at decision time.
+    -- Named `stale_days` first, which says nothing about WHOSE staleness and
+    -- was read as the age of our own row -- this project is days old and the
+    -- repos it refuses are years idle. The column exists to hold a number the
+    -- tier only ever formatted: `last commit 2.9 years ago`. 0 means not
+    -- measured. Issue #270.
+    upstream_idle_days REAL NOT NULL DEFAULT 0,
     -- WHAT WOULD MAKE THIS WORTH ASKING AGAIN, in the machine's terms. A
     -- ceiling refusal expires when a bigger machine arrives, and until now
     -- nothing could find those rows: the reason was prose. Same shape as
@@ -276,10 +278,15 @@ def until_met(until: str, facts: dict | None = None) -> bool:
     fact buried in prose cannot be queried, so writing the condition as prose
     would move the defect rather than fix it.
 
-    Three forms, which is all the real rows need:
+    Four forms, which is all the real rows need:
         runtime:<name>     the machine has that runtime
         memory_gb:><n>     the machine holds more than n GB
         ceiling_gb:><n>    the machine will load weights larger than n GiB
+        commit_after:<iso> the candidate's upstream has committed since
+
+    THE FIRST THREE ARE ABOUT THE MACHINE AND THE FOURTH IS NOT, which is why
+    `facts` is a plain dict rather than a Machine: a verdict waits on whatever
+    would change it, and `dead` waits on somebody else's repository.
     An unrecognised condition is NOT met, so a typo leaves the verdict
     standing rather than silently re-queueing everything.
     """
@@ -294,6 +301,16 @@ def until_met(until: str, facts: dict | None = None) -> bool:
             return float(facts.get(key) or 0) > float(want[1:])
         except ValueError:
             return False
+    if key == "commit_after":
+        seen = (facts.get("last_commit") or "").strip()
+        # STRING COMPARISON IS CORRECT FOR ISO-8601 AND ONLY FOR IT, so both
+        # sides are checked for the shape first. A length test was not enough
+        # and the negative control caught it: "last Tuesday" is twelve
+        # characters and sorts ABOVE any date beginning with a digit, so an
+        # unparseable field reopened the verdict -- the opposite of the safe
+        # direction this function is supposed to fail in.
+        return bool(_ISO_DATE.match(seen) and _ISO_DATE.match(want)
+                    and seen > want)
     return False
 
 
@@ -331,6 +348,9 @@ _UNTIL_FROM_DETAIL = tuple(
     for rt in ("cuda", "rocm", "vllm", "mlx", "llamacpp"))
 
 
+#: A date this can order by comparing strings. Anything else is not met.
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+
 #: `last commit 2.9 years ago`, the only spelling the tier has ever used.
 _YEARS = re.compile(r"last commit ([\d.]+) years? ago")
 
@@ -341,6 +361,37 @@ _YEARS = re.compile(r"last commit ([\d.]+) years? ago")
 _ATTACHES = re.compile(
     r"(?:^a (\w[\w-]*): it|^(\w[\w-]*) in its own card: this) "
     r"attaches to a model rather than being one", re.I | re.M)
+
+
+def _let_a_revived_upstream_be_reconsidered(conn: sqlite3.Connection) -> None:
+    """Give every `dead` verdict the commit that would reopen it.
+
+    A repo idle for two years is refused, and that verdict is recorded
+    `declined`, which is TERMINAL. So a candidate stays refused even if its
+    upstream ships tomorrow -- and `mlx-community/Mistral-7B-Instruct-v0.3-4bit`
+    is on that list, where a requantisation repo has no reason to receive
+    commits at all.
+
+    Every other machine-limited refusal got a condition in #266. This one was
+    missed because its limit is not the machine: it waits on somebody else's
+    repository, which is why until_met takes a plain dict of facts.
+
+    The commit date is recovered from the age the tier recorded, so the
+    condition inherits that approximation -- one decimal place of years, a
+    36-day band. It is a floor on "newer than what we saw", and being
+    conservative here re-asks slightly too early rather than never.
+    """
+    rows = conn.execute(
+        "SELECT id, upstream_idle_days, decided_at FROM verdicts "
+        "WHERE until = '' AND upstream_idle_days > 0").fetchall()
+    for vid, idle, decided in rows:
+        when = float(decided or 0) - float(idle) * 86400.0
+        if when <= 0:
+            continue
+        iso = datetime.fromtimestamp(when, tz=timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ")
+        conn.execute("UPDATE verdicts SET until = ? WHERE id = ?",
+                     (f"commit_after:{iso}", vid))
 
 
 def _lift_kind_and_age_out_of_prose(conn: sqlite3.Connection) -> None:
@@ -368,7 +419,7 @@ def _lift_kind_and_age_out_of_prose(conn: sqlite3.Connection) -> None:
     """
     rows = conn.execute(
         "SELECT id, detail FROM verdicts "
-        "WHERE attaches_to = '' AND stale_days = 0").fetchall()
+        "WHERE attaches_to = '' AND upstream_idle_days = 0").fetchall()
     for vid, detail in rows:
         text = detail or ""
         kind = ""
@@ -379,7 +430,8 @@ def _lift_kind_and_age_out_of_prose(conn: sqlite3.Connection) -> None:
         days = float(m.group(1)) * 365.0 if m else 0.0
         if kind or days:
             conn.execute(
-                "UPDATE verdicts SET attaches_to = ?, stale_days = ? "
+                "UPDATE verdicts SET attaches_to = ?, "
+                "upstream_idle_days = ? "
                 "WHERE id = ?", (kind, days, vid))
 
 
@@ -489,11 +541,36 @@ def _migrate(conn: sqlite3.Connection) -> None:
                          "ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0")
         _lift_sizes_out_of_prose(conn)
     if have and have < 14:
+        # UNDER THE NAME IT ENDS UP WITH. A store arriving from schema 13 has
+        # never seen `stale_days`, so creating it just to rename it one block
+        # later would make the old name real for the first time in a database
+        # that exists AFTER it was retired. v15 below handles the stores that
+        # genuinely have it.
         for col, ddl in (("attaches_to", "TEXT NOT NULL DEFAULT ''"),
-                         ("stale_days", "REAL NOT NULL DEFAULT 0")):
-            if col not in _columns(conn, "verdicts"):
+                         ("upstream_idle_days", "REAL NOT NULL DEFAULT 0")):
+            if col not in _columns(conn, "verdicts") and \
+                    "stale_days" not in _columns(conn, "verdicts"):
                 conn.execute(f"ALTER TABLE verdicts ADD COLUMN {col} {ddl}")
+        if "stale_days" in _columns(conn, "verdicts"):
+            conn.execute("ALTER TABLE verdicts "
+                         "RENAME COLUMN stale_days TO upstream_idle_days")
+        if "attaches_to" not in _columns(conn, "verdicts"):
+            conn.execute("ALTER TABLE verdicts ADD COLUMN "
+                         "attaches_to TEXT NOT NULL DEFAULT ''")
         _lift_kind_and_age_out_of_prose(conn)
+    if have and have < 15:
+        # SAY WHOSE FACT IT IS. `stale_days` reads as the age of the row; it
+        # is days since the CANDIDATE's upstream last committed. It was read
+        # the other way within a day of landing, which is the only test of a
+        # name that matters.
+        cols = _columns(conn, "verdicts")
+        if "stale_days" in cols and "upstream_idle_days" not in cols:
+            conn.execute("ALTER TABLE verdicts "
+                         "RENAME COLUMN stale_days TO upstream_idle_days")
+        elif "upstream_idle_days" not in cols:
+            conn.execute("ALTER TABLE verdicts ADD COLUMN "
+                         "upstream_idle_days REAL NOT NULL DEFAULT 0")
+        _let_a_revived_upstream_be_reconsidered(conn)
     conn.execute("INSERT OR REPLACE INTO meta VALUES ('schema', ?)",
                  (str(SCHEMA_VERSION),))
     conn.commit()
@@ -942,7 +1019,7 @@ def decide(conn: sqlite3.Connection, name: str, outcome: str, *, tier: str = "",
            score: float | None = None, rubric: str = "", judge: str = "",
            at: float | None = None, until: str = "",
            size_bytes: int = 0, attaches_to: str = "",
-           stale_days: float = 0.0) -> int:
+           upstream_idle_days: float = 0.0) -> int:
     """Record what happened to a proposal.
 
     Verdicts accumulate rather than replace: a screen verdict and a later
@@ -1001,12 +1078,12 @@ def decide(conn: sqlite3.Connection, name: str, outcome: str, *, tier: str = "",
     vid = conn.execute(
         "INSERT INTO verdicts (proposal_id, outcome, tier, detail, issue, "
         "run_path, score, rubric, judge, decided_at, machine_id, until, "
-        "size_bytes, attaches_to, stale_days) "
+        "size_bytes, attaches_to, upstream_idle_days) "
         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (row["id"], outcome, tier, detail, issue, run_path, score, rubric,
          judge, time.time() if at is None else at, machine_id, until,
          int(size_bytes or 0), attaches_to,
-         float(stale_days or 0.0))).lastrowid
+         float(upstream_idle_days or 0.0))).lastrowid
     conn.commit()
     return vid
 

@@ -233,7 +233,7 @@ def probe_size_limit() -> Finding:
 
 
 def probe_dead_days() -> Finding:
-    return measure("DEAD_DAYS", insp.DEAD_DAYS, [180, 365, 730, 1095, 3650],
+    return measure("UPSTREAM_DEAD_DAYS", insp.UPSTREAM_DEAD_DAYS, [180, 365, 730, 1095, 3650],
                    lambda v: verdicts(dead_days=v),
                    note="when a repo counts as abandoned")
 
