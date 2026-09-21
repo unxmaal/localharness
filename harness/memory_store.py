@@ -18,7 +18,7 @@ from pathlib import Path
 
 from harness import paths, store
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 #: Outcomes a proposal can reach. TERMINAL ones suppress re-proposal.
 VERDICTS = ("measured", "declined", "broken", "queued", "ignored", "screened")
@@ -109,6 +109,17 @@ CREATE TABLE IF NOT EXISTS verdicts (
     -- above (#211). A text column any code parses is a schema whose format
     -- nobody wrote down. 0 means not measured. Issue #266.
     size_bytes  INTEGER NOT NULL DEFAULT 0,
+    -- THE WORD THAT MADE THIS AN ATTACHMENT, not a sentence containing it.
+    -- `lora`, `comfyui`, `browser`. "" means this is not an attachment, which
+    -- is the answer for almost every row and must stay distinguishable from
+    -- "nobody asked". Issue #268.
+    attaches_to TEXT NOT NULL DEFAULT '',
+    -- HOW STALE THE SOURCE WAS WHEN THIS WAS DECIDED, in days. The tier wrote
+    -- `last commit 2.9 years ago`, which is a number a reader acts on and a
+    -- number no query can reach. 0 means not measured -- an upstream that
+    -- committed today is 0.0 days stale and also the only case where the
+    -- distinction does not matter, since nothing declines a fresh repo.
+    stale_days  REAL NOT NULL DEFAULT 0,
     -- WHAT WOULD MAKE THIS WORTH ASKING AGAIN, in the machine's terms. A
     -- ceiling refusal expires when a bigger machine arrives, and until now
     -- nothing could find those rows: the reason was prose. Same shape as
@@ -320,6 +331,58 @@ _UNTIL_FROM_DETAIL = tuple(
     for rt in ("cuda", "rocm", "vllm", "mlx", "llamacpp"))
 
 
+#: `last commit 2.9 years ago`, the only spelling the tier has ever used.
+_YEARS = re.compile(r"last commit ([\d.]+) years? ago")
+
+#: The two sentences a tier writes when it refuses an attachment, and nothing
+#: else. fetching says `lora in its own card: this attaches to...`; screen.plan
+#: says `a lora: it attaches to...`. Anchored on the shared clause so a judge
+#: merely USING the word "workflow" is not mistaken for a verdict about one.
+_ATTACHES = re.compile(
+    r"(?:^a (\w[\w-]*): it|^(\w[\w-]*) in its own card: this) "
+    r"attaches to a model rather than being one", re.I | re.M)
+
+
+def _lift_kind_and_age_out_of_prose(conn: sqlite3.Connection) -> None:
+    """Move the attachment kind and the source's staleness into columns.
+
+    THE KIND IS RECOVERED FROM THE SENTENCE THE TIER WROTE, not recomputed.
+    My first cut ran screen.is_attachment over the verdict's DETAIL, and the
+    live code runs it over the candidate's DESCRIPTION -- so 78 judge verdicts
+    whose prose happens to contain "workflow", "gui" or "embedding" were
+    labelled attachments. They are not: "This is a composition of existing
+    tools" is a judge explaining a score.
+
+    A migration recovers what was DECIDED. Re-deciding invents verdicts that
+    were never made, and here it would have taught the fetch tier to refuse
+    57 real candidates as adapters.
+
+    Both tiers that record one say `attaches to a model rather than being
+    one`, with the kind as the first word, so that phrase is the marker.
+
+    THE AGE IS RECOVERED APPROXIMATELY AND THAT IS RECORDED. The tier wrote
+    one decimal place of YEARS, so `2.9 years ago` recovers 1058.5 days and
+    the true value was somewhere in a 36-day band. Precision the prose threw
+    away cannot be migrated back; what matters is that the column is now
+    queryable and every row written from here is exact.
+    """
+    rows = conn.execute(
+        "SELECT id, detail FROM verdicts "
+        "WHERE attaches_to = '' AND stale_days = 0").fetchall()
+    for vid, detail in rows:
+        text = detail or ""
+        kind = ""
+        m = _ATTACHES.search(text)
+        if m:
+            kind = (m.group(1) or m.group(2) or "").strip()
+        m = _YEARS.search(text)
+        days = float(m.group(1)) * 365.0 if m else 0.0
+        if kind or days:
+            conn.execute(
+                "UPDATE verdicts SET attaches_to = ?, stale_days = ? "
+                "WHERE id = ?", (kind, days, vid))
+
+
 def _lift_sizes_out_of_prose(conn: sqlite3.Connection) -> None:
     """Move 728 measured sizes from `detail` into a column.
 
@@ -425,6 +488,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE verdicts "
                          "ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0")
         _lift_sizes_out_of_prose(conn)
+    if have and have < 14:
+        for col, ddl in (("attaches_to", "TEXT NOT NULL DEFAULT ''"),
+                         ("stale_days", "REAL NOT NULL DEFAULT 0")):
+            if col not in _columns(conn, "verdicts"):
+                conn.execute(f"ALTER TABLE verdicts ADD COLUMN {col} {ddl}")
+        _lift_kind_and_age_out_of_prose(conn)
     conn.execute("INSERT OR REPLACE INTO meta VALUES ('schema', ?)",
                  (str(SCHEMA_VERSION),))
     conn.commit()
@@ -872,7 +941,8 @@ def decide(conn: sqlite3.Connection, name: str, outcome: str, *, tier: str = "",
            detail: str = "", issue: int | None = None, run_path: str = "",
            score: float | None = None, rubric: str = "", judge: str = "",
            at: float | None = None, until: str = "",
-           size_bytes: int = 0) -> int:
+           size_bytes: int = 0, attaches_to: str = "",
+           stale_days: float = 0.0) -> int:
     """Record what happened to a proposal.
 
     Verdicts accumulate rather than replace: a screen verdict and a later
@@ -931,10 +1001,12 @@ def decide(conn: sqlite3.Connection, name: str, outcome: str, *, tier: str = "",
     vid = conn.execute(
         "INSERT INTO verdicts (proposal_id, outcome, tier, detail, issue, "
         "run_path, score, rubric, judge, decided_at, machine_id, until, "
-        "size_bytes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "size_bytes, attaches_to, stale_days) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (row["id"], outcome, tier, detail, issue, run_path, score, rubric,
          judge, time.time() if at is None else at, machine_id, until,
-         int(size_bytes or 0))).lastrowid
+         int(size_bytes or 0), attaches_to,
+         float(stale_days or 0.0))).lastrowid
     conn.commit()
     return vid
 

@@ -228,6 +228,11 @@ class Fit:
     #: `torch.cuda.is_available()` guard is compatible with running elsewhere.
     cuda_mentioned: list[str] = field(default_factory=list)
     mlx: bool = False
+    #: Days since the source's last commit, as measured by decide(). 0 means
+    #: not measured. It was only ever written into the verdict's prose as
+    #: `last commit 2.9 years ago`, one decimal place of years, which is a
+    #: number a reader acts on and no query can reach. Issue #268.
+    stale_days: float = 0.0
     #: Its weights are GGUF, which only llama.cpp loads. A format is not a
     #: runtime and this field is not one either: it is the evidence that the
     #: `llamacpp` runtime is required, resolved against the machine in
@@ -726,6 +731,7 @@ def decide(fit: Fit, ceiling: int | None = None, dead_days: int = DEAD_DAYS,
         try:
             when = datetime.fromisoformat(fit.last_commit).timestamp()
             days = ((time.time() if now is None else now) - when) / 86400.0
+            fit.stale_days = days
             if days > dead_days:
                 fit.verdict = "dead"
                 fit.why = f"last commit {days / 365.0:.1f} years ago"

@@ -869,6 +869,7 @@ def _report_inspect(a) -> int:
             if outcome:
                 ms.decide(store, repo, outcome, tier=ms.INSPECT,
                           size_bytes=fit.largest if fit.verdict == "fits" else 0,
+                          stale_days=fit.stale_days,
                           detail=f"{fit.verdict}: {fit.why}"[:200])
             # The WEIGHTS are what a download queue can act on. The repo is
             # something to install and screen, and the two are not the same
