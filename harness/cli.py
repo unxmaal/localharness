@@ -2149,6 +2149,36 @@ def cmd_hear(a) -> int:
     return say(path=clip, body=text, human=text)
 
 
+def cmd_compare(a) -> int:
+    """Two models, one lane, a verdict. Issue #259.
+
+    EXIT STATUS IS PART OF THE ANSWER. 0 means a verdict was reached, whatever
+    it was; non-zero means the question could not be answered, so a script can
+    tell "the challenger lost" from "nothing ran".
+    """
+    from harness import compare
+
+    if getattr(a, "dry_run", False):
+        p = compare.plan(a.lane, a.incumbent, a.challenger)
+        print(compare.describe(p))
+        return 0 if p.ok else 1
+
+    got = compare.run(a.lane, a.incumbent, a.challenger,
+                      repeat=getattr(a, "repeat", 3),
+                      out=(getattr(a, "out", "") or None))
+    if not got.ok:
+        return err(got.blocked)
+    print(compare.report(got))
+    if _JSON:
+        print(json.dumps({"lane": got.plan.lane,
+                          "incumbent": got.verdict.incumbent,
+                          "challenger": got.verdict.challenger,
+                          "adopt": got.verdict.adopt,
+                          "why": got.verdict.why,
+                          "receipt": got.receipt}, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="lh", description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="command")
@@ -2165,6 +2195,21 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--seed", type=int)
         p.set_defaults(func=func)
         return p
+
+    # THE PRODUCT. Two models, one command, a verdict. #259.
+    cmp_ = sub.add_parser(
+        "compare", help="measure two models against each other in one lane",
+        description="lh compare code q3-4b local-large")
+    cmp_.add_argument("lane", help=f"one of: {', '.join(lanes.ALL)}")
+    cmp_.add_argument("incumbent", help="what the lane serves now, or any "
+                                        "alias, repo id or engine spec")
+    cmp_.add_argument("challenger", help="what to test against it")
+    cmp_.add_argument("--repeat", type=int, default=3,
+                      help="runs per case; a single sample ranks noise")
+    cmp_.add_argument("--out", default="", help="where to write the receipt")
+    cmp_.add_argument("--dry-run", action="store_true",
+                      help="say what it would do and spend nothing")
+    cmp_.set_defaults(func=cmd_compare)
 
     media("image", "generate an image", DEFAULT_IMAGE_ENGINE, cmd_image)
     v = media("video", "generate a video", DEFAULT_VIDEO_ENGINE, cmd_video)
