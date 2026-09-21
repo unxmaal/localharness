@@ -97,6 +97,16 @@ def test_each_unit_logs_somewhere_you_can_read(plists, service):
 
 
 @pytest.mark.parametrize("service", SERVICES)
+def test_each_unit_writes_its_log_as_it_goes(plists, service):
+    """The first scheduled sweep wrote 87 bytes and then nothing for its whole
+    run while the store kept being updated. launchd's stdout is a file, so
+    Python block-buffers it, and a job that is working reads exactly like a
+    job that is wedged -- which defeats the reason for having a log at all."""
+    unit = next(v for k, v in plists.items() if service in k)
+    assert unit["EnvironmentVariables"].get("PYTHONUNBUFFERED") == "1", unit
+
+
+@pytest.mark.parametrize("service", SERVICES)
 def test_each_unit_carries_a_path_that_includes_homebrew(plists, service):
     """launchd starts jobs with PATH=/usr/bin:/bin:/usr/sbin:/sbin. uv, ffmpeg,
     rsvg-convert and rec all live in /opt/homebrew/bin, so without this every

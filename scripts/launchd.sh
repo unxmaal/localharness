@@ -102,6 +102,8 @@ $(_schedule "$service")
   <dict>
     <key>PATH</key><string>$JOB_PATH</string>
     <key>HOME</key><string>$HOME</string>
+    <!-- stdout is a file here, so an unbuffered log is the only progress. -->
+    <key>PYTHONUNBUFFERED</key><string>1</string>
 $(_hf_env)  </dict>
   <key>ProcessType</key><string>Interactive</string>
 </dict>
