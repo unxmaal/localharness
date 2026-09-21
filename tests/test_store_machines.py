@@ -251,3 +251,94 @@ def test_a_run_path_that_is_not_a_path_is_refused(store):
         ms.decide(store, "org/c", "queued", tier="fetch", run_path="ok")
     ms.decide(store, "org/c", "queued", tier="fetch", run_path="runs/a")
     ms.decide(store, "org/c", "queued", tier="fetch", run_path="/abs/b")
+
+
+# --- the attachment kind and the source's age -----------------------------
+
+def test_the_attachment_kind_is_a_column(store):
+    """It was `lora in its own card: this attaches to a model...`. The word
+    that decided it is the fact; the sentence is the explanation."""
+    ms.decide(store, "org/c", "declined", tier="fetch", attaches_to="lora",
+              detail="lora in its own card: this attaches to a model rather "
+                     "than being one, and no lane can run it alone")
+    row = store.execute(
+        "SELECT attaches_to FROM verdicts ORDER BY id DESC LIMIT 1").fetchone()
+    assert row["attaches_to"] == "lora"
+
+
+def test_not_an_attachment_is_distinguishable_from_nobody_asking(store):
+    """"" is the answer for almost every row, and it has to mean "asked, and
+    no" rather than being indistinguishable from an unfilled column."""
+    ms.decide(store, "org/c", "queued", tier="inspect", detail="fits")
+    row = store.execute(
+        "SELECT attaches_to FROM verdicts ORDER BY id DESC LIMIT 1").fetchone()
+    assert row["attaches_to"] == ""
+
+
+def test_the_age_is_a_number_not_one_decimal_of_years(store):
+    """`last commit 2.9 years ago` is a number a reader acts on and no query
+    can reach."""
+    ms.decide(store, "org/c", "declined", tier="inspect", stale_days=1058.5,
+              detail="dead: last commit 2.9 years ago")
+    row = store.execute(
+        "SELECT stale_days FROM verdicts ORDER BY id DESC LIMIT 1").fetchone()
+    assert row["stale_days"] == pytest.approx(1058.5)
+
+
+def test_a_judge_using_the_word_workflow_is_not_a_verdict_about_one(tmp_path):
+    """THE MIGRATION'S OWN NEAR-MISS, and the reason it recovers rather than
+    recomputes.
+
+    The first cut ran screen.is_attachment over the verdict's DETAIL. The live
+    code runs it over the candidate's DESCRIPTION, so 78 judge verdicts whose
+    prose happens to contain "workflow", "gui" or "embedding" came back
+    labelled attachments -- and "This is a composition of existing tools" is a
+    judge explaining a score, not a declaration that a candidate is an adapter.
+    Shipping it would have taught the fetch tier to refuse 57 real candidates.
+    """
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.executescript("""
+        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+        INSERT INTO meta VALUES ('schema','13');
+        CREATE TABLE proposals (id INTEGER PRIMARY KEY, name TEXT,
+            kind TEXT DEFAULT '', lane TEXT DEFAULT '',
+            resolved TEXT DEFAULT '', consumes TEXT DEFAULT '',
+            produces TEXT DEFAULT '', first_seen REAL DEFAULT 0,
+            last_seen REAL DEFAULT 0, registry TEXT DEFAULT '',
+            description TEXT DEFAULT '');
+        CREATE TABLE verdicts (id INTEGER PRIMARY KEY, proposal_id INTEGER,
+            outcome TEXT, tier TEXT DEFAULT '', detail TEXT DEFAULT '',
+            issue INTEGER, run_path TEXT DEFAULT '', score REAL,
+            rubric TEXT DEFAULT '', judge TEXT DEFAULT '', decided_at REAL,
+            machine_id INTEGER, until TEXT DEFAULT '',
+            size_bytes INTEGER DEFAULT 0);
+        CREATE TABLE machines (id INTEGER PRIMARY KEY, fingerprint TEXT UNIQUE,
+            hw_model TEXT DEFAULT '', os TEXT DEFAULT '', arch TEXT DEFAULT '',
+            memory_gb REAL DEFAULT 0, accelerator TEXT DEFAULT '',
+            runtimes TEXT DEFAULT '', ceiling_gb REAL DEFAULT 0,
+            first_seen REAL DEFAULT 0, last_seen REAL DEFAULT 0);
+        INSERT INTO proposals (id,name) VALUES (1,'org/judged'),(2,'org/lora'),
+                                               (3,'org/old');
+        INSERT INTO verdicts (proposal_id,outcome,tier,detail,decided_at)
+          VALUES (1,'queued','judge',
+                  'This is a composition of existing tools with a clean gui and a reusable workflow for embedding extraction',0),
+                 (2,'declined','fetch',
+                  'lora in its own card: this attaches to a model rather than being one, and no lane can run it alone',0),
+                 (3,'declined','inspect','dead: last commit 2.9 years ago',0);
+    """)
+    old.commit()
+    old.close()
+
+    conn = ms.connect(path)
+    try:
+        got = {r["proposal_id"]: (r["attaches_to"], r["stale_days"])
+               for r in conn.execute(
+                   "SELECT proposal_id, attaches_to, stale_days FROM verdicts")}
+        assert got[1] == ("", 0.0), (
+            f"a judge's prose was read as a verdict about an attachment: "
+            f"{got[1]}")
+        assert got[2][0] == "lora"
+        assert got[3][1] == pytest.approx(2.9 * 365.0)
+    finally:
+        conn.close()

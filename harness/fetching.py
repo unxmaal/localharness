@@ -446,7 +446,8 @@ def run(conn, sizes: dict[str, int], *, limit: int = 1, snapshot=None,
         if attachment:
             why = (f"{attachment} in its own card: this attaches to a model "
                    f"rather than being one, and no lane can run it alone")
-            ms.decide(conn, row["name"], "declined", tier="fetch", detail=why)
+            ms.decide(conn, row["name"], "declined", tier="fetch", detail=why,
+                      attaches_to=attachment)
             done.append({"repo": row["name"], "ok": False, "why": why})
             continue
         # `limit` bounds DOWNLOADS, not decisions. Counting refusals against it
