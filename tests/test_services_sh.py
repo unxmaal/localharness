@@ -61,15 +61,49 @@ def run(script: Path, *args, **overrides) -> subprocess.CompletedProcess:
 #: only whether a pid exists is exactly the defect in issue #173. A fake that
 #: cannot be reached would let the fixed status be called broken and the broken
 #: one correct. `exec` so the pid recorded is the thing to kill.
+#: A service that BINDS AND ANSWERS. It was a bare socket, which meant every
+#: test here asserted only that a port was held. `status` now asks the service
+#: to answer before calling it up (#255), so the fixture has to model one that
+#: can: a bound socket with nothing behind it is the WEDGED case below.
 ALIVE = (
     'exec python3 -c \''
-    'import os, socket, time\n'
-    's = socket.socket()\n'
-    's.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n'
-    's.bind(("127.0.0.1", int(os.environ["GATEWAY_PORT"])))\n'
-    's.listen(1)\n'
-    'time.sleep(120)\n'
+    'import os\n'
+    'from http.server import BaseHTTPRequestHandler, HTTPServer\n'
+    'class H(BaseHTTPRequestHandler):\n'
+    '    def do_GET(self):\n'
+    '        self.send_response(200)\n'
+    '        self.send_header("Content-Type", "application/json")\n'
+    '        self.end_headers()\n'
+    '        self.wfile.write(b"{}")\n'
+    '    def log_message(self, *a): pass\n'
+    'HTTPServer(("127.0.0.1", int(os.environ["GATEWAY_PORT"])), H).serve_forever()\n'
     '\'\n')
+#: A listener that BINDS AND NEVER ANSWERS, which is what mlx_lm.server became
+#: after a failed model load: port held, every request hanging, and `status`
+#: calling it up for hours while four lanes were unrunnable. #255.
+WEDGED = (
+    # `exec`, so the pid services.sh records IS the listener. Without it the
+    # script kills a shell wrapper and the child keeps the port, which then
+    # blocks every later test on the same fixture port.
+    'exec python3 -c \'\n'
+    'import socket\n'
+    's=socket.socket()\n'
+    's.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n'
+    's.bind(("127.0.0.1", int(__import__("os").environ["GATEWAY_PORT"])))\n'
+    's.listen(1)\n'
+    'import time; time.sleep(120)\n'
+    '\'\n')
+
+def _answers(port: int) -> bool:
+    """Can something at `port` serve a GET? The same question status asks."""
+    import urllib.error, urllib.request
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=1)
+        return True
+    except (urllib.error.URLError, OSError):
+        return False
+
+
 #: One that dies on its first line, which is the case this file exists for.
 DEAD = 'echo "boom" >&2\nexit 1\n'
 
@@ -210,10 +244,24 @@ def test_a_service_this_script_did_not_start_is_still_reported_up(tmp_path):
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
     port = listener.getsockname()[1]
+    listener.close()
+    # AN ANSWERING SERVER, not a bare socket. The claim under test is about
+    # PROVENANCE -- who started it -- and `status` now also asks whether the
+    # service can answer (#255), so a socket with nothing behind it would be
+    # reported WEDGED and the provenance line would never be reached.
+    import subprocess as _sp
+    other = _sp.Popen(["bash", "-c", ALIVE],
+                      env={**os.environ, "GATEWAY_PORT": str(port)},
+                      stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
     try:
+        for _ in range(40):
+            if _answers(port):
+                break
+            time.sleep(0.1)
         got = run(script, "status", GATEWAY_PORT=str(port))
     finally:
-        listener.close()
+        other.kill()
+        other.wait(timeout=5)
     assert "gateway" in got.stdout
     gateway_line = next(l for l in got.stdout.splitlines()
                         if l.startswith("gateway"))
@@ -226,3 +274,51 @@ def test_a_service_this_script_did_not_start_is_still_reported_up(tmp_path):
 def test_the_port_is_named_so_a_reader_can_check_it_themselves(tmp_path):
     got = run(tree(tmp_path, "exit 0\n"), "status")
     assert ":49221" in got.stdout and ":49222" in got.stdout
+
+
+# --- a bound port is not a working service (#255) -------------------------
+
+def test_a_wedged_service_is_not_reported_up(tmp_path):
+    """THE STATE THAT COST A MORNING. mlx_lm.server held :8081 after a failed
+    model load: port bound, /v1/models empty, every request hanging. `status`
+    called it `up` for hours while four text lanes were unrunnable, and the
+    only visible symptom was models timing out, which reads as the model
+    failing rather than the service.
+    """
+    script = tree(tmp_path, WEDGED)
+    run(script, "start", "gateway")
+    try:
+        line = next(l for l in run(script, "status").stdout.splitlines()
+                    if l.startswith("gateway"))
+        assert "WEDGED" in line, line
+        assert "up" not in line.split(":")[0], line
+    finally:
+        run(script, "stop", "gateway")
+
+
+def test_a_service_that_answers_is_still_reported_up(tmp_path):
+    """THE NEGATIVE CONTROL. A health probe that fails on a healthy service
+    reports everything down and gets ignored, which is worse than the port
+    check it replaced."""
+    script = tree(tmp_path, ALIVE)
+    run(script, "start", "gateway")
+    try:
+        line = next(l for l in run(script, "status").stdout.splitlines()
+                    if l.startswith("gateway"))
+        assert "up" in line and "WEDGED" not in line, line
+    finally:
+        run(script, "stop", "gateway")
+
+
+def test_every_service_with_a_port_has_a_probe():
+    """A probe keyed on a name this script does not use covers nothing. The
+    launchd agent for :8081 is `mlx` and this script calls it `llamacpp`, so
+    a probe written against the agent's name silently checked nothing."""
+    text = (Path(__file__).resolve().parents[1]
+            / "scripts" / "services.sh").read_text(encoding="utf-8")
+    services = ("gateway", "llamacpp", "audio")
+    probe_block = text.split("probe_for()")[1].split("}")[0]
+    for name in services:
+        assert f"{name})" in probe_block, (
+            f"{name} has a port and no health probe, so `status` can only say "
+            f"whether something holds it")

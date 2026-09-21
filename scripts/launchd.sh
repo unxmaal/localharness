@@ -28,6 +28,29 @@ SERVICES="gateway mlx tts mcp"
 # "lh: command not found".
 JOB_PATH="$HOME/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
+# AND PATH IS NOT THE ONLY THING launchd DROPS. env.sh resolves the weights
+# cache from HF_ROOT, then an inherited HF_HOME, then ./hf_root in the checkout
+# (RULE #222: a default naming one person's volume is not a default). A launchd
+# job inherits neither variable, so it took the in-tree default, and mlx_lm's
+# /v1/models raised
+#
+#   CacheNotFound: .../localharness/hf_root/hub
+#
+# The port stayed bound, the model list came back empty, and every generate
+# request hung until the caller gave up. Four text lanes were unrunnable for
+# hours and the only symptom anywhere else was models timing out, which reads
+# as the model failing. #255.
+#
+# Resolved HERE rather than written into the plist by hand, so the value is
+# this machine's own answer and a second machine gets its own.
+_hf_env() {
+  local root home
+  root="$(cd "$REPO" && . scripts/env.sh >/dev/null 2>&1 && printf '%s' "${HF_ROOT:-}")"
+  home="$(cd "$REPO" && . scripts/env.sh >/dev/null 2>&1 && printf '%s' "${HF_HOME:-}")"
+  [ -n "$root" ] && printf '    <key>HF_ROOT</key><string>%s</string>\n' "$root"
+  [ -n "$home" ] && printf '    <key>HF_HOME</key><string>%s</string>\n' "$home"
+}
+
 usage() {
   echo "usage: $0 {generate [DIR]|install|uninstall|status|probe}" >&2
   exit 2
@@ -56,7 +79,7 @@ write_plist() {
   <dict>
     <key>PATH</key><string>$JOB_PATH</string>
     <key>HOME</key><string>$HOME</string>
-  </dict>
+$(_hf_env)  </dict>
   <key>ProcessType</key><string>Interactive</string>
 </dict>
 </plist>
