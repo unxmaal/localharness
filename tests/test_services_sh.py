@@ -94,16 +94,6 @@ WEDGED = (
     'import time; time.sleep(120)\n'
     '\'\n')
 
-def _answers(port: int) -> bool:
-    """Can something at `port` serve a GET? The same question status asks."""
-    import urllib.error, urllib.request
-    try:
-        urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=1)
-        return True
-    except (urllib.error.URLError, OSError):
-        return False
-
-
 #: One that dies on its first line, which is the case this file exists for.
 DEAD = 'echo "boom" >&2\nexit 1\n'
 
@@ -238,30 +228,29 @@ def test_a_service_this_script_did_not_start_is_still_reported_up(tmp_path):
     """THE DEFECT. status read its own pidfile, so on the machine supervised by
     launchd -- the one whose entire job is to serve -- it reported every
     service down while the gateway was answering requests."""
-    import socket
-    script = tree(tmp_path, "exit 0\n")
-    listener = socket.socket()
-    listener.bind(("127.0.0.1", 0))
-    listener.listen(1)
-    port = listener.getsockname()[1]
-    listener.close()
-    # AN ANSWERING SERVER, not a bare socket. The claim under test is about
-    # PROVENANCE -- who started it -- and `status` now also asks whether the
-    # service can answer (#255), so a socket with nothing behind it would be
-    # reported WEDGED and the provenance line would never be reached.
-    import subprocess as _sp
-    other = _sp.Popen(["bash", "-c", ALIVE],
-                      env={**os.environ, "GATEWAY_PORT": str(port)},
-                      stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+    # TWO TREES, ONE PORT. `owner` starts a real service through the script
+    # itself; `script` is a second checkout with no pidfile of its own, which
+    # is exactly the launchd situation: something is serving and this copy did
+    # not start it.
+    #
+    # AN ANSWERING SERVER, not a bare socket, because `status` now also asks
+    # whether the service can answer (#255) and a socket with nothing behind
+    # it is reported WEDGED before the provenance line is ever reached.
+    #
+    # Started through run() rather than a raw Popen. Every launch in this file
+    # goes through run() because it carries the module's BASH and the shells
+    # module, and Windows needs both: a raw `bash -c` bypassed that layer and
+    # was green on macOS and Linux and red on check-windows. RULE #201.
+    owner_root, other_root = tmp_path / "owner", tmp_path / "other"
+    owner_root.mkdir()
+    other_root.mkdir()
+    owner = tree(owner_root, ALIVE)
+    script = tree(other_root, "exit 0\n")
+    run(owner, "start", "gateway")
     try:
-        for _ in range(40):
-            if _answers(port):
-                break
-            time.sleep(0.1)
-        got = run(script, "status", GATEWAY_PORT=str(port))
+        got = run(script, "status")
     finally:
-        other.kill()
-        other.wait(timeout=5)
+        run(owner, "stop", "gateway")
     assert "gateway" in got.stdout
     gateway_line = next(l for l in got.stdout.splitlines()
                         if l.startswith("gateway"))
