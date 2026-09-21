@@ -106,6 +106,38 @@ def candidate_for(lane: str, model: str, description: str = "") -> str:
     return spec.format(model=model)
 
 
+def no_runner(spec: str) -> str:
+    """Why nothing here can run `spec`, or "".
+
+    A LANE HAVING A RUNNER IS NOT THE SAME QUESTION AS A RUNNER TAKING THIS
+    MODEL. `candidate_for` only proved the lane has a spec template, so every
+    discovered image candidate came back `ready`, was downloaded, and was then
+    refused by evals.run for "no cases of a modality it can run" -- because
+    engines.resolve raises on a model no mflux entry point serves,
+    modality_of falls through to None, and a text candidate matches no image
+    case. The refusal is correctly non-terminal (the harness failed, not the
+    candidate), so the same candidate was re-fetched and re-screened on every
+    sweep, forever, and the image lane could never screen anything the loop
+    found. Asked here, before the disk is spent.
+    """
+    if not spec:
+        return ""
+    from harness import engines
+    head, sep, _ = spec.partition(":")
+    if not sep or head not in engines.names():
+        # ONLY A PROCESS ENGINE CAN BE ASKED THIS. A text lane's candidate is
+        # the bare repo id, which mlx_lm.server swaps to live, and `tts:`/
+        # `stt:` are runner prefixes rather than engines. Asking resolve()
+        # about those calls every ordinary code candidate unrunnable, which
+        # is what the negative control in the end-to-end suite caught.
+        return ""
+    try:
+        engines.resolve(spec)
+    except ValueError as exc:
+        return str(exc).split(". ", 1)[0]
+    return ""
+
+
 def plan(rows, *, missing=None) -> list[dict]:
     """What a screen would do to each row, and what stands in the way.
 
@@ -126,10 +158,12 @@ def plan(rows, *, missing=None) -> list[dict]:
         spec = candidate_for(lane, name, row.get("description") or "")
         absent = [] if not spec else missing(name)
         attached = is_attachment(row.get("description") or "")
-        if not spec:
+        gap = "" if not spec else no_runner(spec)
+        if not spec or gap:
             state, why = NO_RUNNER, (
                 f"a {attached}: it attaches to a model rather than being one, "
                 f"so no runner takes it as a candidate" if attached
+                else gap if gap
                 else f"no runner for the {lane} lane" if lane
                 else "no lane, so no case and no metric")
         elif absent == [name]:

@@ -54,6 +54,12 @@ class Engine:
     cwd: str | None = None
 
 
+def names() -> frozenset[str]:
+    """The engine names a spec may carry. Read off the builder table rather
+    than restated, so adding an engine does not need a second edit."""
+    return frozenset(_BUILDERS)
+
+
 def resolve(spec: str) -> Engine:
     """Parse a candidate spec into an Engine."""
     head, _, optstr = spec.partition(",")

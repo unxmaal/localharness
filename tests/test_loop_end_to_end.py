@@ -295,3 +295,97 @@ def test_the_scheduled_sweep_bounds_what_it_spends():
             / "serve-discover.sh").read_text(encoding="utf-8")
     assert "--budget-gib" in body and "--top" in body, body
     assert "--run" in body, "a sweep that never spends discovers nothing"
+
+
+# --- a lane's runner must take THIS model, asked before the disk is spent ---
+
+def test_a_model_no_runner_can_load_never_reaches_a_download(store, tmp_path):
+    """FOUND IN THE FIRST SCHEDULED SWEEP, which is the point of scheduling it.
+
+    Both image candidates were downloaded, handed to evals.run, refused with
+    "no cases of a modality it can run", and re-queued -- correctly, since
+    that refusal is about the harness and not about the candidate. So they
+    came back on the next sweep, and would have forever: the image lane could
+    never screen anything the loop found, and every sweep spent the disk again
+    to rediscover it.
+
+    `screen.candidate_for` only proved the LANE has a spec template.
+    `mflux:SupraLabs/Supra-A2A-Nano-Exp` is a well-formed spec that no mflux
+    entry point serves.
+    """
+    from harness import fetching, memory_store as ms
+
+    # NOT A REAL REPO. The two candidates this was found on are already in
+    # the developer's HF cache, so `queued` skipped them as present and the
+    # test passed for no reason. RULE #249: pin the ambient fact.
+    name = "org/supra-a2a-nano-exp-notreal"
+    fakes.seeded_store(store, [(name, "image", 1.2, 2)])
+    downloads = fakes.Downloads(tmp_path / "hub")
+    got = fetching.run(store, {name: int(1.2 * 1024 ** 3)}, limit=1,
+                       snapshot=downloads)
+    assert downloads.asked == [], "weights nothing can load were downloaded"
+    assert got and "no runner" in got[0]["why"], got
+    # NOT TERMINAL. An engine entry would make this candidate runnable, so
+    # declining it would settle a real candidate for a gap that is ours.
+    latest = store.execute(
+        "SELECT outcome FROM verdicts v JOIN proposals p ON p.id = v.proposal_id"
+        " WHERE p.name = ? ORDER BY v.id DESC LIMIT 1", (name,)).fetchone()
+    assert latest["outcome"] == "queued", latest["outcome"]
+
+
+def test_a_model_a_runner_can_load_is_still_fetched(store, tmp_path):
+    """THE NEGATIVE CONTROL, and the half that decides whether the guard can
+    ship. A check that refuses every image candidate empties the queue and
+    reads exactly like a queue with nothing in it.
+
+    THE NAME IS NOT A REAL REPO, and that is deliberate. Written first as
+    `filipstrand/Z-Image-Turbo-mflux-4bit`, the control failed on this machine
+    for the wrong reason: those weights are in the developer's HF cache, so
+    the fetch skipped them as already present and `asked` was empty either
+    way. It would have passed on a runner with a cold cache and failed here,
+    which is RULE #249 a third time -- pin the ambient fact, do not read it.
+    The tail still names a family mflux serves, which is what is under test.
+    """
+    from harness import fetching
+
+    name = "org/z-image-turbo-4bit-notreal"
+    fakes.seeded_store(store, [(name, "image", 5.5, 2)])
+    downloads = fakes.Downloads(tmp_path / "hub")
+    fetching.run(store, {name: int(5.5 * 1024 ** 3)}, limit=1,
+                 snapshot=downloads)
+    assert downloads.asked == [name], downloads.asked
+
+
+def test_a_runner_gap_is_reported_to_a_person(store):
+    """An engine entry cannot be invented -- a guessed mflux binary rejects
+    the model several seconds into loading, which is why that table is
+    enumerated. So the gap is surfaced rather than worked around, the same as
+    a laneless candidate."""
+    from harness import rank
+
+    rows = [{"name": "SupraLabs/Supra-A2A-Nano-Exp", "lane": "image",
+             "description": ""},
+            {"name": "filipstrand/Z-Image-Turbo-mflux-4bit", "lane": "image",
+             "description": ""}]
+    got = rank.runnerless(rows)
+    assert [r["name"] for r in got] == ["SupraLabs/Supra-A2A-Nano-Exp"]
+    assert "unknown mflux model" in got[0]["why_not"]
+
+
+def test_the_screen_never_hands_a_runnerless_model_to_a_run():
+    """THE LIVE REPRODUCTION, and the one that matters: these weights are
+    already on disk, so no fetch-tier guard can reach them.
+
+    `SupraLabs/Supra-A2A-Nano-Exp` and `Danrisi/UltraReal_FineTune_Anima_base1_v3`
+    were both planned `ready`, run, and refused with "no cases of a modality it
+    can run" -- a refusal about the harness, correctly non-terminal, so both
+    were re-queued and came back on the next sweep forever.
+    """
+    from harness import screen
+
+    rows = [{"name": "SupraLabs/Supra-A2A-Nano-Exp", "lane": "image",
+             "description": ""},
+            {"name": "Danrisi/UltraReal_FineTune_Anima_base1_v3",
+             "lane": "image", "description": ""}]
+    states = {r["name"]: r["state"] for r in screen.plan(rows)}
+    assert set(states.values()) == {screen.NO_RUNNER}, states

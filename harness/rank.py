@@ -265,6 +265,29 @@ def wanted(rows, minimum: int = 2) -> list[dict]:
     return sorted(out, key=lambda r: (-int(r.get("times") or 0), r["name"]))
 
 
+def runnerless(rows) -> list[dict]:
+    """Candidates whose lane has a runner that cannot load them, with why.
+
+    THE SAME ARGUMENT AS `wanted`, one rung along. A lane is a person's
+    decision; so is an engine entry. These have a lane and a home, and the
+    only thing between them and a screen is a line in engines.ENTRY_POINTS
+    that nobody can write automatically -- guessing one yields a binary that
+    rejects the model several seconds into loading, which is the reason that
+    table is enumerated rather than inferred.
+    """
+    from harness import screen
+    out = []
+    for row in rows:
+        lane = lane_of(row)
+        if not lane:
+            continue
+        gap = screen.no_runner(screen.candidate_for(
+            lane, row["name"], row.get("description") or ""))
+        if gap:
+            out.append({**row, "why_not": gap})
+    return sorted(out, key=lambda r: (r.get("lane") or "", r["name"]))
+
+
 def serving(config=None) -> set[str]:
     """The upstream model ids this machine's gateway serves.
 

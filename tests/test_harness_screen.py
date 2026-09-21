@@ -18,7 +18,11 @@ def test_a_candidate_whose_weights_are_absent_is_waiting_not_failed():
     """A SCREEN NEVER DOWNLOADS. Fetching is its own step with its own disk
     budget, and a tier that quietly pulls gigabytes because something ranked
     well is how a laptop fills up overnight."""
-    got = screen.plan(rows(("org/m", "image")), missing=lambda n: [n])[0]
+    # The name's tail must be a family mflux serves. `org/m` was not, so the
+    # row is now correctly no-runner and this test asserted `waiting` on a
+    # candidate the screen could never have run.
+    got = screen.plan(rows(("org/z-image-turbo-4bit", "image")),
+                      missing=lambda n: [n])[0]
     assert got["state"] == screen.WAITING
     assert "lh fetch" in got["why_not"]
 

@@ -399,6 +399,21 @@ def run(conn, sizes: dict[str, int], *, limit: int = 1, snapshot=None,
             ms.decide(conn, row["name"], "declined", tier="fetch", detail=why)
             done.append({"repo": row["name"], "ok": False, "why": why})
             continue
+        # A LANE HAVING A RUNNER IS NOT A RUNNER TAKING THIS MODEL, and this
+        # tier is where the difference costs gigabytes. Both image candidates
+        # in the first scheduled sweep were downloaded, handed to evals.run,
+        # refused for "no cases of a modality it can run", and re-queued --
+        # correctly, since that refusal is about the harness. So they came
+        # back on the next sweep and would have forever. `queued`, not
+        # `declined`: the candidate did nothing wrong and an engine entry
+        # would make it runnable, so it is reported to a person instead.
+        gap = screen.no_runner(screen.candidate_for(
+            row.get("lane") or "", row["name"], row.get("description") or ""))
+        if gap:
+            why = f"{gap}: no runner in the {row['lane']} lane can load it"
+            ms.decide(conn, row["name"], "queued", tier="fetch", detail=why)
+            done.append({"repo": row["name"], "ok": False, "why": why})
+            continue
         attachment = screen.is_attachment(row.get("description") or "")
         if attachment:
             why = (f"{attachment} in its own card: this attaches to a model "
