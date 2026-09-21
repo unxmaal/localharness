@@ -180,3 +180,25 @@ def test_probe_is_available_without_installing_anything():
                           capture_output=True, text=True)
     # Either verdict is fine here; what matters is that it ran and said so.
     assert "ok" in proc.stdout.lower() or "denied" in (proc.stdout + proc.stderr).lower()
+
+
+def test_install_waits_for_a_teardown_before_loading_again():
+    """`install` claims in its own comment to be re-runnable and was not.
+
+    On a machine with all five agents already loaded it printed "loaded
+    gateway", then "Bootstrap failed: 5: Input/output error" and stopped --
+    naming neither the service nor the cause. `launchctl bootout` returns
+    before the job is gone, so the bootstrap that follows hits a label that
+    still exists.
+
+    `set -e` then made it worse than either extreme: four agents kept running
+    the OLD plists while one ran the new one, and nothing said which.
+    """
+    gen = GEN.read_text(encoding="utf-8")
+    body = gen[gen.index("install_units()"):gen.index("uninstall_units()")]
+    assert "_await_unload" in body, (
+        "install bootstraps straight after bootout, which fails on a machine "
+        "where the agents are already loaded -- the normal case")
+    assert "failed=" in body and "FAILED to load" in body, (
+        "a failed bootstrap must name the service and let the rest load, "
+        "rather than aborting the loop and leaving the machine part old")

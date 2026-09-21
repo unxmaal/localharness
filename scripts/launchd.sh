@@ -178,17 +178,45 @@ MSG
   fi
 }
 
+#: `bootout` RETURNS BEFORE THE JOB IS GONE. It signals the process and the
+#: label lives on until the teardown completes, so the bootstrap that follows
+#: hits an already-loaded label and fails with "Bootstrap failed: 5: Input/
+#: output error", which names neither the service nor the cause.
+_await_unload() {
+  local label="$1" i
+  for i in $(seq 1 50); do
+    launchctl print "gui/$UID/$label" >/dev/null 2>&1 || return 0
+    sleep 0.2
+  done
+  return 1
+}
+
 install_units() {
   preflight
   mkdir -p "$AGENTS"
   generate "$AGENTS" >/dev/null
+  local failed=""
   for service in $SERVICES; do
     # bootout first so `install` is re-runnable: bootstrap on an already-loaded
     # label fails, and "already loaded" is the normal state when reinstalling.
     launchctl bootout "gui/$UID/$PREFIX.$service" 2>/dev/null || true
-    launchctl bootstrap "gui/$UID" "$AGENTS/$PREFIX.$service.plist"
-    echo "loaded $PREFIX.$service"
+    _await_unload "$PREFIX.$service" || true
+    # KEEP GOING AND REPORT. `set -e` here left the machine running a MIX of
+    # old and new agents and said only that something failed, which is worse
+    # than either all-old or all-new because nothing on it is a known state.
+    if launchctl bootstrap "gui/$UID" "$AGENTS/$PREFIX.$service.plist"; then
+      echo "loaded $PREFIX.$service"
+    else
+      failed="$failed $service"
+      echo "FAILED to load $PREFIX.$service" >&2
+    fi
   done
+  if [ -n "$failed" ]; then
+    echo >&2
+    echo "not loaded:$failed -- the rest are running, so this machine is" >&2
+    echo "part old and part new. Re-run install." >&2
+    return 1
+  fi
   echo
   echo "Give them a moment, then: ./scripts/smoke.sh"
 }
