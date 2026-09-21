@@ -95,10 +95,27 @@ def record(conn, verdict: Verdict) -> None:
     try:
         ms.decide(conn, verdict.challenger, outcome, tier=TIER,
                   detail=detail[:200])
+        return
     except KeyError:
-        # Named on a command line rather than proposed by a sweep. The decision
-        # still happened; there is simply no proposal row to hang it on.
         pass
+
+    # NO PROPOSAL ROW, AND THE DECISION STILL HAS TO SURVIVE. This used to
+    # swallow the KeyError with a note saying the decision had happened
+    # anyway. It had not: `adopted()` reads verdict rows, so an adoption whose
+    # winner arrived any way other than through a sweep was discarded on the
+    # spot and the lane went on serving the incumbent. A candidate named on a
+    # command line, or reached through `lh verify`, could beat the incumbent on
+    # the metric AND the paired test and change nothing.
+    #
+    # AN ADOPTION IS A FACT ABOUT THE LANE, not about a proposal, so the row
+    # exists to carry it rather than the other way round. `source` says where
+    # it came from, so a later sweep seeing the same name adds a sighting to
+    # this row instead of starting a second one.
+    ms.record(conn, ms.Seen(name=verdict.challenger, source=TIER, url="",
+                            why=f"named in a {verdict.lane} comparison",
+                            lane=verdict.lane, resolved=verdict.challenger))
+    ms.decide(conn, verdict.challenger, outcome, tier=TIER,
+              detail=detail[:200])
 
 
 def adopted(conn) -> dict[str, str]:

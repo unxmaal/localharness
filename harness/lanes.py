@@ -3,7 +3,7 @@
 Four modules each decided the set of lanes independently and no two agreed:
 
     discover.LANES          image stt svg text tts video
-    screen.LANE_CANDIDATE   image stt code tts
+    screen.LANE_CANDIDATES  image stt code tts
     rank.LANE_PRIORITY      image code web svg video
     evals/cases/*           image stt svg code tts video web extract
 

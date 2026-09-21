@@ -1655,6 +1655,16 @@ def _report_loop(a) -> int:
                   f"rather than ranked or invented:")
             for row in short[:10]:
                 print(f"  {row.get('times', 0)}x  {row['name']}")
+        stuck = rank.runnerless(rows)
+        if stuck:
+            print(f"\n=== runners wanted ===")
+            print(f"{len(stuck)} candidate(s) have a lane and no runner that "
+                  f"can load them. An engine entry is a decision for a person "
+                  f"-- a guessed one is a binary that refuses the model "
+                  f"several seconds into loading:")
+            for row in stuck[:10]:
+                print(f"  {row.get('lane', ''):8} {row['name']}\n"
+                      f"           {row['why_not']}")
         print(f"\n=== adopted ===")
         current = adopt.adopted(store)
         if current:

@@ -54,6 +54,12 @@ class Engine:
     cwd: str | None = None
 
 
+def names() -> frozenset[str]:
+    """The engine names a spec may carry. Read off the builder table rather
+    than restated, so adding an engine does not need a second edit."""
+    return frozenset(_BUILDERS)
+
+
 def resolve(spec: str) -> Engine:
     """Parse a candidate spec into an Engine."""
     head, _, optstr = spec.partition(",")
@@ -271,8 +277,8 @@ _DIFFUSERS_OPTIONS = {"steps", "width", "height", "guidance"}
 #: A script in the checkout rather than something on PATH, for the same reason
 #: H3_BIN is: it carries the pinned torch and diffusers versions, and mflux's
 #: trick of installing as a `uv tool` would put a 2.5 GB CUDA torch in one.
-IMAGE_CUDA_DEFAULT_BIN = str(
-    Path(__file__).resolve().parent.parent / "scripts" / "image-cuda.sh")
+IMAGE_DIFFUSERS_DEFAULT_BIN = str(
+    Path(__file__).resolve().parent.parent / "scripts" / "image-diffusers.sh")
 
 
 def _diffusers(spec: str, model: str, options: dict) -> Engine:
@@ -285,7 +291,7 @@ def _diffusers(spec: str, model: str, options: dict) -> Engine:
 
     def argv(prompt: str, out: Path, params: dict) -> list[str]:
         p = {**defaults, **{k: v for k, v in params.items() if v is not None}}
-        cmd = [os.environ.get("IMAGE_CUDA_BIN", IMAGE_CUDA_DEFAULT_BIN),
+        cmd = [os.environ.get("IMAGE_DIFFUSERS_BIN", IMAGE_DIFFUSERS_DEFAULT_BIN),
                "--model", model, "--prompt", prompt, "--output", str(out)]
         for name in ("width", "height", "steps", "seed", "guidance"):
             _flag(cmd, f"--{name}", p.get(name))

@@ -25,7 +25,7 @@ def test_spelling_a_spec_twice_is_spelling_it_once(lane, model, want):
 
 
 def test_it_is_idempotent_for_every_lane_that_has_a_spelling():
-    for lane in screen.LANE_CANDIDATE:
+    for lane in screen.LANE_CANDIDATES:
         once = screen.candidate_for(lane, "org/model")
         assert screen.candidate_for(lane, once) == once, lane
 

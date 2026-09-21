@@ -763,11 +763,27 @@ def judgeable(conn, limit: int = 50) -> list[dict]:
         ) AND p.id NOT IN (
             SELECT proposal_id FROM verdicts WHERE tier = ?
         )
+        -- AND NOBODY HAS ALREADY ANSWERED IT. A terminal verdict from ANY
+        -- tier means the question is settled, and this looked only at the
+        -- judge: a candidate screened `broken` came straight back round, and
+        -- three of the four adopt verdicts in the real store are one model
+        -- measured, declined, and measured again. #253.
+        --
+        -- The LATEST verdict decides, not any verdict, because a retraction
+        -- is an appended `queued` row over the top of a terminal one. Reading
+        -- "has ever been terminal" would make every retraction permanent,
+        -- which is the defect schema 7 exists to undo.
+        AND COALESCE((
+            SELECT v.outcome FROM verdicts v
+             WHERE v.proposal_id = p.id ORDER BY v.id DESC LIMIT 1
+        ), '') NOT IN (SELECT value FROM json_each(?))
         GROUP BY p.id
         ORDER BY times DESC, last_seen DESC
         LIMIT ?
     """
-    return [dict(r) for r in conn.execute(q, (INSPECT, INSPECT, JUDGE, limit))]
+    import json as _json
+    return [dict(r) for r in conn.execute(
+        q, (INSPECT, INSPECT, JUDGE, _json.dumps(list(TERMINAL)), limit))]
 
 
 def judgeable_total(conn) -> int:

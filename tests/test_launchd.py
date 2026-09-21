@@ -7,6 +7,7 @@ the last time this repo had three near-identical things, the copies disagreed
 about which port they used.
 """
 import plistlib
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -17,7 +18,12 @@ import shells
 
 REPO = Path(__file__).resolve().parents[1]
 GEN = REPO / "scripts" / "launchd.sh"
-SERVICES = ("gateway", "mlx", "tts", "mcp")
+#: READ FROM THE SCRIPT, not restated here. A hardcoded copy is a second
+#: answer to the same question, and it went stale the moment `discover` was
+#: added: the suite failed with `assert 5 == 4` for a change that was correct.
+SERVICES = tuple(
+    re.search(r'^SERVICES="([^"]+)"', GEN.read_text(encoding="utf-8"), re.M)
+    .group(1).split())
 
 #: launchd IS macOS. There is no Windows equivalent to generate plists for, and
 #: Windows service supervision (Task Scheduler) is not implemented -- so these
@@ -54,10 +60,32 @@ def test_each_unit_runs_the_repo_script(plists, service):
     assert Path(argv[1]).is_absolute(), "launchd has no working directory"
 
 
-@pytest.mark.parametrize("service", SERVICES)
-def test_each_unit_restarts_on_crash(plists, service):
+#: Jobs that RUN AND EXIT, read from the script for the same reason SERVICES
+#: is. KeepAlive on one of these restarts a finished sweep at once and the
+#: machine discovers in a tight loop.
+PERIODIC = tuple(
+    re.search(r'^declare -a PERIODIC=\(([^)]*)\)',
+              GEN.read_text(encoding="utf-8"), re.M).group(1).split())
+SERVERS = tuple(s for s in SERVICES if s not in PERIODIC)
+
+
+@pytest.mark.parametrize("service", SERVERS)
+def test_each_server_restarts_on_crash(plists, service):
     unit = next(v for k, v in plists.items() if service in k)
     assert unit.get("KeepAlive") is True
+    assert "StartInterval" not in unit, (
+        f"{service} serves; an interval would let it die between runs")
+
+
+@pytest.mark.parametrize("service", PERIODIC)
+def test_each_periodic_job_runs_on_an_interval(plists, service):
+    """A sweep finishes. KeepAlive would restart it immediately and the
+    machine would discover in a tight loop, which is the opposite failure from
+    a sweep that never runs and just as invisible."""
+    unit = next(v for k, v in plists.items() if service in k)
+    assert isinstance(unit.get("StartInterval"), int), unit
+    assert unit["StartInterval"] >= 300, "that is not a schedule, it is a loop"
+    assert unit.get("KeepAlive") is not True
 
 
 @pytest.mark.parametrize("service", SERVICES)
@@ -66,6 +94,16 @@ def test_each_unit_logs_somewhere_you_can_read(plists, service):
     for key in ("StandardOutPath", "StandardErrorPath"):
         assert unit.get(key), f"{service} has no {key}"
         assert Path(unit[key]).is_absolute()
+
+
+@pytest.mark.parametrize("service", SERVICES)
+def test_each_unit_writes_its_log_as_it_goes(plists, service):
+    """The first scheduled sweep wrote 87 bytes and then nothing for its whole
+    run while the store kept being updated. launchd's stdout is a file, so
+    Python block-buffers it, and a job that is working reads exactly like a
+    job that is wedged -- which defeats the reason for having a log at all."""
+    unit = next(v for k, v in plists.items() if service in k)
+    assert unit["EnvironmentVariables"].get("PYTHONUNBUFFERED") == "1", unit
 
 
 @pytest.mark.parametrize("service", SERVICES)
@@ -142,3 +180,25 @@ def test_probe_is_available_without_installing_anything():
                           capture_output=True, text=True)
     # Either verdict is fine here; what matters is that it ran and said so.
     assert "ok" in proc.stdout.lower() or "denied" in (proc.stdout + proc.stderr).lower()
+
+
+def test_install_waits_for_a_teardown_before_loading_again():
+    """`install` claims in its own comment to be re-runnable and was not.
+
+    On a machine with all five agents already loaded it printed "loaded
+    gateway", then "Bootstrap failed: 5: Input/output error" and stopped --
+    naming neither the service nor the cause. `launchctl bootout` returns
+    before the job is gone, so the bootstrap that follows hits a label that
+    still exists.
+
+    `set -e` then made it worse than either extreme: four agents kept running
+    the OLD plists while one ran the new one, and nothing said which.
+    """
+    gen = GEN.read_text(encoding="utf-8")
+    body = gen[gen.index("install_units()"):gen.index("uninstall_units()")]
+    assert "_await_unload" in body, (
+        "install bootstraps straight after bootout, which fails on a machine "
+        "where the agents are already loaded -- the normal case")
+    assert "failed=" in body and "FAILED to load" in body, (
+        "a failed bootstrap must name the service and let the rest load, "
+        "rather than aborting the loop and leaving the machine part old")

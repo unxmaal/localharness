@@ -46,11 +46,15 @@ NVIDIA_CUBLAS_PIN="nvidia-cublas-cu12==12.9.2.10"
 NVIDIA_CUDNN_PIN="nvidia-cudnn-cu12==9.25.1.1"
 
 # The image lane on a machine with an NVIDIA card, built by
-# scripts/image-cuda.sh into a venv of its own. torch+cu124 is only on
+# scripts/image-diffusers.sh into a venv of its own. torch+cu124 is only on
 # PyTorch's index and the rest are only on PyPI, which is why the script
 # installs them in two steps.
 TORCH_CUDA_INDEX="https://download.pytorch.org/whl/cu124"
 TORCH_CUDA_PIN="torch==2.6.0+cu124"
+# The same torch on Apple Silicon, where Metal support is in the ordinary PyPI
+# wheel and the +cu124 build does not exist at all. Same MINOR version as the
+# CUDA pin so the two machines run the same diffusers against the same API.
+TORCH_MPS_PIN="torch==2.6.0"
 DIFFUSERS_PIN="diffusers==0.40.0"
 TRANSFORMERS_PIN="transformers==5.17.0"
 ACCELERATE_PIN="accelerate==1.15.0"

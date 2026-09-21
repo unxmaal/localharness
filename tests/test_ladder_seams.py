@@ -129,17 +129,15 @@ def test_an_adapter_never_reaches_a_download(store, tmp_path):
     assert got and "attaches to a model" in got[0]["why"]
 
 
-@pytest.mark.xfail(strict=True, reason="#253 is open: a terminal verdict does "
-                                       "not stop re-screening. This is an "
-                                       "INVENTORY, not a gate -- the class is "
-                                       "already violated, so it must not block "
-                                       "a merge. strict=True so it fails loudly "
-                                       "the moment #253 is fixed and the mark "
-                                       "gets deleted rather than rotting.")
 def test_a_terminal_verdict_is_not_handed_back_to_the_screen(store):
-    """#253. GPT-X2.5-135M was screened `broken` twice and was ready for a
-    third. LFM2.5-350M was measured, lost, recorded `declined`, and measured
-    again an hour later against the same incumbent."""
+    """#253, now FIXED. GPT-X2.5-135M was screened `broken` twice and was
+    ready for a third; LFM2.5-350M was measured, lost, recorded `declined`,
+    and measured again an hour later against the same incumbent, which is
+    three of the four adopt verdicts in the real store.
+
+    The mark on this test XPASSed the moment ms.judgeable learned to exclude
+    a candidate whose LATEST verdict is terminal, which is what strict=True is
+    for: an inventory that becomes a gate says so rather than rotting."""
     from harness.cli import _queueable
 
     fakes.seeded_store(store, [("org/answered", "code", 0.5, 2),

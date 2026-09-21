@@ -206,7 +206,18 @@ def rank(rows, *, serving=(), measured_lanes=(), ceiling_gib: float = 22.0,
         got, why = value(row, serving=serving, measured_lanes=measured,
                          ceiling_gib=ceiling_gib)
         out.append({**row, "value": got, "value_why": "; ".join(why)})
-    return sorted(out, key=lambda r: (-r["value"], r["name"]))
+    # THE TIEBREAK IS ABOUT THE CANDIDATE, NEVER ITS NAME. Ten code candidates
+    # scored an identical +3.7, so the order was the alphabet: `AxiomicLabs`
+    # won every run and `z-lab` never did. A STABLE arbitrary tiebreak is worse
+    # than a random one, because it makes the tail of the queue unreachable
+    # rather than merely last -- no amount of re-running ever gets there.
+    #
+    # Freshness breaks the tie instead: the loop works THROUGH a backlog over
+    # successive runs rather than re-reading its first page. `name` stays as
+    # the final term so one run's order is reproducible. #252.
+    return sorted(out, key=lambda r: (-r["value"],
+                                      -float(r.get("last_seen") or 0.0),
+                                      r["name"]))
 
 
 def unrunnable(row: dict, machine=None) -> str:
@@ -252,6 +263,29 @@ def wanted(rows, minimum: int = 2) -> list[dict]:
     out = [r for r in rows
            if not lane_of(r) and int(r.get("times") or 0) >= minimum]
     return sorted(out, key=lambda r: (-int(r.get("times") or 0), r["name"]))
+
+
+def runnerless(rows) -> list[dict]:
+    """Candidates whose lane has a runner that cannot load them, with why.
+
+    THE SAME ARGUMENT AS `wanted`, one rung along. A lane is a person's
+    decision; so is an engine entry. These have a lane and a home, and the
+    only thing between them and a screen is a line in engines.ENTRY_POINTS
+    that nobody can write automatically -- guessing one yields a binary that
+    rejects the model several seconds into loading, which is the reason that
+    table is enumerated rather than inferred.
+    """
+    from harness import screen
+    out = []
+    for row in rows:
+        lane = lane_of(row)
+        if not lane:
+            continue
+        gap = screen.no_runner(screen.candidate_for(
+            lane, row["name"], row.get("description") or ""))
+        if gap:
+            out.append({**row, "why_not": gap})
+    return sorted(out, key=lambda r: (r.get("lane") or "", r["name"]))
 
 
 def serving(config=None) -> set[str]:

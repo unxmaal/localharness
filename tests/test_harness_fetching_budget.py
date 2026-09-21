@@ -16,7 +16,12 @@ from harness import memory_store as ms
 GIB = fetching.GIB
 
 
-def _seed(conn, name, gib, lane="image"):
+#: `code` because the budget is arithmetic and has nothing to do with a lane.
+#: These were seeded into `image` with invented names, which the screen tier
+#: now correctly calls no-runner -- mflux is an enumerated table of families
+#: and `org/a-small` is not one of them. A budget test refused before it could
+#: measure the budget was five green tests measuring nothing.
+def _seed(conn, name, gib, lane="code"):
     ms.record(conn, ms.Seen(name=name, source="test", url="", why="",
                             relevance=0, kind="candidate",
                             registry=ms.HUGGINGFACE, lane=lane, resolved=name))
@@ -134,13 +139,13 @@ def test_an_ordinary_model_is_not_refused_as_an_attachment(tmp_path):
     conn = ms.connect(tmp_path / "s.db")
     try:
         ms.record(conn, ms.Seen(
-            name="org/real-model", source="test", lane="image",
-            registry="huggingface", resolved="org/real-model",
+            name="org/z-image-turbo-4bit", source="test", lane="image",
+            registry="huggingface", resolved="org/z-image-turbo-4bit",
             description="task text-to-image; served by mflux; "
                         "built from org/base; 4.0 GiB of weights"))
-        ms.decide(conn, "org/real-model", "queued", tier="inspect",
+        ms.decide(conn, "org/z-image-turbo-4bit", "queued", tier="inspect",
                   detail="bytes=4294967296 fits")
-        got = fetching.run(conn, {"org/real-model": 4 * 1024 ** 3}, limit=1,
+        got = fetching.run(conn, {"org/z-image-turbo-4bit": 4 * 1024 ** 3}, limit=1,
                            snapshot=lambda *a, **k: (seen.append(1),
                                                      str(tmp_path))[1])
         assert seen, f"an ordinary model was not fetched: {got}"

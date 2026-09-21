@@ -18,7 +18,11 @@ def test_a_candidate_whose_weights_are_absent_is_waiting_not_failed():
     """A SCREEN NEVER DOWNLOADS. Fetching is its own step with its own disk
     budget, and a tier that quietly pulls gigabytes because something ranked
     well is how a laptop fills up overnight."""
-    got = screen.plan(rows(("org/m", "image")), missing=lambda n: [n])[0]
+    # The name's tail must be a family mflux serves. `org/m` was not, so the
+    # row is now correctly no-runner and this test asserted `waiting` on a
+    # candidate the screen could never have run.
+    got = screen.plan(rows(("org/z-image-turbo-4bit", "image")),
+                      missing=lambda n: [n])[0]
     assert got["state"] == screen.WAITING
     assert "lh fetch" in got["why_not"]
 
@@ -148,15 +152,17 @@ def test_a_real_model_is_still_a_candidate():
     """The negative half. A filter that refuses everything screens nothing."""
     assert screen.is_attachment("task text-to-image; served by mlx; "
                                 "tagged mlx, mflux, text-to-image") == ""
+    # The ENGINE is not the assertion. The image lane holds two, and which one
+    # spells a given model is settled by which one can run it.
     assert screen.candidate_for("image", "org/base",
-                                "tagged mlx, mflux") == "mflux:org/base"
+                                "tagged mlx, mflux").endswith(":org/base")
 
 
 def test_a_candidate_with_no_description_is_not_assumed_to_be_an_adapter():
     """Most rows carry no description. Treating silence as an adapter would
     empty the queue."""
     assert screen.is_attachment("") == ""
-    assert screen.candidate_for("image", "org/x") == "mflux:org/x"
+    assert screen.candidate_for("image", "org/x").endswith(":org/x")
 
 
 def test_an_enumerated_exception_survives():

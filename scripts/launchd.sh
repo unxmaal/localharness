@@ -17,7 +17,15 @@ AGENTS="$HOME/Library/LaunchAgents"
 LH_HOME="${LOCALHARNESS_HOME:-$HOME/localharness}"
 LH_LOGS="$LH_HOME/logs"
 PREFIX="com.unxmaal.localharness"
-SERVICES="gateway mlx tts mcp"
+# `discover` is not a server. It is the scheduled sweep, and it is in this
+# list because the thing that must survive a reboot is the SCHEDULE. #261.
+SERVICES="gateway mlx tts mcp discover"
+
+#: Services that RUN AND EXIT rather than serve, with how often to run them.
+#: KeepAlive on one of these restarts a finished sweep at once and the machine
+#: discovers in a tight loop; StartInterval is the right key.
+declare -a PERIODIC=(discover)
+DISCOVER_INTERVAL="${DISCOVER_INTERVAL:-21600}"   # six hours
 
 # launchd starts jobs with PATH=/usr/bin:/bin:/usr/sbin:/sbin and NOTHING else.
 # uv, ffmpeg, rsvg-convert and rec all live in /opt/homebrew/bin, so without
@@ -56,6 +64,21 @@ usage() {
   exit 2
 }
 
+# A server is kept alive; a periodic job is run on an interval and allowed to
+# finish. Getting this backwards means either a sweep that never repeats or one
+# that never stops.
+_schedule() {
+  local service="$1" p
+  for p in "${PERIODIC[@]}"; do
+    if [ "$p" = "$service" ]; then
+      printf '  <key>StartInterval</key><integer>%s</integer>\n' \
+        "$DISCOVER_INTERVAL"
+      return
+    fi
+  done
+  printf '  <key>KeepAlive</key><true/>\n'
+}
+
 write_plist() {
   local service="$1" dest="$2"
   cat > "$dest/$PREFIX.$service.plist" <<PLIST
@@ -71,7 +94,7 @@ write_plist() {
     <string>$REPO/scripts/serve-$service.sh</string>
   </array>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+$(_schedule "$service")
   <key>WorkingDirectory</key><string>$REPO</string>
   <key>StandardOutPath</key><string>$LH_LOGS/$service.log</string>
   <key>StandardErrorPath</key><string>$LH_LOGS/$service.log</string>
@@ -79,6 +102,8 @@ write_plist() {
   <dict>
     <key>PATH</key><string>$JOB_PATH</string>
     <key>HOME</key><string>$HOME</string>
+    <!-- stdout is a file here, so an unbuffered log is the only progress. -->
+    <key>PYTHONUNBUFFERED</key><string>1</string>
 $(_hf_env)  </dict>
   <key>ProcessType</key><string>Interactive</string>
 </dict>
@@ -153,17 +178,46 @@ MSG
   fi
 }
 
+#: `bootout` RETURNS BEFORE THE JOB IS GONE. It signals the process and the
+#: label lives on until the teardown completes, so the bootstrap that follows
+#: hits an already-loaded label and fails with "Bootstrap failed: 5: Input/
+#: output error", which names neither the service nor the cause.
+_await_unload() {
+  local label="$1" left=50
+  while [ "$left" -gt 0 ]; do
+    launchctl print "gui/$UID/$label" >/dev/null 2>&1 || return 0
+    left=$((left - 1))
+    sleep 0.2
+  done
+  return 1
+}
+
 install_units() {
   preflight
   mkdir -p "$AGENTS"
   generate "$AGENTS" >/dev/null
+  local failed=""
   for service in $SERVICES; do
     # bootout first so `install` is re-runnable: bootstrap on an already-loaded
     # label fails, and "already loaded" is the normal state when reinstalling.
     launchctl bootout "gui/$UID/$PREFIX.$service" 2>/dev/null || true
-    launchctl bootstrap "gui/$UID" "$AGENTS/$PREFIX.$service.plist"
-    echo "loaded $PREFIX.$service"
+    _await_unload "$PREFIX.$service" || true
+    # KEEP GOING AND REPORT. `set -e` here left the machine running a MIX of
+    # old and new agents and said only that something failed, which is worse
+    # than either all-old or all-new because nothing on it is a known state.
+    if launchctl bootstrap "gui/$UID" "$AGENTS/$PREFIX.$service.plist"; then
+      echo "loaded $PREFIX.$service"
+    else
+      failed="$failed $service"
+      echo "FAILED to load $PREFIX.$service" >&2
+    fi
   done
+  if [ -n "$failed" ]; then
+    echo >&2
+    echo "not loaded:$failed -- the rest are running, so this machine is" >&2
+    echo "part old and part new. Re-run install." >&2
+    return 1
+  fi
   echo
   echo "Give them a moment, then: ./scripts/smoke.sh"
 }
