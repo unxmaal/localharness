@@ -206,7 +206,18 @@ def rank(rows, *, serving=(), measured_lanes=(), ceiling_gib: float = 22.0,
         got, why = value(row, serving=serving, measured_lanes=measured,
                          ceiling_gib=ceiling_gib)
         out.append({**row, "value": got, "value_why": "; ".join(why)})
-    return sorted(out, key=lambda r: (-r["value"], r["name"]))
+    # THE TIEBREAK IS ABOUT THE CANDIDATE, NEVER ITS NAME. Ten code candidates
+    # scored an identical +3.7, so the order was the alphabet: `AxiomicLabs`
+    # won every run and `z-lab` never did. A STABLE arbitrary tiebreak is worse
+    # than a random one, because it makes the tail of the queue unreachable
+    # rather than merely last -- no amount of re-running ever gets there.
+    #
+    # Freshness breaks the tie instead: the loop works THROUGH a backlog over
+    # successive runs rather than re-reading its first page. `name` stays as
+    # the final term so one run's order is reproducible. #252.
+    return sorted(out, key=lambda r: (-r["value"],
+                                      -float(r.get("last_seen") or 0.0),
+                                      r["name"]))
 
 
 def unrunnable(row: dict, machine=None) -> str:

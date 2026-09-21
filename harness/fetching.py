@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from harness import memory_store as ms
+from harness import rank
 from harness import screen
 
 GIB = 1024 ** 3
@@ -342,6 +343,15 @@ def refused_by_harness(why: str) -> str:
     return ""
 
 
+def machine_id() -> str:
+    """This machine, named so a shared store stays legible from another."""
+    from harness import machine as _machine
+    try:
+        return _machine.detect().accelerator.name or "this machine"
+    except Exception:  # noqa: BLE001
+        return "this machine"
+
+
 def run(conn, sizes: dict[str, int], *, limit: int = 1, snapshot=None,
         free: int | None = None, lane: str = "",
         budget: int | None = None) -> list[dict]:
@@ -374,6 +384,21 @@ def run(conn, sizes: dict[str, int], *, limit: int = 1, snapshot=None,
         # merely sized would be downloaded and handed to a runner that cannot
         # load it. `declined` rather than `queued`, because unlike "no measured
         # size" this is a fact about the candidate and not about us.
+        # A RUNTIME THIS MACHINE DOES NOT HAVE IS AN ANSWER, not a gap to
+        # come back to. rank.unrunnable already drops these from the ordering,
+        # so they never reach a fetch and never receive a verdict: the queue
+        # carries them forever and every sweep re-ranks them. #254.
+        #
+        # Recorded WITH THE MACHINE THAT REFUSED, because the store is shared
+        # and the same weights are ordinary on the box with the card. A reader
+        # elsewhere sees a fact about this machine rather than about the model.
+        needs = rank.unrunnable(row, None)
+        if needs:
+            why = (f"{needs} on {machine_id()}: this machine has no runtime "
+                   f"that can load these weights")
+            ms.decide(conn, row["name"], "declined", tier="fetch", detail=why)
+            done.append({"repo": row["name"], "ok": False, "why": why})
+            continue
         attachment = screen.is_attachment(row.get("description") or "")
         if attachment:
             why = (f"{attachment} in its own card: this attaches to a model "

@@ -17,7 +17,15 @@ AGENTS="$HOME/Library/LaunchAgents"
 LH_HOME="${LOCALHARNESS_HOME:-$HOME/localharness}"
 LH_LOGS="$LH_HOME/logs"
 PREFIX="com.unxmaal.localharness"
-SERVICES="gateway mlx tts mcp"
+# `discover` is not a server. It is the scheduled sweep, and it is in this
+# list because the thing that must survive a reboot is the SCHEDULE. #261.
+SERVICES="gateway mlx tts mcp discover"
+
+#: Services that RUN AND EXIT rather than serve, with how often to run them.
+#: KeepAlive on one of these restarts a finished sweep at once and the machine
+#: discovers in a tight loop; StartInterval is the right key.
+declare -a PERIODIC=(discover)
+DISCOVER_INTERVAL="${DISCOVER_INTERVAL:-21600}"   # six hours
 
 # launchd starts jobs with PATH=/usr/bin:/bin:/usr/sbin:/sbin and NOTHING else.
 # uv, ffmpeg, rsvg-convert and rec all live in /opt/homebrew/bin, so without
@@ -56,6 +64,21 @@ usage() {
   exit 2
 }
 
+# A server is kept alive; a periodic job is run on an interval and allowed to
+# finish. Getting this backwards means either a sweep that never repeats or one
+# that never stops.
+_schedule() {
+  local service="$1" p
+  for p in "${PERIODIC[@]}"; do
+    if [ "$p" = "$service" ]; then
+      printf '  <key>StartInterval</key><integer>%s</integer>\n' \
+        "$DISCOVER_INTERVAL"
+      return
+    fi
+  done
+  printf '  <key>KeepAlive</key><true/>\n'
+}
+
 write_plist() {
   local service="$1" dest="$2"
   cat > "$dest/$PREFIX.$service.plist" <<PLIST
@@ -71,7 +94,7 @@ write_plist() {
     <string>$REPO/scripts/serve-$service.sh</string>
   </array>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+$(_schedule "$service")
   <key>WorkingDirectory</key><string>$REPO</string>
   <key>StandardOutPath</key><string>$LH_LOGS/$service.log</string>
   <key>StandardErrorPath</key><string>$LH_LOGS/$service.log</string>
