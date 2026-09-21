@@ -447,6 +447,8 @@ def cmd_discover(a) -> int:
         return _report_control(a)
     if getattr(a, "recurrence", False):
         return _report_recurrence(a)
+    if getattr(a, "revisit", False):
+        return _report_revisit(a)
     if getattr(a, "sources", False):
         return _report_sources(a)
     if getattr(a, "feeds", False):
@@ -576,6 +578,43 @@ def _report_control(a) -> int:
     print(f"  DOES NOT SEPARATE: {got['separated_in']} of {got['runs']} runs. "
           f"No ranking may be drawn from this rubric.")
     return 1
+
+
+def _report_revisit(a) -> int:
+    """Verdicts another machine made whose condition THIS machine now meets.
+
+    A refusal is routinely a fact about one box: `needs-cuda` is true where
+    there is no cuda runtime and false where there is, and `too-big` is
+    measured against a ceiling that describes one 32 GB machine. Until #266 the reason lived in prose, so
+    a verdict made elsewhere was a dead end -- there was no way to ask which
+    of them this machine could now answer.
+    """
+    from harness import memory_store as ms
+
+    store = ms.connect()
+    try:
+        here = ms.this_machine()
+        rows = ms.revisitable(store)
+    finally:
+        store.close()
+    print(f"this machine: {here['fingerprint']}")
+    print(f"  runtimes {here['runtimes'] or '-'}, "
+          f"ceiling {here['ceiling_gb']:.0f} GiB, "
+          f"memory {here['memory_gb']:.0f} GB\n")
+    if not rows:
+        print("nothing to revisit: no verdict from another machine has a "
+              "condition this one satisfies.")
+        return 0
+    print(f"{len(rows)} candidate(s) refused elsewhere for a reason that does "
+          f"not apply here:\n")
+    for r in sorted(rows, key=lambda r: (r["lane"] or "", r["name"])):
+        print(f"  {(r['lane'] or '-'):8} {r['name']}")
+        where = r["decided_on"] or "an unrecorded machine"
+        print(f"           {r['outcome']} on {where}: "
+              f"{(r['detail'] or '')[:70]}")
+        print(f"           waiting on {r['until']}, which this machine meets")
+    print("\nRetract one by re-queueing it: a verdict is never deleted.")
+    return 0
 
 
 def _report_recurrence(a) -> int:
@@ -2348,6 +2387,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "the store already knows. Arithmetic, not a judge")
     d.add_argument("--recurrence", action="store_true",
                    help="what keeps coming back, from the discovery store")
+    d.add_argument("--revisit", action="store_true",
+                   help="candidates another machine refused whose reason no "
+                        "longer applies here. A verdict is a fact about the "
+                        "machine that made it")
     d.add_argument("--comments", type=int, default=0, metavar="N",
                    help="with --feeds, also read the replies on the N newest "
                         "posts per source. The comparative judgements live "

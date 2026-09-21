@@ -18,7 +18,7 @@ from pathlib import Path
 
 from harness import paths, store
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 #: Outcomes a proposal can reach. TERMINAL ones suppress re-proposal.
 VERDICTS = ("measured", "declined", "broken", "queued", "ignored", "screened")
@@ -92,7 +92,42 @@ CREATE TABLE IF NOT EXISTS verdicts (
     score       REAL,
     rubric      TEXT NOT NULL DEFAULT '',
     judge       TEXT NOT NULL DEFAULT '',
-    decided_at  REAL NOT NULL
+    decided_at  REAL NOT NULL,
+    -- WHERE IT WAS DECIDED. The store is shared across three machines and a
+    -- refusal is routinely a fact about ONE of them: `needs-cuda` is true
+    -- here and false on the box with the card. This lived in the detail
+    -- string as the word `arm64`, which is an architecture rather than a
+    -- machine and cannot tell the 4070 under Linux from the same 4070 under
+    -- Windows -- two rigs this project's own comparable() already refuses to
+    -- pool. Issue #266.
+    machine_id  INTEGER REFERENCES machines(id),
+    -- WHAT WOULD MAKE THIS WORTH ASKING AGAIN, in the machine's terms. A
+    -- ceiling refusal expires when a bigger machine arrives, and until now
+    -- nothing could find those rows: the reason was prose. Same shape as
+    -- lanes.PARKED, which carries (why, until) for a lane and was the only
+    -- place in the project that said out loud what it was waiting for.
+    until       TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS machines (
+    id           INTEGER PRIMARY KEY,
+    -- Stable across runs and distinct between rigs. NOT the architecture and
+    -- NOT the hostname: a hostname changes without the machine changing, and
+    -- an architecture stays the same across two machines that measure
+    -- differently.
+    fingerprint  TEXT NOT NULL UNIQUE,
+    hw_model     TEXT NOT NULL DEFAULT '',
+    os           TEXT NOT NULL DEFAULT '',
+    arch         TEXT NOT NULL DEFAULT '',
+    memory_gb    REAL NOT NULL DEFAULT 0,
+    accelerator  TEXT NOT NULL DEFAULT '',
+    -- CAPABILITY AT DECISION TIME, which is the half that makes a verdict
+    -- re-askable. A machine that gains a runtime is a different machine for
+    -- this purpose, so these are recorded rather than probed when read.
+    runtimes     TEXT NOT NULL DEFAULT '',
+    ceiling_gb   REAL NOT NULL DEFAULT 0,
+    first_seen   REAL NOT NULL,
+    last_seen    REAL NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS edges (
@@ -166,6 +201,102 @@ def connect(path: Path | None = None):
     return conn
 
 
+def until_met(until: str, facts: dict | None = None) -> bool:
+    """Whether `facts` satisfies the condition a verdict is waiting on.
+
+    A PREDICATE, NOT A SENTENCE. The whole point of #266 is that a machine
+    fact buried in prose cannot be queried, so writing the condition as prose
+    would move the defect rather than fix it.
+
+    Three forms, which is all the real rows need:
+        runtime:<name>     the machine has that runtime
+        memory_gb:><n>     the machine holds more than n GB
+        ceiling_gb:><n>    the machine will load weights larger than n GiB
+    An unrecognised condition is NOT met, so a typo leaves the verdict
+    standing rather than silently re-queueing everything.
+    """
+    if not until:
+        return False
+    facts = facts if facts is not None else this_machine()
+    key, _, want = until.partition(":")
+    if key == "runtime":
+        return want in (facts.get("runtimes") or "").split(",")
+    if key in ("memory_gb", "ceiling_gb") and want.startswith(">"):
+        try:
+            return float(facts.get(key) or 0) > float(want[1:])
+        except ValueError:
+            return False
+    return False
+
+
+def revisitable(conn: sqlite3.Connection, facts: dict | None = None) -> list:
+    """Verdicts decided elsewhere whose condition THIS machine now satisfies.
+
+    The read path the columns exist for. A candidate declined on a machine
+    with no cuda is not declined on the box with the card, and until now
+    nothing could find those rows: the reason was a sentence.
+
+    Only the LATEST verdict per proposal counts, so a condition that was
+    already retracted does not resurrect.
+    """
+    facts = facts if facts is not None else this_machine()
+    rows = conn.execute("""
+        SELECT p.name, p.lane, v.outcome, v.detail, v.until, v.tier,
+               m.fingerprint AS decided_on
+          FROM verdicts v
+          JOIN proposals p ON p.id = v.proposal_id
+          LEFT JOIN machines m ON m.id = v.machine_id
+         WHERE v.id = (SELECT id FROM verdicts w
+                        WHERE w.proposal_id = p.id ORDER BY w.id DESC LIMIT 1)
+           AND v.until != ''
+    """).fetchall()
+    here = facts.get("fingerprint", "")
+    return [dict(r) for r in rows
+            if r["decided_on"] != here and until_met(r["until"], facts)]
+
+
+#: What a pre-#266 refusal was waiting for, derived from the phrase the tier
+#: wrote. Keyed on the runtime name because machine.refuses() builds these,
+#: so the two stay in step without a second list to maintain.
+_UNTIL_FROM_DETAIL = tuple(
+    (f"needs-{rt}", f"runtime:{rt}")
+    for rt in ("cuda", "rocm", "vllm", "mlx", "llamacpp"))
+
+
+def _attribute_old_verdicts(conn: sqlite3.Connection) -> None:
+    """Point 1767 existing verdicts at the machine that wrote them, and give
+    the machine-limited ones a condition.
+
+    THIS IS AN INFERENCE AND IS RECORDED AS ONE. Only this Mac has ever
+    written to this store -- 56 rows say `on arm64` and none say anything
+    else -- so attributing every pre-existing row to the machine running the
+    migration is correct HERE and would be wrong on a store that had been
+    shared. The fingerprint carries the real identity either way, so a reader
+    can see which machine was assumed rather than trusting that it was right.
+    """
+    mid = remember_machine(conn)
+    conn.execute("UPDATE verdicts SET machine_id = ? WHERE machine_id IS NULL",
+                 (mid,))
+    for phrase, until in _UNTIL_FROM_DETAIL:
+        conn.execute(
+            "UPDATE verdicts SET until = ? "
+            "WHERE until = '' AND lower(detail) LIKE ?",
+            (until, f"%{phrase}%"))
+    # THE 144 ROWS THE STUDIO IS FOR. `too-big` is measured against
+    # MEMORY_CEILING, which describes ONE 32 GB machine, so every one of these
+    # is a statement about the machine that measured it, not the model. The condition is
+    # the size the weights actually need, read out of the tier's own sentence,
+    # so a bigger machine matches exactly the rows it can now run rather than
+    # all of them.
+    for vid, detail in conn.execute(
+            "SELECT id, detail FROM verdicts "
+            "WHERE until = '' AND detail LIKE 'too-big:%'").fetchall():
+        m = re.search(r"([\d.]+)\s*GiB", detail or "")
+        if m:
+            conn.execute("UPDATE verdicts SET until = ? WHERE id = ?",
+                         (f"ceiling_gb:>{float(m.group(1)):.1f}", vid))
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     row = conn.execute("SELECT value FROM meta WHERE key='schema'").fetchone()
     have = int(row["value"]) if row else 0
@@ -207,6 +338,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # of #230 -- naming rows by hand missed the second member of the same
         # class.
         _retract_harness_refusals(conn)
+    if have and have < 12:
+        for col, ddl in (("machine_id", "INTEGER REFERENCES machines(id)"),
+                         ("until", "TEXT NOT NULL DEFAULT ''")):
+            if col not in _columns(conn, "verdicts"):
+                conn.execute(f"ALTER TABLE verdicts ADD COLUMN {col} {ddl}")
+        _attribute_old_verdicts(conn)
     conn.execute("INSERT OR REPLACE INTO meta VALUES ('schema', ?)",
                  (str(SCHEMA_VERSION),))
     conn.commit()
@@ -575,15 +712,101 @@ def set_lane(conn, name: str, lane: str) -> bool:
     return True
 
 
+#: The machine this process is running on, resolved once. The probes shell
+#: out and the answer does not change while the process runs.
+_THIS_MACHINE: dict | None = None
+
+
+def this_machine() -> dict:
+    """The identity facts a verdict needs to stay re-askable.
+
+    IMPORTED LAZILY. evals.environment already computes exactly these for
+    receipts and imports harness.memory, so a module-level import here would
+    be a cycle -- and writing a second copy is how this repo collected four
+    answers to "which engines exist" (RULE #237).
+
+    The fingerprint is hw_model + os + arch rather than a hostname: a hostname
+    changes without the machine changing, and an architecture stays the same
+    across two rigs that measure differently. The 4070 under Linux and under
+    Windows are different rigs by comparable()'s own definition -- different
+    peak-memory instrument, different OCR grader -- and must not pool.
+    """
+    global _THIS_MACHINE
+    if _THIS_MACHINE is not None:
+        return _THIS_MACHINE
+    try:
+        from evals import environment
+        from harness import inspect as _ins
+        from harness import machine as _machine
+
+        env = environment.capture()
+        mach = _machine.detect()
+        acc = env.get("accelerator") or {}
+        got = {
+            "hw_model": env.get("hw_model", ""),
+            "os": env.get("os", ""),
+            "arch": env.get("arch", ""),
+            "memory_gb": float(env.get("memory_gb") or 0),
+            "accelerator": f"{acc.get('kind', '')} "
+                           f"{float(acc.get('total_gb') or 0):.0f}GB".strip(),
+            "runtimes": ",".join(sorted(mach.runtimes)),
+            "ceiling_gb": _ins.MEMORY_CEILING / (1024 ** 3),
+        }
+    except Exception:  # noqa: BLE001
+        # A store write must never fail because a probe did. An unknown
+        # machine is recorded AS unknown rather than silently attributed to
+        # whichever one wrote last, which would be worse than no column.
+        got = {"hw_model": "", "os": "", "arch": "", "memory_gb": 0.0,
+               "accelerator": "", "runtimes": "", "ceiling_gb": 0.0}
+    got["fingerprint"] = "/".join(
+        x for x in (got["hw_model"], got["os"], got["arch"]) if x) or "unknown"
+    _THIS_MACHINE = got
+    return got
+
+
+def remember_machine(conn: sqlite3.Connection, facts: dict | None = None) -> int:
+    """The id of the row for this machine, inserting or refreshing it."""
+    facts = dict(facts or this_machine())
+    now = time.time()
+    row = conn.execute("SELECT id FROM machines WHERE fingerprint = ?",
+                       (facts["fingerprint"],)).fetchone()
+    if row:
+        conn.execute(
+            "UPDATE machines SET last_seen = ?, runtimes = ?, ceiling_gb = ?, "
+            "memory_gb = ?, accelerator = ? WHERE id = ?",
+            (now, facts["runtimes"], facts["ceiling_gb"], facts["memory_gb"],
+             facts["accelerator"], row["id"]))
+        return int(row["id"])
+    cur = conn.execute(
+        "INSERT INTO machines (fingerprint, hw_model, os, arch, memory_gb, "
+        "accelerator, runtimes, ceiling_gb, first_seen, last_seen) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (facts["fingerprint"], facts["hw_model"], facts["os"], facts["arch"],
+         facts["memory_gb"], facts["accelerator"], facts["runtimes"],
+         facts["ceiling_gb"], now, now))
+    return int(cur.lastrowid)
+
+
 def decide(conn: sqlite3.Connection, name: str, outcome: str, *, tier: str = "",
            detail: str = "", issue: int | None = None, run_path: str = "",
            score: float | None = None, rubric: str = "", judge: str = "",
-           at: float | None = None) -> int:
+           at: float | None = None, until: str = "") -> int:
     """Record what happened to a proposal.
 
     Verdicts accumulate rather than replace: a screen verdict and a later
     measurement are two facts, and which tier produced a row is part of whether
     two rows may be compared.
+
+    THE MACHINE IS RECORDED HERE AND NOWHERE ELSE. This is the single write
+    path for a verdict, so no caller has to remember -- and 56 rows in the
+    real store prove that asking callers to remember yields the fact as prose
+    inside `detail` when it is remembered at all. Issue #266.
+
+    `until` is what would make this verdict worth asking again, as a
+    PREDICATE rather than a sentence: `runtime:cuda`, `memory_gb:>22`. The
+    first draft of this stored "a machine with cuda" and re-created the exact
+    defect being fixed one level up -- a fact about a machine that only a
+    human can evaluate. See until_met().
     """
     if outcome not in VERDICTS:
         raise ValueError(f"unknown outcome {outcome!r}; "
@@ -609,11 +832,17 @@ def decide(conn: sqlite3.Connection, name: str, outcome: str, *, tier: str = "",
                 and same["detail"] == detail and same["score"] is None
                 and not same["run_path"]):
             return same["id"]
+    # A MACHINE THAT CANNOT BE IDENTIFIED IS RECORDED AS UNKNOWN, never
+    # omitted: a NULL here would be read as "some machine" and quietly pooled
+    # with rows that do know.
+    machine_id = remember_machine(conn)
     vid = conn.execute(
         "INSERT INTO verdicts (proposal_id, outcome, tier, detail, issue, "
-        "run_path, score, rubric, judge, decided_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "run_path, score, rubric, judge, decided_at, machine_id, until) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (row["id"], outcome, tier, detail, issue, run_path, score, rubric,
-         judge, time.time() if at is None else at)).lastrowid
+         judge, time.time() if at is None else at, machine_id,
+         until)).lastrowid
     conn.commit()
     return vid
 
