@@ -82,6 +82,37 @@ listening() {
   return 1
 }
 
+# A BOUND PORT IS NOT A WORKING SERVICE. `listening` answers whether something
+# holds the port, which is what `stop` needs to know. It is not what a reader
+# asking "is this working" needs: mlx_lm.server held :8081 for hours with an
+# empty model list and every request hanging, and status reported it `up` the
+# whole time. Four text lanes were unrunnable and the only visible symptom was
+# models timing out, which reads as the model failing. #255.
+#
+# One cheap GET with a short timeout. A service that cannot answer its own
+# listing in three seconds is not serving, whatever the port says.
+answering() {
+  local port="$1" path="$2"
+  [ -n "$path" ] || return 0          # no probe defined: the port is all we have
+  command -v curl >/dev/null 2>&1 || return 0
+  curl -fsS -m 3 -o /dev/null "http://127.0.0.1:$port$path" >/dev/null 2>&1
+}
+
+# service -> the cheapest endpoint that proves it can do its job. A service
+# absent here is judged by its port alone, which is the old behaviour.
+# NAMED AS THIS SCRIPT NAMES THEM, not as the launchd agents do. The two
+# disagree: :8081 is `llamacpp` here and `com.unxmaal.localharness.mlx` there,
+# which is why `stop` would not touch the wedged server this morning and why a
+# probe keyed on `mlx` silently covered nothing. #255.
+probe_for() {
+  case "$1" in
+    gateway)  printf '/v1/models' ;;
+    llamacpp) printf '/v1/models' ;;
+    audio)    printf '/v1/models' ;;
+    *)        printf '' ;;
+  esac
+}
+
 # PowerShell cannot take a POSIX path for a working directory or a redirect,
 # and Git Bash reports every path that way. Passing $PWD straight through made
 # Start-Process fail before it launched anything, which arrived as an empty
@@ -210,7 +241,12 @@ status() {
     pid="$(cat "$(pidfile "$name")" 2>/dev/null || true)"
     port="$(port_for "$name")"
     if listening "$port"; then
-      if alive "$pid"; then
+      if ! answering "$port" "$(probe_for "$name")"; then
+        # Bound and not serving. The state that cost hours: `up` here sends a
+        # reader looking at the models instead of at the service.
+        printf '%-9s WEDGED:%-5s holds the port and does not answer%s\n' \
+          "$name" "$port" "$(alive "$pid" && printf ', pid %s' "$pid" || true)"
+      elif alive "$pid"; then
         printf '%-9s up    :%-5s pid %s\n' "$name" "$port" "$pid"
       else
         # Up, and not by this script. Say so rather than claiming it: `stop`
