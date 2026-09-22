@@ -20,3 +20,4 @@ hf_root/
 .coverage
 coverage.json
 .cache/
+refs/

@@ -44,6 +44,19 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="read lyrics from a file instead, for anything with "
                         "newlines in it")
     p.add_argument("--instrumental", action="store_true")
+    # STYLE TRANSFER. `cover` is in TASK_TYPES_TURBO, so the config this
+    # project runs supports it; it was simply never passed. Read off
+    # GenerationParams rather than guessed: task_type, src_audio and
+    # audio_cover_strength are the three fields that matter. Issue #275.
+    p.add_argument("--task", default="text2music",
+                   help="text2music, or cover for style transfer from --ref")
+    p.add_argument("--ref", default="",
+                   help="reference audio to take the style from (task=cover)")
+    p.add_argument("--cover-strength", type=float, default=0.2,
+                   help="how much of the reference to keep, 0..1. ACE-Step's "
+                        "own docs say to set this SMALL for style transfer; "
+                        "the field defaults to 1.0, which reproduces the "
+                        "reference rather than restyling a new piece")
     p.add_argument("--bpm", type=float, default=None)
     p.add_argument("--duration", type=float, default=None)
     p.add_argument("--keyscale", default="")
@@ -81,6 +94,16 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 def main(argv=None) -> int:
     args = parse_args(argv)
+    # ARGUMENTS BEFORE ENVIRONMENT. A missing --ref is wrong however the
+    # machine is configured, and reporting the checkout first sends whoever
+    # ran it to fix the wrong thing.
+    if args.task == "cover" and not args.ref:
+        print("cover needs --ref: it restyles a reference, and without one "
+              "there is nothing to take the style from", file=sys.stderr)
+        return 2
+    if args.ref and not Path(args.ref).expanduser().is_file():
+        print(f"no reference audio at {args.ref}", file=sys.stderr)
+        return 2
     root = Path(args.root or ".").expanduser().resolve()
     if not (root / "acestep").is_dir():
         print(f"no ACE-Step checkout at {root}; set $ACESTEP_ROOT",
@@ -120,7 +143,10 @@ def main(argv=None) -> int:
         return 4
 
     params = GenerationParams(
-        task_type="text2music", caption=args.caption, lyrics=lyrics,
+        task_type=args.task, caption=args.caption, lyrics=lyrics,
+        src_audio=(str(Path(args.ref).expanduser().resolve())
+                   if args.ref else None),
+        audio_cover_strength=args.cover_strength,
         instrumental=args.instrumental, bpm=args.bpm, duration=args.duration,
         keyscale=args.keyscale, timesignature=args.timesignature,
         vocal_language=args.language, seed=args.seed,

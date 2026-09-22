@@ -22,9 +22,11 @@ from dataclasses import dataclass, field
 COST_S = {
     "extract": 20, "code": 60, "web": 120, "svg": 30,
     "tts": 30, "stt": 120, "image": 200, "video": 2700,
-    # 55s of model init then ~37s per 30s case, three cases. Measured
-    # 2026-09-20 on the M2 Pro, turbo at 8 steps.
-    "music": 180,
+    # 55s of model init then ~37s per 30s case. Measured 2026-09-20 on the
+    # M2 Pro, turbo at 8 steps, when the lane had three cases. `cover` is the
+    # fourth and is CHEAPER than the others -- it skips the LM entirely and
+    # goes straight to the DiT -- measured at ~40s on 2026-09-22 (#275).
+    "music": 220,
 }
 
 #: A lane nobody should start without meaning to. Video is ~40 minutes for ONE

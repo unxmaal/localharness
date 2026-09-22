@@ -1,0 +1,36 @@
+# STYLE TRANSFER: take the style of a reference and apply it to new material.
+#
+# THIS CASE HAS NO PROGRAMMATIC PASS CONDITION FOR THE THING IT IS ABOUT, and
+# that is deliberate rather than unfinished. Per the 2026 literature there is
+# no per-clip style-similarity metric: Frechet Audio Distance is distributional
+# and cannot score one clip, CLAP score measures text adherence, and human
+# preference studies are the field's ground truth. Four encoders were refused
+# here on an auditioned corpus (#272). `music` is in lanes.HUMAN_JUDGED, so a
+# person decides this one with `lh judge`.
+#
+# What IS asserted are the parts a program can still see. A cover that comes
+# back the wrong length, or that sings when told not to, has failed whatever
+# it sounds like -- and those checks cost nothing and would otherwise be
+# thrown away along with the one that cannot be automated.
+#
+# THE REFERENCE IS GENERATED, NOT COMMITTED. scripts/make-cover-ref.sh writes
+# it from a fixed caption and seed. That holds recording condition constant
+# (RULE #199: a render scored against a studio master measures production, not
+# style), keeps a 5 MB wav out of a public repo, and sidesteps the licensing
+# question entirely.
+id: cover
+modality: music
+prompt: >-
+  A slow acoustic ballad for fingerpicked steel-string guitar and light
+  strings, warm and intimate, in the style of the reference.
+params:
+  task: cover
+  cover_strength: 0.2
+  ref: cover-reference.wav
+  instrumental: true
+  lyrics: "[Instrumental]"
+  duration: 30
+  seed: 42
+assert:
+  expect_vocals: false
+  duration_s: 30
