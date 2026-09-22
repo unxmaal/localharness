@@ -342,7 +342,13 @@ PARAM_KEYS = {"width", "height", "steps", "seed", "guidance", "frames",
               # measurement in the receipt, and the gap between them is the
               # adherence axis.
               "lyrics", "bpm", "duration", "keyscale", "timesignature",
-              "instrumental"}
+              "instrumental",
+              # music, style transfer: `task` selects cover over text2music,
+              # `ref` names the audio whose style is being taken, and
+              # `cover_strength` says how much of it to keep. The reference
+              # belongs to the CASE rather than the engine spec because it is
+              # what the case is asking about. #275.
+              "task", "ref", "cover_strength"}
 # Assertions that need text to search. Declaring one on an image case can only
 # pass vacuously until the suite can OCR, so it is rejected rather than ignored.
 TEXT_ASSERTIONS = {"min_shapes", "must_contain", "must_not_contain"}
