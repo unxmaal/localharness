@@ -68,7 +68,10 @@ def ceiling_bytes(acc=None) -> int:
 #: cloning it is the download this tier exists to avoid.
 CLONE_KB_CAP = 250_000
 #: No commits in this long and it is not where this month's technique lives.
-DEAD_DAYS = 730
+#: How long a candidate's UPSTREAM may sit without a commit before the
+#: inspect tier refuses it. Theirs, not ours: this project is days old and
+#: every repo it has refused this way is years idle.
+UPSTREAM_DEAD_DAYS = 730
 #: How many named weights to size. A repo that lists a hundred models is
 #: showing a CATALOGUE, and the smallest few decide the verdict anyway, so
 #: sizing all of them buys nothing and costs an hour.
@@ -228,11 +231,13 @@ class Fit:
     #: `torch.cuda.is_available()` guard is compatible with running elsewhere.
     cuda_mentioned: list[str] = field(default_factory=list)
     mlx: bool = False
-    #: Days since the source's last commit, as measured by decide(). 0 means
-    #: not measured. It was only ever written into the verdict's prose as
-    #: `last commit 2.9 years ago`, one decimal place of years, which is a
-    #: number a reader acts on and no query can reach. Issue #268.
-    stale_days: float = 0.0
+    #: Days since the CANDIDATE'S UPSTREAM last committed, as measured by
+    #: decide(). 0 means not measured. It was only ever written into the
+    #: verdict's prose as `last commit 2.9 years ago`, one decimal place of
+    #: years, which is a number a reader acts on and no query can reach.
+    #: Named `stale_days` first, which says nothing about whose staleness and
+    #: was read as the age of our own row. Issues #268 and #270.
+    upstream_idle_days: float = 0.0
     #: Its weights are GGUF, which only llama.cpp loads. A format is not a
     #: runtime and this field is not one either: it is the evidence that the
     #: `llamacpp` runtime is required, resolved against the machine in
@@ -609,7 +614,7 @@ def card_description(data: dict) -> str:
 
 
 def inspect_model(model_id: str, *, data: dict | None = None, fetch=None,
-                  ceiling: int | None = None, dead_days: int = DEAD_DAYS,
+                  ceiling: int | None = None, dead_days: int = UPSTREAM_DEAD_DAYS,
                   machine=None) -> Fit:
     """Read a HuggingFace model card and say whether it can run here.
 
@@ -644,7 +649,7 @@ def inspect_model(model_id: str, *, data: dict | None = None, fetch=None,
     return decide(fit, ceiling=ceiling, dead_days=dead_days, machine=machine)
 
 
-def decide(fit: Fit, ceiling: int | None = None, dead_days: int = DEAD_DAYS,
+def decide(fit: Fit, ceiling: int | None = None, dead_days: int = UPSTREAM_DEAD_DAYS,
            now: float | None = None, machine=None) -> Fit:
     """Turn what was read into one verdict and the reason for it.
 
@@ -731,7 +736,7 @@ def decide(fit: Fit, ceiling: int | None = None, dead_days: int = DEAD_DAYS,
         try:
             when = datetime.fromisoformat(fit.last_commit).timestamp()
             days = ((time.time() if now is None else now) - when) / 86400.0
-            fit.stale_days = days
+            fit.upstream_idle_days = days
             if days > dead_days:
                 fit.verdict = "dead"
                 fit.why = f"last commit {days / 365.0:.1f} years ago"
@@ -767,7 +772,7 @@ def _takes_cache(fn) -> bool:
 def inspect(repo: str, workdir: Path, *, meta: dict | None = None,
             sizer=None, facts=hf_facts, run=_run,
             ceiling: int | None = None,
-            dead_days: int = DEAD_DAYS,
+            dead_days: int = UPSTREAM_DEAD_DAYS,
             machine=None,
             kb_cap: int = CLONE_KB_CAP) -> Fit:
     """Clone a candidate's source, read it, and say whether it can run here."""

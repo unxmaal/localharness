@@ -275,14 +275,20 @@ def test_not_an_attachment_is_distinguishable_from_nobody_asking(store):
     assert row["attaches_to"] == ""
 
 
-def test_the_age_is_a_number_not_one_decimal_of_years(store):
+def test_the_upstream_idle_time_is_a_number_not_one_decimal_of_years(store):
     """`last commit 2.9 years ago` is a number a reader acts on and no query
-    can reach."""
-    ms.decide(store, "org/c", "declined", tier="inspect", stale_days=1058.5,
+    can reach.
+
+    THE NAME SAYS WHOSE. It was `stale_days` for a day and was read as the age
+    of our own row -- this project is days old and the repos it refuses this
+    way are years idle. A column named for a fact without its subject is the
+    same defect as machine_id() answering `arm64`."""
+    ms.decide(store, "org/c", "declined", tier="inspect",
+              upstream_idle_days=1058.5,
               detail="dead: last commit 2.9 years ago")
-    row = store.execute(
-        "SELECT stale_days FROM verdicts ORDER BY id DESC LIMIT 1").fetchone()
-    assert row["stale_days"] == pytest.approx(1058.5)
+    row = store.execute("SELECT upstream_idle_days FROM verdicts "
+                        "ORDER BY id DESC LIMIT 1").fetchone()
+    assert row["upstream_idle_days"] == pytest.approx(1058.5)
 
 
 def test_a_judge_using_the_word_workflow_is_not_a_verdict_about_one(tmp_path):
@@ -332,9 +338,10 @@ def test_a_judge_using_the_word_workflow_is_not_a_verdict_about_one(tmp_path):
 
     conn = ms.connect(path)
     try:
-        got = {r["proposal_id"]: (r["attaches_to"], r["stale_days"])
+        got = {r["proposal_id"]: (r["attaches_to"], r["upstream_idle_days"])
                for r in conn.execute(
-                   "SELECT proposal_id, attaches_to, stale_days FROM verdicts")}
+                   "SELECT proposal_id, attaches_to, upstream_idle_days "
+                   "FROM verdicts")}
         assert got[1] == ("", 0.0), (
             f"a judge's prose was read as a verdict about an attachment: "
             f"{got[1]}")
@@ -342,3 +349,43 @@ def test_a_judge_using_the_word_workflow_is_not_a_verdict_about_one(tmp_path):
         assert got[3][1] == pytest.approx(2.9 * 365.0)
     finally:
         conn.close()
+
+
+# --- a refusal that waits on somebody else's repository -------------------
+
+def test_a_dead_upstream_can_be_reconsidered_when_it_commits(store):
+    """A repo idle two years is refused, and that verdict is `declined`,
+    which is TERMINAL. So the candidate stayed refused even after its upstream
+    shipped -- and `mlx-community/Mistral-7B-Instruct-v0.3-4bit` is on that
+    list, where a requantisation repo has no reason to receive commits at all.
+
+    Every other machine-limited refusal got a condition in #266. This one was
+    missed because its limit is not the machine."""
+    ms.decide(store, "org/c", "declined", tier="inspect",
+              upstream_idle_days=1058.5,
+              until="commit_after:2023-10-22T03:10:14Z",
+              detail="dead: last commit 2.9 years ago")
+    fresh = {"fingerprint": "elsewhere", "last_commit": "2026-09-01T00:00:00Z"}
+    assert ms.revisitable(store, fresh), "a revived upstream stays refused"
+    stale = {"fingerprint": "elsewhere", "last_commit": "2023-01-01T00:00:00Z"}
+    assert not ms.revisitable(store, stale), (
+        "an upstream that has NOT moved was offered for reconsideration")
+
+
+def test_an_unparseable_commit_date_does_not_reopen_everything():
+    """Not-met is the safe direction: a registry field that is not ISO-8601
+    must leave the verdict standing rather than re-queueing the corpus."""
+    assert not ms.until_met("commit_after:2023-10-22T03:10:14Z",
+                            {"last_commit": "last Tuesday"})
+    assert not ms.until_met("commit_after:2023-10-22T03:10:14Z",
+                            {"last_commit": ""})
+    assert not ms.until_met("commit_after:2023-10-22T03:10:14Z", {})
+
+
+def test_the_machine_conditions_still_ignore_an_upstream_fact():
+    """The negative control for mixing two kinds of condition in one column.
+    A machine with cuda must not satisfy a verdict waiting on a commit."""
+    assert not ms.until_met("commit_after:2023-01-01T00:00:00Z",
+                            {"runtimes": "cpu,cuda", "memory_gb": 61.0})
+    assert not ms.until_met("runtime:cuda",
+                            {"last_commit": "2026-09-01T00:00:00Z"})

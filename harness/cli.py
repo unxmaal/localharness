@@ -867,9 +867,17 @@ def _report_inspect(a) -> int:
             # never proposed again. "unknown" settles nothing, deliberately.
             outcome = {"fits": "queued", "unknown": ""}.get(fit.verdict, "declined")
             if outcome:
+                # A `dead` refusal WAITS ON SOMEBODY ELSE'S REPOSITORY, and
+                # is recorded `declined`, which is terminal. Without the
+                # condition a candidate stays refused even after its upstream
+                # ships -- and a requantisation repo has no reason to receive
+                # commits at all. #270.
+                until = (f"commit_after:{fit.last_commit}"
+                         if fit.verdict == "dead" and fit.last_commit else "")
                 ms.decide(store, repo, outcome, tier=ms.INSPECT,
                           size_bytes=fit.largest if fit.verdict == "fits" else 0,
-                          stale_days=fit.stale_days,
+                          upstream_idle_days=fit.upstream_idle_days,
+                          until=until,
                           detail=f"{fit.verdict}: {fit.why}"[:200])
             # The WEIGHTS are what a download queue can act on. The repo is
             # something to install and screen, and the two are not the same
