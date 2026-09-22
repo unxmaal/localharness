@@ -1007,6 +1007,52 @@ def _newest_receipt_for(lane: str):
     return max(got, key=lambda d: d.stat().st_mtime) / "results.json"
 
 
+def cmd_judge(a) -> int:
+    """Serve the page a person votes on, for a lane no program can score.
+
+    Some capabilities have no metric -- not because the right one has not been
+    found, but because the field has none. There is no per-clip
+    style-similarity measure; Frechet Audio Distance is distributional and
+    cannot score one clip; human preference studies are the ground truth for
+    music generation. This project hit that wall three times and answered by
+    not building the capability. Issue #273.
+    """
+    from harness import human, judge_server, lanes
+
+    run = Path(a.run).expanduser()
+    if not run.is_absolute():
+        run = paths.home() / "runs" / run
+    results = run / "results.json"
+    if not results.is_file():
+        return err(f"no results.json in {run}")
+    receipt = json.loads(results.read_text(encoding="utf-8"))
+    lane = (a.lane or receipt.get("receipt", {}).get("modality") or "").strip()
+    if not lane:
+        return err("that receipt does not name its modality; pass --lane")
+    if not lanes.human_judged(lane):
+        print(f"note: the {lane} lane has programmatic checks and is not in "
+              f"lanes.HUMAN_JUDGED, so this verdict is extra rather than the "
+              f"deciding one.")
+    pairs = human.pairings(receipt)
+    if not pairs:
+        return err("no two candidates in that run share a case, so there is "
+                   "nothing to compare")
+    try:
+        judge_server.serve(lane, receipt, port=a.port,
+                           open_browser=not a.no_browser)
+    except OSError as exc:
+        return err(f"could not serve on port {a.port}: {exc}")
+    settled = [p for p in pairs
+               if human.decided(lane, p["case"], p["a"], p["b"]) is not None]
+    print(f"\n{len(settled)} of {len(pairs)} pairing(s) settled")
+    for p in pairs:
+        got = human.decided(lane, p["case"], p["a"], p["b"])
+        if got is None:
+            continue
+        print(f"  {p['case']:14} {got or 'no preference'}")
+    return 0
+
+
 def cmd_report(a) -> int:
     """Write the status page. Issue #231."""
     from harness import report
@@ -2460,6 +2506,21 @@ def build_parser() -> argparse.ArgumentParser:
     rep.add_argument("--out", default="",
                      help="where to write it (default: $LOCALHARNESS_HOME/report.html)")
     rep.set_defaults(func=cmd_report)
+
+    jud = sub.add_parser(
+        "judge",
+        help="decide a human-judged lane by looking and listening. Issue #273")
+    # THE RUN DIRECTORY IS REQUIRED AND IS NOT _latest_receipt. That helper
+    # says so itself: "NOT FOR DECIDING ANYTHING. Reporting only", because
+    # newest means sorts-highest-by-name and one badly named directory wins
+    # forever (#222). A human verdict decides something.
+    jud.add_argument("run", help="the run directory whose artifacts to compare")
+    jud.add_argument("--lane", default="",
+                     help="the lane being judged (default: read from the "
+                          "receipt)")
+    jud.add_argument("--port", type=int, default=8765)
+    jud.add_argument("--no-browser", action="store_true")
+    jud.set_defaults(func=cmd_judge)
 
     ver = sub.add_parser(
         "verify",
