@@ -77,6 +77,25 @@ def parked(lane) -> tuple[str, str]:
 #: candidate spec.
 TEXT_SERVED = ("code", "web", "svg", "extract")
 
+#: Lanes whose winner no program can pick, so a person does. Not a failure to
+#: find the right metric: per the 2026 literature there is no per-clip
+#: style-similarity metric at all, FAD is distributional and cannot score one
+#: clip, and human preference studies are the field's ground truth. This
+#: project reached the same wall three times before naming it -- cover
+#: similarity (#272), musical quality (KNOWLEDGE #154), and svg aesthetics
+#: (KNOWLEDGE #108, "no check can see that OmniSVG's gear is a better-looking
+#: gear"). Issue #273.
+#:
+#: A lane here still runs every programmatic check it has. `music` keeps its
+#: sung-lyric WER and its duration adherence; what it gains is a verdict for
+#: the part those cannot see.
+HUMAN_JUDGED = ("music", "svg")
+
+
+def human_judged(lane) -> bool:
+    """Whether this lane's winner is decided by a person."""
+    return canonical(lane) in HUMAN_JUDGED
+
 
 def canonical(lane) -> str:
     """The surviving name for `lane`. Empty means no lane at all."""
