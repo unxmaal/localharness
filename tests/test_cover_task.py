@@ -55,9 +55,15 @@ def test_a_bare_reference_resolves_under_the_project_home():
     assert ref.parent.name == "refs"
 
 
-def test_an_absolute_reference_is_left_alone():
-    got = argv({"task": "cover", "ref": "/elsewhere/x.wav"})
-    assert got[got.index("--ref") + 1] == "/elsewhere/x.wav"
+def test_an_absolute_reference_is_left_alone(tmp_path):
+    """THE PATH COMES FROM tmp_path, not a literal. `/elsewhere/x.wav` is
+    absolute on POSIX and normalises to `C:\\elsewhere\\x.wav` on Windows, so
+    asserting the string tests the runner rather than the behaviour -- which
+    is only that an absolute reference is NOT rewritten under refs/."""
+    ref = tmp_path / "x.wav"
+    got = argv({"task": "cover", "ref": str(ref)})
+    assert Path(got[got.index("--ref") + 1]) == ref
+    assert Path(got[got.index("--ref") + 1]).parent.name != "refs"
 
 
 def test_cover_without_a_reference_is_refused_before_the_model_loads():
