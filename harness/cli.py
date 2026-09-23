@@ -1025,7 +1025,8 @@ def cmd_judge(a) -> int:
     music generation. This project hit that wall three times and answered by
     not building the capability. Issue #273.
     """
-    from harness import human, judge_server, lanes
+    from harness import adopt, human, judge_server, lanes, winners
+    from harness import memory_store as ms
 
     run = Path(a.run).expanduser()
     if not run.is_absolute():
@@ -1045,9 +1046,33 @@ def cmd_judge(a) -> int:
     if not pairs:
         return err("no two candidates in that run share a case, so there is "
                    "nothing to compare")
+    def _record(lane_, pairs_):
+        """Write the lane's verdict the moment it becomes decidable."""
+        won, why = human.lane_verdict(lane_, pairs_)
+        if won is None:
+            return
+        incumbent = adopt.default_for(lane_, winners.typed().get(lane_, ""))
+        names = sorted({p["a"] for p in pairs_} | {p["b"] for p in pairs_})
+        store = ms.connect()
+        try:
+            for challenger in names:
+                if challenger != incumbent:
+                    adopt.record(store, adopt.decide_by_hand(
+                        lane_, incumbent, challenger, pairs_))
+            store.commit()
+        finally:
+            store.close()
+        print(f"  recorded: {won or 'no preference'} -- {why}")
+
+    # A RUN THAT IS ALREADY JUDGED RECORDS WITHOUT ANYONE CLICKING. Recording
+    # only on a new answer leaves a finished run unrecorded forever, and
+    # recording only at shutdown loses it whenever the server is killed rather
+    # than interrupted -- which is how a service manager stops things.
+    _record(lane, pairs)
+
     try:
         judge_server.serve(lane, receipt, port=a.port,
-                           open_browser=not a.no_browser)
+                           open_browser=not a.no_browser, on_answer=_record)
     except OSError as exc:
         return err(f"could not serve on port {a.port}: {exc}")
     settled = [p for p in pairs
@@ -1058,7 +1083,19 @@ def cmd_judge(a) -> int:
         if got is None:
             continue
         print(f"  {p['case']:14} {got or 'no preference'}")
-    return 0
+
+    # THE VERDICT GOES IN THE STORE, or the whole exercise is a page somebody
+    # clicked. adopt.record already knows how to write a winner that has no
+    # proposal row (#262), so a candidate named on a command line lands the
+    # same way one from a sweep does.
+    won, why = human.lane_verdict(lane, pairs)
+    if won is None:
+        print(f"\nnot recorded: {why}")
+        return 0
+    print(f"\n{lane}: {'no preference' if not won else won}")
+    print(f"  {why}")
+    _record(lane, pairs)           # idempotent; covers a run that was already
+    return 0                       # fully judged before the server started
 
 
 def cmd_report(a) -> int:

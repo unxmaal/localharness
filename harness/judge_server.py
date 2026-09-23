@@ -63,6 +63,11 @@ class Judge(BaseHTTPRequestHandler):
     lane = ""
     pairs: list[dict] = []
     files: list[str] = []
+    #: Called after every answer. The verdict is written when the last vote
+    #: lands rather than when the server stops, because how a server stops is
+    #: not the operator's decision: SIGTERM killed one outright and the
+    #: judging was lost even though every answer was already on disk.
+    on_answer = staticmethod(lambda lane, pairs: None)
 
     def log_message(self, *a):        # the terminal is for the operator
         pass
@@ -133,15 +138,23 @@ class Judge(BaseHTTPRequestHandler):
         answer = ("tie" if pick == "tie"
                   else ("a" if (pick == "left") == (first == a) else "b"))
         human.record(self.lane, get("case"), a, b, answer, shown_first=first)
+        try:
+            self.on_answer(self.lane, self.pairs)
+        except Exception as exc:            # noqa: BLE001
+            # A store that will not take the verdict must not lose the vote,
+            # which is already saved. Report and carry on.
+            print(f"  could not record the lane verdict: {exc}")
         self.send_response(303)
         self.send_header("Location", "/")
         self.end_headers()
 
 
-def serve(lane: str, receipt: dict, port: int = 8765, open_browser=True) -> None:
+def serve(lane: str, receipt: dict, port: int = 8765, open_browser=True,
+          on_answer=None) -> None:
     Judge.lane = lane
     Judge.pairs = human.pairings(receipt)
     Judge.files = []
+    Judge.on_answer = staticmethod(on_answer or (lambda lane, pairs: None))
     if not Judge.pairs:
         raise ValueError("that receipt has no two candidates sharing a case, "
                          "so there is nothing to compare")

@@ -159,3 +159,82 @@ def test_a_settled_pairing_stops_being_offered():
     for _ in range(human.ENOUGH):
         human.record("image", p["case"], p["a"], p["b"], "a")
     assert p["case"] not in {q["case"] for q in human.pending("image", pairs)}
+
+
+# --- the lane's verdict, and adoption from it ------------------------------
+
+def _settle(lane, case, a, b, answer):
+    for _ in range(human.ENOUGH):
+        human.record(lane, case, a, b, answer)
+
+
+def test_a_lane_is_not_judged_until_every_case_is():
+    """Adopting on a partial set lets the order somebody clicked in pick the
+    winner, and the cases are not interchangeable: the first real run split
+    `cover` one way and `lyrics-dense` the other, unanimously each way."""
+    pairs = human.pairings(RECEIPT)
+    _settle("image", pairs[0]["case"], pairs[0]["a"], pairs[0]["b"], "a")
+    won, why = human.lane_verdict("image", pairs)
+    assert won is None and "not judged" in why or "fewer than" in why
+
+
+def test_a_plurality_of_cases_carries_the_lane():
+    pairs = human.pairings(RECEIPT)
+    _settle("image", "fox", "alpha", "beta", "a")
+    _settle("image", "sign", "alpha", "beta", "a")
+    won, why = human.lane_verdict("image", pairs)
+    assert won == "alpha", why
+
+
+def test_cases_that_disagree_evenly_are_no_preference():
+    """The real run's shape. A split is a finding, not a reason to keep
+    asking until one side wins."""
+    pairs = human.pairings(RECEIPT)
+    _settle("image", "fox", "alpha", "beta", "a")
+    _settle("image", "sign", "alpha", "beta", "b")
+    won, why = human.lane_verdict("image", pairs)
+    assert won == "" and "disagree" in why
+
+
+def test_a_case_with_no_preference_counts_for_nobody():
+    """It still counts toward the total, so winning one case of four does not
+    carry the lane on a technicality."""
+    pairs = human.pairings(RECEIPT)
+    _settle("image", "fox", "alpha", "beta", "a")
+    _settle("image", "sign", "alpha", "beta", "tie")
+    won, why = human.lane_verdict("image", pairs)
+    assert won == "alpha"
+    assert "1 of 2" in why and "no preference" in why
+
+
+def test_an_unjudged_lane_is_not_a_loss():
+    """`better()` returning False means measured and short. Unjudged means
+    nobody looked. The first is terminal; conflating them settles a candidate
+    on the strength of nobody having opened the page."""
+    from harness import adopt
+
+    pairs = human.pairings(RECEIPT)
+    v = adopt.decide_by_hand("image", "alpha", "beta", pairs)
+    assert not v.adopt
+    assert "not judged" in v.why
+
+
+def test_the_preferred_candidate_is_adopted_and_the_other_is_not():
+    from harness import adopt
+
+    pairs = human.pairings(RECEIPT)
+    for case in ("fox", "sign"):
+        _settle("image", case, "alpha", "beta", "a")
+    assert adopt.decide_by_hand("image", "beta", "alpha", pairs).adopt
+    loser = adopt.decide_by_hand("image", "alpha", "beta", pairs)
+    assert not loser.adopt and "incumbent was preferred" in loser.why
+
+
+def test_no_preference_leaves_the_incumbent_in_place():
+    from harness import adopt
+
+    pairs = human.pairings(RECEIPT)
+    for case in ("fox", "sign"):
+        _settle("image", case, "alpha", "beta", "tie")
+    v = adopt.decide_by_hand("image", "alpha", "beta", pairs)
+    assert not v.adopt and "incumbent stays" in v.why

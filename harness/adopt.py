@@ -53,6 +53,37 @@ def better(incumbent: dict, challenger: dict) -> bool:
     return winners.order_key(challenger) > winners.order_key(incumbent)
 
 
+def decide_by_hand(lane: str, incumbent: str, challenger: str,
+                   pairs: list[dict]) -> Verdict:
+    """The same closing step for a lane no program can score. Issue #279.
+
+    The two statistical gates are replaced by ONE question a person already
+    answered, because for these lanes the gates cannot be computed: there is
+    no per-clip style-similarity metric, and a lane's own checkers are blind
+    to the thing being compared. `music` scored 4/4 with identical duration
+    adherence for both candidates while a person picked different winners in
+    different cases -- information the programmatic path structurally could
+    not produce.
+
+    UNJUDGED IS NOT A LOSS. `better()` returning False means the challenger
+    was measured and came up short; an unjudged lane has not been asked. The
+    first is terminal, the second must stay queued, and conflating them
+    settles a candidate nobody looked at.
+    """
+    from harness import human
+
+    won, why = human.lane_verdict(lane, pairs)
+    if won is None:
+        return Verdict(lane, incumbent, challenger, False, f"not judged: {why}")
+    if not won:
+        return Verdict(lane, incumbent, challenger, False,
+                       f"the incumbent stays: {why}")
+    if won != challenger:
+        return Verdict(lane, incumbent, challenger, False,
+                       f"the incumbent was preferred: {why}")
+    return Verdict(lane, incumbent, challenger, True, f"preferred by hand: {why}")
+
+
 def decide(lane: str, incumbent: dict, challenger: dict,
            rows: list[dict] | None = None) -> Verdict:
     """Whether this challenger replaces this incumbent.

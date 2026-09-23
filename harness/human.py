@@ -125,6 +125,49 @@ def decided(lane: str, case: str, a: str, b: str) -> str | None:
     return top[0][0]
 
 
+def lane_verdict(lane: str, pairs: list[dict]) -> tuple[str | None, str]:
+    """Who won the LANE, and why, from the per-case answers.
+
+    Returns (winner, why). `None` means not enough has been judged to say;
+    `""` means judged and no preference.
+
+    EVERY PAIRING MUST BE DECIDED FIRST. Adopting on a partial set lets the
+    order somebody happened to click in pick the winner, and the cases are
+    not interchangeable -- this lane's own first run split `cover` to one
+    candidate and `lyrics-dense` to the other, unanimously each way.
+
+    A PLURALITY OF CASES WINS, and a tie is a real outcome rather than a
+    reason to keep asking. Cases where the answer was "no preference" count
+    toward the total and for nobody, so a candidate that wins one case out of
+    four does not carry the lane on a technicality.
+    """
+    from collections import Counter
+
+    decided_by = {}
+    for p in pairs:
+        got = decided(lane, p["case"], p["a"], p["b"])
+        if got is None:
+            return None, (f"{p['case']} has fewer than {ENOUGH} answers, so "
+                          f"the lane is not judged yet")
+        decided_by[p["case"]] = got
+    if not decided_by:
+        return None, "nothing to judge"
+
+    counts = Counter(w for w in decided_by.values() if w)
+    ties = sum(1 for w in decided_by.values() if not w)
+    detail = ", ".join(f"{c}: {w.split('@')[-1] if w else 'no preference'}"
+                       for c, w in sorted(decided_by.items()))
+    if not counts:
+        return "", f"no case had a preference ({detail})"
+    top = counts.most_common()
+    if len(top) > 1 and top[0][1] == top[1][1]:
+        return "", (f"the cases disagree {top[0][1]}-{top[1][1]} with no "
+                    f"majority ({detail})")
+    won, n = top[0]
+    return won, f"won {n} of {len(decided_by)} case(s) ({detail})" + (
+        f", {ties} with no preference" if ties else "")
+
+
 def pending(lane: str, pairs: list[dict]) -> list[dict]:
     """Pairings still short of ENOUGH answers, each with what it still needs
     and the side to show first, shuffled."""
