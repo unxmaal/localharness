@@ -60,6 +60,42 @@ def names() -> frozenset[str]:
     return frozenset(_BUILDERS)
 
 
+#: Options that say WHERE something is rather than WHAT it produces. Two runs
+#: differing only in these are the same exam and must keep one identity, or a
+#: receipt from another machine stops matching this one.
+_ENVIRONMENTAL = frozenset({"root", "lm"})
+
+
+def distinguish(options: dict, already: frozenset = frozenset()) -> str:
+    """The suffix that keeps two option-variants of one engine apart, or "".
+
+    WITHOUT THIS, TWO CANDIDATES BECOME ONE. `acestep:...,steps=8` and
+    `acestep:...,steps=16` both resolved to `acestep/acestep-v15-turbo`, so a
+    run comparing them wrote both into the SAME artifact filename -- the
+    second overwrote the first -- and the receipt recorded one candidate where
+    two had run. Eight artifacts came back as three. mflux had it too:
+    `quantize` was hand-rolled into the name and `steps` was not.
+
+    That is RULE #262's class (an axis that changes the exam must be IN the
+    receipt) and gauntlet #8 (the label is not the run). A confounded
+    comparison that still produces a plausible number is worse than one that
+    errors. Issue #277.
+
+    Sorted, so the same options in a different order are the same identity.
+
+    `already` names options a builder has ALREADY put in its own label -- the
+    mflux name carries `-q8` from `quantize`, and repeating it would give
+    `mflux/z-image-turbo-q4@quantize=4`. The builder that encodes an option is
+    the only thing that knows it did.
+    """
+    keep = {k: v for k, v in sorted(options.items())
+            if k not in _ENVIRONMENTAL and k not in already
+            and v is not None and v != ""}
+    if not keep:
+        return ""
+    return "@" + ",".join(f"{k}={v}" for k, v in keep.items())
+
+
 def resolve(spec: str) -> Engine:
     """Parse a candidate spec into an Engine."""
     head, _, optstr = spec.partition(",")
@@ -206,7 +242,9 @@ def _mflux(spec: str, model: str, options: dict) -> Engine:
             cmd += ["--quantize", str(quantize)]
         return cmd
 
-    return Engine(name=f"mflux/{model}-{label}", spec=spec, argv=argv,
+    return Engine(name=f"mflux/{model}-{label}"
+                       f"{distinguish(options, frozenset({'quantize'}))}",
+                  spec=spec, argv=argv,
                   modality="image", output_suffix=".png", timeout=900.0)
 
 
@@ -276,7 +314,8 @@ def _h3(spec: str, model: str, options: dict) -> Engine:
     # text encoder, which reads like a model problem rather than a path one.
     binary = os.environ.get("H3_BIN", H3_DEFAULT_BIN)
 
-    return Engine(name="h3/minimax-h3", spec=spec, argv=argv, modality="video",
+    return Engine(name=f"h3/minimax-h3{distinguish(options)}",
+                  spec=spec, argv=argv, modality="video",
                   output_suffix=".mp4",
                   # 512x512x22 frames measured at 40.5 minutes on the M2 Pro.
                   timeout=6 * 3600.0, stream=True,
@@ -312,7 +351,8 @@ def _diffusers(spec: str, model: str, options: dict) -> Engine:
 
     # Named for the model rather than the repo owner: two owners publishing the
     # same name would collide, and the eval table has one column for this.
-    return Engine(name=f"diffusers/{model.rsplit('/', 1)[-1]}", spec=spec,
+    return Engine(name=f"diffusers/{model.rsplit('/', 1)[-1]}"
+                       f"{distinguish(options)}", spec=spec,
                   argv=argv, modality="image", output_suffix=".png",
                   timeout=900.0)
 
@@ -351,7 +391,8 @@ def _diffusers_video(spec: str, model: str, options: dict) -> Engine:
             cmd.append("--no-offload")
         return cmd
 
-    return Engine(name=f"diffusers-video/{model.rsplit('/', 1)[-1]}", spec=spec,
+    return Engine(name=f"diffusers-video/{model.rsplit('/', 1)[-1]}"
+                       f"{distinguish(options)}", spec=spec,
                   argv=argv, modality="video", output_suffix=".mp4",
                   # Minutes per second of video on this card, and a first run
                   # downloads the weights. h3 allows six hours for the same
@@ -461,7 +502,8 @@ def _acestep(spec: str, model: str, options: dict) -> Engine:
             cmd.append("--instrumental")
         return cmd
 
-    return Engine(name=f"acestep/{model.rsplit('/', 1)[-1]}", spec=spec,
+    return Engine(name=f"acestep/{model.rsplit('/', 1)[-1]}"
+                       f"{distinguish(options)}", spec=spec,
                   argv=argv, modality="music", output_suffix=".wav",
                   # Measured 2026-09-20 on the M2 Pro: 55s of model init then
                   # 37.5s for a 30s track. The ceiling is 600s of audio, and a
