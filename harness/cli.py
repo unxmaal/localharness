@@ -31,7 +31,7 @@ from pathlib import Path
 
 from harness.checks import code as code_check
 from harness import (audio, completion, discover as discovery, env, exclusive,
-                     lanes, paths, proc, vector)
+                     lanes, memory, paths, proc, vector)
 from harness.checks import html as html_check
 from harness.checks import image as image_check
 from harness.checks import svg as svg_check
@@ -1411,16 +1411,34 @@ def _report_screen(a) -> int:
     try:
         for r in ready[:getattr(a, "limit", 1)]:
             print(f"\n── {r['name']}", flush=True)
-            proc = subprocess.run(screen.argv(r), capture_output=True,
-                                  text=True)
+            # Headroom, including what is already resident. #284.
+            room, why_not = memory.check_model(r["name"])
+            if not room:
+                print(f"   QUEUED: {why_not}")
+                ms.decide(store, r["name"], "queued", tier=ms.SCREEN,
+                          detail=f"not screened: {why_not}"[:600],
+                          until=f"memory_gb:>{memory.available_gb():.1f}")
+                continue
+            # Its own receipt directory, not the newest for the modality. #282.
+            outdir = paths.runs() / f"screen-{int(time.time())}-{r['modality']}"
+            try:
+                proc = subprocess.run(screen.argv(r, outdir=outdir),
+                                      capture_output=True, text=True)
+            except OSError as exc:
+                print(f"   QUEUED: the screen could not start: {exc}")
+                ms.decide(store, r["name"], "queued", tier=ms.SCREEN,
+                          detail=f"not screened: the screen could not start: "
+                                 f"{exc}"[:600])
+                continue
             # The RUN's own summary, read from what it wrote rather than parsed
             # out of its chatter: a tier that infers an outcome from stdout is
             # a tier that reports success when the format changes.
-            summary = _latest_summary(r["modality"])
+            summary = _summary_at(outdir)
             # The run's own stderr is where a refused request says so, and a
             # refusal is a fact about the harness rather than the candidate.
             got, why = screen.outcome(proc.returncode, summary,
-                                      detail=(proc.stderr or "")[-2000:])
+                                      detail=(proc.stderr or "")[-2000:],
+                                      candidate=r["candidate"])
             print(f"   {got.upper()}: {why}")
             if proc.returncode != 0:
                 err(proc.stderr.strip()[-400:] or "no stderr")
@@ -1432,30 +1450,20 @@ def _report_screen(a) -> int:
             evidence = " ".join((proc.stderr or "").split())[-300:]
             detail = f"{why} || {evidence}" if evidence else why
             ms.decide(store, r["name"], got, tier=ms.SCREEN,
-                      detail=detail[:600])
+                      detail=detail[:600],
+                      run_path=str(outdir) if outdir.exists() else "")
     finally:
         store.close()
     return 0
 
 
-def _latest_summary(modality: str) -> dict | None:
-    """The summary of the newest run receipt for this modality."""
-    newest, when = None, 0.0
+def _summary_at(outdir) -> dict | None:
+    """The summary this run wrote, or None if it wrote none. #282."""
     try:
-        receipts = sorted(paths.runs().rglob("results.json"))
-    except OSError:
+        data = json.loads((outdir / "results.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         return None
-    for f in receipts:
-        try:
-            stat = f.stat()
-            data = json.loads(f.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if (data.get("receipt") or {}).get("modality") != modality:
-            continue
-        if stat.st_mtime > when:
-            newest, when = data.get("summary"), stat.st_mtime
-    return newest
+    return data.get("summary")
 
 
 def _report_judge_store(a) -> int:

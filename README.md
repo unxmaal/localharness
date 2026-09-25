@@ -988,6 +988,39 @@ It will refuse if the two runs are not fairly comparable, and tell you which
 difference disqualified them. Comparing a run from before a settings change
 against one from after compares two different exams, so it stops you.
 
+### Reading a run's memory conditions
+
+A wall-clock number taken while the machine was busy is not the same number as
+one taken on an idle machine, so every receipt records what the machine was
+doing. Two fields do that, and they are not interchangeable.
+
+`pressure` is current, and is the one to read:
+
+| field | source | meaning |
+|---|---|---|
+| `free_pct` | `kern.memorystatus_level` | percent free, the figure jetsam acts on |
+| `level` | `kern.memorystatus_vm_pressure_level` | 1 normal, 2 warning, 4 critical |
+| `swapouts` | `vm.compressor.segment.swapout_regular` | a counter; a rate only when sampled twice |
+| `wired_gb` | `vm_stat` pages wired down | memory that cannot be paged out |
+
+`swap_used_mb` is a high-water mark. macOS grows the swap file and does not
+shrink it when pages are freed, so on a 32 GB machine it can read 8 GB while
+63% of memory is free, and it stays there until reboot. It is kept as a
+description of the machine. Do not read it as a measure of pressure during the
+run, and do not conclude anything about a candidate from it: 14 candidates
+passed their screen with it above 2 GB, one of them at 7.9 GB.
+
+Receipts written before 2026-09-25 have `swap_used_mb` only, so their timings
+carry no usable pressure reading. Their pass/fail verdicts and peak memory are
+unaffected; only wall-clock comparisons across them are suspect.
+
+`swaps`, in `/usr/bin/time -l` output, is unmaintained on macOS and always
+reads 0. Nothing should branch on it.
+
+Whether a run is refused for lack of memory is a separate question, answered by
+`memory.check_model` against free memory minus what is already resident, not by
+either field above.
+
 ## Developing
 
 ```bash

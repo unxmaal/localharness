@@ -824,21 +824,47 @@ def test_a_text_only_case_is_withheld_from_omnisvg():
 
 # ---- a timing taken under memory pressure says so (issue #142) -----------
 
-def test_a_run_on_a_swapping_machine_warns_before_the_numbers():
+def test_a_run_low_on_memory_warns_before_the_numbers():
     import io
-    from evals.run import warn_if_swapping, SWAP_WARN_MB
+    from evals.run import warn_if_pressed, FREE_PCT_WARN
+    from harness.pressure import Pressure
     buf = io.StringIO()
-    warn_if_swapping(SWAP_WARN_MB + 1, out=buf)
+    warn_if_pressed(Pressure(free_pct=FREE_PCT_WARN - 1, level=1), out=buf)
     assert "not comparable" in buf.getvalue()
     assert "peak memory is unaffected" in buf.getvalue()
 
 
-def test_a_quiet_machine_says_nothing():
-    """A warning that always fires is a warning nobody reads."""
+def test_the_pressure_level_alone_is_enough_to_warn():
+    """macOS escalating past normal is the kernel's own judgement and outranks
+    any percentage this project picked."""
     import io
-    from evals.run import warn_if_swapping, SWAP_WARN_MB
+    from evals.run import warn_if_pressed
+    from harness import pressure
     buf = io.StringIO()
-    warn_if_swapping(SWAP_WARN_MB - 1, out=buf)
+    warn_if_pressed(pressure.Pressure(free_pct=99, level=pressure.CRITICAL),
+                    out=buf)
+    assert "pressure level 4" in buf.getvalue()
+
+
+def test_a_quiet_machine_says_nothing():
+    """A warning that always fires is a warning nobody reads, and the swap
+    version fired on 14 runs that passed. #283."""
+    import io
+    from evals.run import warn_if_pressed, FREE_PCT_WARN
+    from harness.pressure import Pressure
+    buf = io.StringIO()
+    warn_if_pressed(Pressure(free_pct=FREE_PCT_WARN + 1, level=1), out=buf)
+    assert buf.getvalue() == ""
+
+
+def test_a_machine_that_cannot_be_measured_says_nothing():
+    """Unknown is not pressed. The swap reader returned 0 when it could not
+    tell, which read as an idle machine."""
+    import io
+    from evals.run import warn_if_pressed
+    from harness.pressure import Pressure
+    buf = io.StringIO()
+    warn_if_pressed(Pressure(), out=buf)
     assert buf.getvalue() == ""
 
 

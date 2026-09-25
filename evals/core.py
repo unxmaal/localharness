@@ -492,6 +492,8 @@ class Receipt:
     #: and #142 spent two issues finding that out. Recorded so a figure cannot
     #: be quoted without the condition that produced it.
     swap_used_mb: int = 0
+    #: Current pressure at run start. Not a comparability axis. #283.
+    pressure: dict = field(default_factory=dict)
     #: What the cases SAID, not what they were called. `case_ids` are names,
     #: and a name survives every edit to the thing it names: change
     #: fox-snow.yaml from 512 to 1024, or rewrite its prompt, and the id, the
@@ -509,6 +511,7 @@ class Receipt:
                 "instruments": dict(self.instruments),
                 "where": self.where,
                 "swap_used_mb": self.swap_used_mb,
+                "pressure": dict(self.pressure),
                 "cases_digest": self.cases_digest}
 
 

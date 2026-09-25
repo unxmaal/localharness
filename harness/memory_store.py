@@ -19,7 +19,7 @@ from pathlib import Path
 
 from harness import paths, store
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 #: Outcomes a proposal can reach. TERMINAL ones suppress re-proposal.
 VERDICTS = ("measured", "declined", "broken", "queued", "ignored", "screened")
@@ -571,9 +571,40 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE verdicts ADD COLUMN "
                          "upstream_idle_days REAL NOT NULL DEFAULT 0")
         _let_a_revived_upstream_be_reconsidered(conn)
+    if have and have < 16:
+        _retract_screens_with_no_evidence(conn)
     conn.execute("INSERT OR REPLACE INTO meta VALUES ('schema', ?)",
                  (str(SCHEMA_VERSION),))
     conn.commit()
+
+
+def _retract_screens_with_no_evidence(conn) -> None:
+    """Reopen screen verdicts that are terminal on no evidence. #281."""
+    rows = conn.execute(
+        "SELECT v.id, v.proposal_id, p.name FROM verdicts v "
+        "JOIN proposals p ON p.id = v.proposal_id "
+        "WHERE v.tier = ? AND v.outcome = 'broken' AND v.run_path = '' "
+        "AND v.detail LIKE 'it ran and passed nothing%'", (SCREEN,)).fetchall()
+    seen = set()
+    for _, pid, name in rows:
+        if pid in seen:
+            continue
+        seen.add(pid)
+        # Only where it is still the latest word.
+        latest = conn.execute(
+            "SELECT outcome, run_path, detail FROM verdicts "
+            "WHERE proposal_id = ? ORDER BY id DESC LIMIT 1", (pid,)).fetchone()
+        if not latest or latest[0] != "broken" or latest[1] != "":
+            continue
+        if not str(latest[2] or "").startswith("it ran and passed nothing"):
+            continue
+        conn.execute(
+            "INSERT INTO verdicts (proposal_id, outcome, tier, detail, "
+            "decided_at) VALUES (?, 'queued', ?, ?, ?)",
+            (pid, SCREEN,
+             "retracted: the screen stored no run_path, so the reason it "
+             "passed nothing is unrecoverable and the verdict cannot be "
+             "re-judged. Issue #281.", time.time()))
 
 
 def _canonical_lanes(conn) -> None:
