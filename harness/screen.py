@@ -20,6 +20,8 @@ absent is reported as waiting on a fetch, not screened and not failed.
 """
 from __future__ import annotations
 
+import sys
+
 from harness import lanes
 
 #: lane -> how to spell a candidate of that lane for evals.run, given a model
@@ -282,7 +284,8 @@ def argv(row: dict, outdir=None) -> list[str]:
     """The exact command a screen runs. One case, one repeat, no quality
     metrics: the screen answers whether it runs, and a metric here would invite
     ranking a screen against a measurement."""
-    out = ["python", "-m", "evals.run", "--modality", row["modality"],
+    out = [sys.executable or "python", "-m", "evals.run",
+           "--modality", row["modality"],
            "--screen", "--repeat", "1", "--candidates", row["candidate"]]
     upstream = routed_gateway(row.get("name") or "")
     if upstream:
@@ -339,8 +342,43 @@ def refused_by_harness(detail: str) -> str:
     return ""
 
 
+def model_tail(spec: str) -> str:
+    """The model portion of a spec, as it appears in a receipt key."""
+    _, _, rest = spec.partition(":")
+    model = (rest or spec).partition(",")[0]
+    return model.rstrip("/").rpartition("/")[2].strip().lower()
+
+
+def wrong_run(summary: dict | None, candidate: str) -> str:
+    """Why this receipt is another candidate's, or "". #282."""
+    if not summary or not candidate:
+        return ""
+    if row_for(summary, candidate) is not None:
+        return ""
+    return (f"the receipt names {', '.join(sorted(summary))} rather than "
+            f"{candidate}, so it is not this run's")
+
+
+def row_for(summary: dict | None, candidate: str) -> dict | None:
+    """This candidate's summary row, matched on the model portion. #282."""
+    want = model_tail(candidate)
+    if not summary or not want:
+        return None
+    for key, row in summary.items():
+        if any(part.strip().lower() == want for part in str(key).split("/")):
+            return row or {}
+    return None
+
+
+def why_nothing_passed(summary: dict | None, candidate: str) -> str:
+    """The checker's own reason for failing, or "". #281."""
+    rows = row_for(summary, candidate) or {}
+    failures = [str(f) for f in (rows.get("failures") or []) if f]
+    return "; ".join(failures)[:300]
+
+
 def outcome(returncode: int, summary: dict | None,
-            detail: str = "") -> tuple[str, str]:
+            detail: str = "", candidate: str = "") -> tuple[str, str]:
     """A store verdict from one screen run.
 
     `broken` is TERMINAL and `screened` is not, which is the right way round: a
@@ -356,6 +394,9 @@ def outcome(returncode: int, summary: dict | None,
         return "queued", (f"not screened: {refused}. The harness could not "
                           f"deliver the request, which says nothing about the "
                           f"candidate")
+    mismatch = wrong_run(summary, candidate) if candidate else ""
+    if mismatch:
+        return "queued", f"not screened: {mismatch}"
     if returncode != 0:
         return "broken", f"the screen exited {returncode}"
     # THE SUMMARY SPELLS IT `passed`. Reading `pass` returned 0 for every run,
@@ -366,5 +407,7 @@ def outcome(returncode: int, summary: dict | None,
     if not summary:
         return "broken", "the screen produced no rows"
     if rows == 0:
-        return "broken", "it ran and passed nothing"
+        why = why_nothing_passed(summary, candidate) if candidate else ""
+        return "broken", (f"it ran and passed nothing: {why}" if why
+                          else "it ran and passed nothing")
     return "screened", f"{rows} case(s) passed a screen"

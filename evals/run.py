@@ -592,7 +592,7 @@ def main(argv: list[str] | None = None) -> int:
     if outdir:
         outdir.mkdir(parents=True, exist_ok=True)
 
-    warn_if_swapping()
+    pressed = warn_if_pressed()
     skipped = unrun_summary(cases, candidates)
     if skipped:
         print(f"\nnot run, no candidate for them -- {skipped}", file=sys.stderr)
@@ -640,6 +640,7 @@ def main(argv: list[str] | None = None) -> int:
             instruments=instruments(),
             where=where_id(),
             swap_used_mb=swap_used_mb(),
+            pressure=pressed.as_dict(),
             cases_digest=cases_digest(cases))
         (outdir / "results.json").write_text(json.dumps(
             {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -680,15 +681,12 @@ def instruments() -> dict:
     return {k: v for k, v in found.items() if v}
 
 
-#: Swap above this and a wall-clock number from the run is not comparable with
-#: one taken on a quiet machine. Not a hard limit: the run is still worth
-#: having, and a refusal here would stop somebody measuring quality because the
-#: machine was busy.
-SWAP_WARN_MB = 2048
+#: Below this, wall-clock is not comparable with a quiet machine. #283.
+FREE_PCT_WARN = 25
 
 
 def swap_used_mb() -> int:
-    """Swap in use right now, or 0 if it cannot be told."""
+    """Swap in use, or 0 if it cannot be told. Descriptive only. #283."""
     try:
         from evals.environment import capture
         return int(capture().get("swap_used_mb") or 0)
@@ -718,22 +716,21 @@ def winner_for(modality: str, runs=None) -> str:
     return got["candidate"]
 
 
-def warn_if_swapping(swap: int | None = None, out=None) -> int:
-    """Say so BEFORE the numbers appear, not in a footnote afterwards.
-
-    #142 is two issues and a week spent on a 2x wall-clock difference whose
-    most likely explanation is that the machine was at 19.9 GB of swap. The
-    peak memory matched to the decimal; only the timing moved, which is exactly
-    the shape memory pressure makes.
-    """
+def warn_if_pressed(got=None, out=None):
+    """Warn before the numbers appear if the machine is not quiet. #283."""
     import sys
-    swap = swap_used_mb() if swap is None else swap
-    if swap >= SWAP_WARN_MB:
-        print(f"\nWARNING: {swap} MB of swap in use. Wall-clock numbers from "
-              f"this run are not comparable with ones taken on a quiet "
-              f"machine; peak memory is unaffected.",
-              file=out or sys.stderr, flush=True)
-    return swap
+    from harness import pressure
+    got = pressure.sample() if got is None else got
+    why = ""
+    if got.alarming:
+        why = f"macOS reports memory pressure level {got.level}"
+    elif got.free_pct is not None and got.free_pct <= FREE_PCT_WARN:
+        why = f"{got.free_pct}% of memory free"
+    if why:
+        print(f"\nWARNING: {why}. Wall-clock numbers from this run are not "
+              f"comparable with ones taken on a quiet machine; peak memory is "
+              f"unaffected.", file=out or sys.stderr, flush=True)
+    return got
 
 
 def where_id() -> str:
@@ -834,6 +831,7 @@ def compare_runs(files: list[str], across: str = "") -> int:
                                   instruments=raw.get("instruments") or {},
                                   where=raw.get("where", ""),
                                   swap_used_mb=raw.get("swap_used_mb", 0),
+                                  pressure=raw.get("pressure") or {},
                                   cases_digest=raw.get("cases_digest", "")),
                        data.get("summary") or {},
                        data.get("rows") or []))
