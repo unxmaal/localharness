@@ -1,6 +1,6 @@
 version: 5
 name: novelty
-model: q3-4b
+model: mlx-community/Qwen3-4B-Instruct-2507-4bit
 scale: [1, 10]
 
 # What this rubric asks a cheap local model, before any GPU time is spent.

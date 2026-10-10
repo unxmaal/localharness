@@ -93,7 +93,7 @@ evals:                    ## compare candidates; REQUIRES the services running
 	  --candidates $(CANDIDATES) --out .logs/evals-$$(date +%Y%m%d-%H%M%S)
 
 MODALITY   ?= all
-CANDIDATES ?= local-mid
+CANDIDATES ?= mlx-community/Qwen2.5-1.5B-Instruct-4bit
 
 clean:
 	rm -f tools/h3probe

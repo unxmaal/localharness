@@ -705,6 +705,8 @@ class Receipt:
     router_swaps: dict = field(default_factory=dict)
     #: The budget ladder a cut-off reply was retried up, max_tokens its top rung; () for one budget. An axis. #668.
     budget_ladder: tuple = ()
+    #: receipt key -> the model id each text candidate resolved to at run time. Not an axis. #670.
+    resolved: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {"modality": self.modality, "case_ids": list(self.case_ids),
@@ -724,7 +726,8 @@ class Receipt:
                 "max_tokens": self.max_tokens,
                 "knobs": dict(self.knobs),
                 "router_swaps": dict(self.router_swaps),
-                "budget_ladder": list(self.budget_ladder)}
+                "budget_ladder": list(self.budget_ladder),
+                "resolved": dict(self.resolved)}
 
     @classmethod
     def from_dict(cls, raw: dict) -> "Receipt":
@@ -745,7 +748,8 @@ class Receipt:
                    launch=raw.get("launch") or {}, max_tokens=int(budget),
                    knobs=legacy_knobs(raw),
                    router_swaps=raw.get("router_swaps") or {},
-                   budget_ladder=tuple(int(n) for n in raw.get("budget_ladder") or ()))
+                   budget_ladder=tuple(int(n) for n in raw.get("budget_ladder") or ()),
+                   resolved=raw.get("resolved") or {})
 
 
 def legacy_knobs(raw: dict) -> dict:

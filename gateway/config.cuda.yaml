@@ -1,11 +1,12 @@
 # The gateway on a machine with an NVIDIA card. Same shape as config.yaml, and
-# it differs only in which weights each alias names.
+# it differs only in which weights each entry names. `in_place_of` names the
+# Mac model an entry stands in for, so a typed default reaches its build here.
 #
-# THE NAMES ARE GGUF FILENAME STEMS, because that is what llama-server's router
-# reports for a file in --models-dir: qwen2.5-0.5b-instruct-q4_k_m.gguf is
+# THE IDS ARE GGUF FILENAME STEMS, and each entry is named by its id (#670),
+# because that is what llama-server's router reports for a file in --models-dir: qwen2.5-0.5b-instruct-q4_k_m.gguf is
 # served as "qwen2.5-0.5b-instruct-q4_k_m". A name with no file behind it is a
 # 400 from the router rather than a silent fallback to whatever is loaded,
-# which is what makes an alias per model safe here.
+# which is what makes a name per model safe here.
 #
 # One api_base for all of them: the router holds the models and swaps by the
 # `model` field, the same way mlx_lm.server does. scripts/serve-llamacpp.sh
@@ -14,62 +15,97 @@
 #
 #   GATEWAY_CONFIG=gateway/config.cuda.yaml ./scripts/serve-gateway.sh
 model_list:
-  - model_name: local-small
-    litellm_params:
+  - model_name: qwen2.5-0.5b-instruct-q4_k_m
+    in_place_of: mlx-community/Qwen2.5-0.5B-Instruct-4bit
+    litellm_params: &localsmall
       model: openai/qwen2.5-0.5b-instruct-q4_k_m
       api_base: http://127.0.0.1:8081/v1
       api_key: not-needed
-  - model_name: local-mid
-    litellm_params:
+  - model_name: qwen2.5-1.5b-instruct-q4_k_m
+    in_place_of: mlx-community/Qwen2.5-1.5B-Instruct-4bit
+    litellm_params: &localmid
       model: openai/qwen2.5-1.5b-instruct-q4_k_m
       api_base: http://127.0.0.1:8081/v1
       api_key: not-needed
-  - model_name: local-large
-    litellm_params:
+  - model_name: qwen2.5-7b-instruct-q4_k_m
+    in_place_of: mlx-community/Qwen2.5-7B-Instruct-4bit
+    litellm_params: &locallarge
       model: openai/qwen2.5-7b-instruct-q4_k_m
       api_base: http://127.0.0.1:8081/v1
       api_key: not-needed
 
   # ---- Qwen3, the same candidates the Mac config carries ------------------
-  - model_name: q3-1.7b
-    litellm_params:
+  - model_name: qwen3-1.7b-q4_k_m
+    in_place_of: mlx-community/Qwen3-1.7B-4bit
+    litellm_params: &q317b
       model: openai/qwen3-1.7b-q4_k_m
       api_base: http://127.0.0.1:8081/v1
       api_key: not-needed
-  - model_name: q3-4b
-    litellm_params:
+  - model_name: qwen3-4b-instruct-2507-q4_k_m
+    in_place_of: mlx-community/Qwen3-4B-Instruct-2507-4bit
+    litellm_params: &q34b
       model: openai/qwen3-4b-instruct-2507-q4_k_m
       api_base: http://127.0.0.1:8081/v1
       api_key: not-needed
   # The decide lane's default (#311, #572).
-  - model_name: eval-imajev-4b
+  - model_name: imajev-4b-Q8_0
     source_repo: mindchain/imajev-4b-GGUF
     source_file: imajev-4b-Q8_0.gguf
-    litellm_params:
+    litellm_params: &evalimajev4b
       model: openai/imajev-4b-Q8_0
       api_base: http://127.0.0.1:8081/v1
       api_key: not-needed
-  - model_name: q3-8b
-    litellm_params:
+  - model_name: qwen3-8b-q4_k_m
+    in_place_of: mlx-community/Qwen3-8B-4bit
+    litellm_params: &q38b
       model: openai/qwen3-8b-q4_k_m
       api_base: http://127.0.0.1:8081/v1
       api_key: not-needed
-  - model_name: q3-14b
-    litellm_params:
+  - model_name: qwen3-14b-q4_k_m
+    in_place_of: mlx-community/Qwen3-14B-4bit
+    litellm_params: &q314b
       model: openai/qwen3-14b-q4_k_m
       api_base: http://127.0.0.1:8081/v1
       api_key: not-needed
 
-  # q3-30b and q3-coder are absent rather than broken. Both are 30B-A3B at
+  # Qwen3-30B-A3B and Qwen3-Coder-30B-A3B are absent rather than broken. Both are 30B-A3B at
   # ~17 GB, over the 12 GB this was written against, and harness/memory.py
   # refuses them here. llama.cpp can put the MoE experts on the CPU with
   # --n-cpu-moe and run them anyway, which is a different measurement from the
-  # Mac's and needs its own row rather than the same alias.
+  # Mac's and needs its own row rather than the same name.
+
+  # Old nicknames, kept one release so queued jobs and clients keep working; `soh` warns. #670.
+  - model_name: local-small
+    deprecated_for: qwen2.5-0.5b-instruct-q4_k_m
+    litellm_params: *localsmall
+  - model_name: local-mid
+    deprecated_for: qwen2.5-1.5b-instruct-q4_k_m
+    litellm_params: *localmid
+  - model_name: local-large
+    deprecated_for: qwen2.5-7b-instruct-q4_k_m
+    litellm_params: *locallarge
+  - model_name: q3-1.7b
+    deprecated_for: qwen3-1.7b-q4_k_m
+    litellm_params: *q317b
+  - model_name: q3-4b
+    deprecated_for: qwen3-4b-instruct-2507-q4_k_m
+    litellm_params: *q34b
+  - model_name: eval-imajev-4b
+    deprecated_for: imajev-4b-Q8_0
+    litellm_params: *evalimajev4b
+  - model_name: q3-8b
+    deprecated_for: qwen3-8b-q4_k_m
+    litellm_params: *q38b
+  - model_name: q3-14b
+    deprecated_for: qwen3-14b-q4_k_m
+    litellm_params: *q314b
 
 litellm_settings:
   drop_params: true
   # usage_log records each request's shape, never its text, to the store (#481).
-  callbacks: ["usage_log.proxy_handler_instance"]
+  # served_model names the model that answered in the reply and its headers (#670).
+  callbacks: ["usage_log.proxy_handler_instance",
+              "served_model.proxy_handler_instance"]
   # llama-server implements /v1/chat/completions and not /v1/responses, so the
   # same routing workaround the Mac config needs applies unchanged.
   use_chat_completions_url_for_anthropic_messages: true

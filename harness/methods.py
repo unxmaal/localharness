@@ -131,6 +131,10 @@ def weights_of(spec: str) -> str:
     if not base:
         return ""
     model = base.partition(",")[0].strip()
+    from harness import models
+    # A gateway entry is named by its repo id now (#670); the gateway serves it, as it did its nickname.
+    if models.on_gateway(model):
+        return ""
     return model if "/" in model and ":" not in model else ""
 
 

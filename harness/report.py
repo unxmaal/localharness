@@ -135,13 +135,19 @@ def _holdout_rate(conn, lane: str, run_id: int, cid) -> float | None:
     return round(sum(r["passed"] for r in mine) / len(mine), 3) if mine else None
 
 
+def _model(spec: str) -> str:
+    """A served spec named by its model id, the alias beside it. #670."""
+    from harness import models
+    return models.display(spec) if spec else ""
+
+
 def _candidate_of(conn, lane: str, serves: str) -> int | None:
     """The candidates row of what a lane serves."""
     from harness import candidates, screen
     if not serves:
         return None
     spec = screen.candidate_for(lane, serves) or serves
-    return candidates.ensure(conn, spec, lane=lane)
+    return candidates.served(conn, spec, lane=lane)
 
 
 def queue_state(conn) -> dict:
@@ -320,7 +326,8 @@ td.num { text-align:right; font-variant-numeric:tabular-nums }
 .bad  { background:var(--badbg);  color:var(--bad) }
 .good { background:var(--goodbg); color:var(--good) }
 tr.changed td { background:var(--goodbg) }
-.dim { color:var(--dim) }
+.dim, .about { color:var(--dim) }
+.about { font-size:.82rem }
 .note { color:var(--dim); margin:.4rem 0 0; font-size:.85rem }
 .bar { display:inline-block; height:.6rem; background:currentColor; opacity:.35;
        vertical-align:middle; margin-left:.5rem }
@@ -375,7 +382,7 @@ def _lane_rows(lanes, changed) -> str:
             f'<tr class="{"changed" if why else ""}">'
             f'<td>{_esc(l["lane"])}'
             f'{"" if l["wanted"] else " <span class=dim>(not on the wanted list)</span>"}</td>'
-            f'<td>{_esc(l["serves"]) or "<span class=dim>--</span>"}</td>'
+            f'<td>{_esc(_model(l["serves"])) or "<span class=dim>--</span>"}</td>'
             f'<td class="num">{rate}</td><td class="num">{med}</td>'
             f'<td class="num">{ttft}</td>'
             f'<td class="dim">{_esc(metric)}</td>'

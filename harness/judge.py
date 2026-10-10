@@ -136,7 +136,7 @@ def load(name: str = DEFAULT_RUBRIC, directory: Path | None = None,
             body.append("")
     body.append(raw.get("instructions", "").strip())
     return Rubric(name=raw.get("name", name), version=int(raw.get("version", 0)),
-                  model=raw.get("model", "q3-4b"), low=int(scale[0]),
+                  model=raw.get("model", "mlx-community/Qwen3-4B-Instruct-2507-4bit"), low=int(scale[0]),
                   high=int(scale[1]), prompt="\n".join(body).strip(),
                   fragments=fragments)
 
@@ -194,7 +194,9 @@ def score(item: str, rubric: Rubric | None = None, *, gateway: str = "",
     """Score one described item. Returns (score, reasoning)."""
     rubric = rubric or load()
     complete = complete or completion.complete
-    kw = {"model": rubric.model, "modality": "extract"}
+    from harness.models import build_here
+    # The rubric names a model id; this machine's gateway may serve another build of it. #670.
+    kw = {"model": build_here(rubric.model), "modality": "extract"}
     if gateway:
         kw["gateway"] = gateway
     text = complete(f"{rubric.prompt}\n\n---\n{item}\n---", **kw)
@@ -216,7 +218,7 @@ MAX_MENTIONS = 12
 
 
 def mentions(text: str, *, gateway: str = "", complete=None,
-             model: str = "q3-4b") -> list[tuple[str, str]]:
+             model: str = "mlx-community/Qwen3-4B-Instruct-2507-4bit") -> list[tuple[str, str]]:
     """Names a piece of freeform prose mentions, with what it claims of each.
 
     The extractor that reads the monthly recap is shaped for `Name - one-line

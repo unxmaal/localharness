@@ -130,7 +130,7 @@ def text_engine(environ=None) -> str:
     return (environ.get(ENV_VAR) or "").strip() or DEFAULT
 
 
-#: Sampling keys a spec may carry after a comma, e.g. `q3-4b,temperature=0`. #90.
+#: Sampling keys a spec may carry after a comma, e.g. `<model id>,temperature=0`. #90.
 SAMPLING_KEYS = ("temperature", "top_p", "repetition_penalty")
 
 

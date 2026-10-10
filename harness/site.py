@@ -135,7 +135,8 @@ pre { background:var(--code); border:2px solid var(--line); padding:.75rem .9rem
       overflow-x:auto; font-size:.85rem; line-height:1.45; margin:.4rem 0 1rem }
 code { font-size:.92em }
 h3 { font-size:.9rem; margin:1.4rem 0 .4rem }
-.sub, .note, .dim { color:var(--dim) }
+.sub, .note, .dim, .about { color:var(--dim) }
+.about { font-size:.82rem; margin-top:.15rem }
 .sub { margin:0 0 .5rem }
 .note { font-size:.88rem; margin:.5rem 0 0 }
 .wide { overflow-x:auto; max-width:100%; margin:.4rem 0 }
@@ -288,7 +289,7 @@ def lane_names(machines: list[dict]) -> list[str]:
 
 def ticker_items(machines: list[dict]) -> list[str]:
     """What each adopted lane serves and where, then when each machine last published."""
-    items = [f"{l['lane']} serves {l.get('serves')} on {d['machine'].get('label')}"
+    items = [f"{l['lane']} serves {l.get('serves_model') or l.get('serves')} on {d['machine'].get('label')}"
              for d in machines for l in d.get("lanes") or [] if l.get("adopted")]
     items += [f"{d['machine'].get('label')} last published {_date(d.get('generated_at'))}"
               for d in machines]
@@ -443,7 +444,7 @@ def _bench_table(lane: dict, table: list[dict] | None = None, dated: bool = Fals
                  else f'{passed}{_num(r.get("pass_rate"))}')
         rows.append(
             f'<tr{SERVING_ROW if serving else ""}>'
-            f'<td>{_esc(r.get("candidate"))} {" ".join(tags)}</td>'
+            f'<td>{publish.model_html(r)} {" ".join(tags)}</td>'
             f'<td class="num">{_esc(score)}</td>'
             f'<td class="num">{_num(r.get("median_s"))}</td>'
             f'<td class="num">{_num(r.get("first_s"))}</td>'
@@ -505,7 +506,8 @@ def benchmarks(machines: list[dict], now: float | None = None) -> str:
                 continue
             how = f" (adopted {_esc(lane.get('adopted_how'))})" if lane.get("adopted") else ""
             parts.append(f'{_lane_tables(d["machine"].get("label"), lane)}'
-                         f'<p class="note">Serving here: {_esc(lane.get("serves")) or "--"}'
+                         f'<p class="note">Serving here: '
+                         f'{_esc(lane.get("serves_model") or lane.get("serves")) or "--"}'
                          f'{how}</p>')
         wins.append(window(_esc(n), "".join(parts), tints[i % len(tints)],
                            attrs=f' id="lane-{_esc(n)}"'))

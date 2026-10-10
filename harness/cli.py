@@ -81,7 +81,8 @@ DEFAULT_RESOLUTION = 512
 # EVERY NUMBER BELOW IS FROM ONE EXAM: an M2 Pro with 32 GB, mlx_lm.server
 # behind the LiteLLM gateway, DEFAULT_TEMPERATURE 0.2, 2026-09-06. None of it
 # has been re-run on a discrete card (#96), and a different temperature is a
-# different exam (#90). Re-derive with:
+# different exam (#90). The names are the gateway nicknames of the time, which
+# gateway/config.yaml maps to model ids (#670). Re-derive with:
 #   uv run python -m evals.run --modality <lane> --repeat 3 \
 #     --candidates local-mid,local-large,q3-4b,q3-8b,q3-14b
 #
@@ -110,14 +111,14 @@ DEFAULT_RESOLUTION = 512
 #
 # Qwen2.5-1.5B (local-mid) was the default for svg and web and scored 2/9 and
 # 3/6. That was the single worst consequence of never having compared anything.
-DEFAULT_SVG_MODEL = "local-large"
-DEFAULT_WEB_MODEL = "q3-4b"
-DEFAULT_CODE_MODEL = "q3-4b"
-DEFAULT_EXTRACT_MODEL = "local-large"
+DEFAULT_SVG_MODEL = "mlx-community/Qwen2.5-7B-Instruct-4bit"
+DEFAULT_WEB_MODEL = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
+DEFAULT_CODE_MODEL = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
+DEFAULT_EXTRACT_MODEL = "mlx-community/Qwen2.5-7B-Instruct-4bit"
 # Best measured on the decide lane (#311), on llama-server, which enforces the lane's schema. #572.
-DEFAULT_DECIDE_MODEL = "eval-imajev-4b"
+DEFAULT_DECIDE_MODEL = "imajev-4b-Q8_0"
 #: infovore claim extraction: Qwen2.5-7B on llama-server, which enforces the reply schema. #654.
-DEFAULT_CLAIMS_MODEL = "eval-7b"
+DEFAULT_CLAIMS_MODEL = "Qwen2.5-7B-Instruct-Q4_K_M"
 #: The agent lane starts on the code lane's typed default until it adopts. #474.
 DEFAULT_AGENT_MODEL = DEFAULT_CODE_MODEL
 #: The ocr lane starts on the reader the image lane's text check already trusts. #562.
@@ -547,7 +548,7 @@ def build_parser() -> argparse.ArgumentParser:
              "on a significant win. Issue #464")
     ado.add_argument("--lane", default="")
     ado.add_argument("--challenger", default="",
-                     help="a spec or gateway alias, e.g. q3-30b")
+                     help="a spec or gateway model id, e.g. mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit")
     ado.add_argument("--power", action="store_true",
                      help="print, per lane, the repeat and holdout size needed to "
                           "reach power 0.8, and the projected wall time (#591)")

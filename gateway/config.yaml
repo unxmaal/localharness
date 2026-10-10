@@ -1,24 +1,24 @@
 model_list:
-  - model_name: local-small
-    litellm_params:
+  - model_name: mlx-community/Qwen2.5-0.5B-Instruct-4bit
+    litellm_params: &localsmall
       model: openai/mlx-community/Qwen2.5-0.5B-Instruct-4bit
       api_base: http://127.0.0.1:8081/v1
       api_key: not-needed
-  - model_name: local-mid
-    litellm_params:
+  - model_name: mlx-community/Qwen2.5-1.5B-Instruct-4bit
+    litellm_params: &localmid
       model: openai/mlx-community/Qwen2.5-1.5B-Instruct-4bit
       api_base: http://127.0.0.1:8081/v1
       api_key: not-needed
 
-  # The largest text model that is comfortable here. Named for its size rather
-  # than a role: it was called local-summarize for a voice-layer summarizer that
-  # no longer exists, and an alias named after a deleted job is a trap.
+  # The largest text model that is comfortable here. It was called local-summarize
+  # for a voice-layer summarizer that no longer exists, then local-large; a name
+  # that is not the model's id is a trap, so it is now named by its id (#670).
   #
   # Size is load-bearing for anything that restates a claim. Qwen2.5-1.5B
   # mangles technical statements when condensing -- "plateaus" came out as
   # "scales superlinearly", the exact opposite of the source.
-  - model_name: local-large
-    litellm_params:
+  - model_name: mlx-community/Qwen2.5-7B-Instruct-4bit
+    litellm_params: &locallarge
       model: openai/mlx-community/Qwen2.5-7B-Instruct-4bit
       api_base: http://127.0.0.1:8081/v1
       api_key: not-needed
@@ -31,68 +31,68 @@ model_list:
   # incumbents rather than replacing them, so the eval decides rather than a
   # blog post:
   #   uv run python -m evals.run --modality svg,web,code,extract --repeat 3 \
-  #     --candidates local-mid,local-large,q3-4b,q3-8b,q3-14b,q3-30b,q3-coder
+  #     --candidates mlx-community/Qwen2.5-1.5B-Instruct-4bit,mlx-community/Qwen3-4B-Instruct-2507-4bit
   #
   # NOTE Qwen3-8B and Qwen3-14B are HYBRID THINKING models: they emit <think>
   # blocks unless told not to. The -2507-Instruct and -Coder variants are not.
   # That is a real difference for `extract`, whose whole value is one bare fact.
-  - model_name: q3-1.7b
-    litellm_params:
+  - model_name: mlx-community/Qwen3-1.7B-4bit
+    litellm_params: &q317b
       model: openai/mlx-community/Qwen3-1.7B-4bit
       api_base: http://127.0.0.1:8081/v1
       api_key: not-needed
-  - model_name: q3-4b
-    litellm_params:
+  - model_name: mlx-community/Qwen3-4B-Instruct-2507-4bit
+    litellm_params: &q34b
       model: openai/mlx-community/Qwen3-4B-Instruct-2507-4bit
       api_base: http://127.0.0.1:8081/v1
       api_key: not-needed
-  - model_name: q3-8b
-    litellm_params:
+  - model_name: mlx-community/Qwen3-8B-4bit
+    litellm_params: &q38b
       model: openai/mlx-community/Qwen3-8B-4bit
       api_base: http://127.0.0.1:8081/v1
       api_key: not-needed
-  - model_name: q3-14b
-    litellm_params:
+  - model_name: mlx-community/Qwen3-14B-4bit
+    litellm_params: &q314b
       model: openai/mlx-community/Qwen3-14B-4bit
       api_base: http://127.0.0.1:8081/v1
       api_key: not-needed
-  - model_name: q3-30b
-    litellm_params:
+  - model_name: mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit
+    litellm_params: &q330b
       model: openai/mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit
       api_base: http://127.0.0.1:8081/v1
       api_key: not-needed
-  - model_name: q3-coder
-    litellm_params:
+  - model_name: mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
+    litellm_params: &q3coder
       model: openai/mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
       api_base: http://127.0.0.1:8081/v1
       api_key: not-needed
   # llama-server (scripts/serve-eval.sh): enforces response_format json_schema.
-  - model_name: eval-4b
+  - model_name: Qwen3-4B-Instruct-2507-Q4_K_M
     source_repo: unsloth/Qwen3-4B-Instruct-2507-GGUF
     source_file: Qwen3-4B-Instruct-2507-Q4_K_M.gguf
-    litellm_params:
+    litellm_params: &eval4b
       model: openai/Qwen3-4B-Instruct-2507-Q4_K_M
       api_base: http://127.0.0.1:8082/v1
       api_key: not-needed
   # The decide lane's default: best measured on the lane (#311), and its schema is enforced. #572.
-  - model_name: eval-imajev-4b
+  - model_name: imajev-4b-Q8_0
     source_repo: mindchain/imajev-4b-GGUF
     source_file: imajev-4b-Q8_0.gguf
-    litellm_params:
+    litellm_params: &evalimajev4b
       model: openai/imajev-4b-Q8_0
       api_base: http://127.0.0.1:8082/v1
       api_key: not-needed
-  - model_name: eval-7b
+  - model_name: Qwen2.5-7B-Instruct-Q4_K_M
     source_repo: bartowski/Qwen2.5-7B-Instruct-GGUF
     source_file: Qwen2.5-7B-Instruct-Q4_K_M.gguf
-    litellm_params:
+    litellm_params: &eval7b
       model: openai/Qwen2.5-7B-Instruct-Q4_K_M
       api_base: http://127.0.0.1:8082/v1
       api_key: not-needed
-  - model_name: eval-12b
+  - model_name: google_gemma-3-12b-it-Q4_K_M
     source_repo: bartowski/google_gemma-3-12b-it-GGUF
     source_file: google_gemma-3-12b-it-Q4_K_M.gguf
-    litellm_params:
+    litellm_params: &eval12b
       model: openai/google_gemma-3-12b-it-Q4_K_M
       api_base: http://127.0.0.1:8082/v1
       api_key: not-needed
@@ -104,11 +104,54 @@ model_list:
       api_key: os.environ/ANTHROPIC_API_KEY
       additional_drop_params: ["temperature", "top_p", "repetition_penalty"]
 
+  # Old nicknames, kept one release so queued jobs and clients keep working; `soh` warns. #670.
+  - model_name: local-small
+    deprecated_for: mlx-community/Qwen2.5-0.5B-Instruct-4bit
+    litellm_params: *localsmall
+  - model_name: local-mid
+    deprecated_for: mlx-community/Qwen2.5-1.5B-Instruct-4bit
+    litellm_params: *localmid
+  - model_name: local-large
+    deprecated_for: mlx-community/Qwen2.5-7B-Instruct-4bit
+    litellm_params: *locallarge
+  - model_name: q3-1.7b
+    deprecated_for: mlx-community/Qwen3-1.7B-4bit
+    litellm_params: *q317b
+  - model_name: q3-4b
+    deprecated_for: mlx-community/Qwen3-4B-Instruct-2507-4bit
+    litellm_params: *q34b
+  - model_name: q3-8b
+    deprecated_for: mlx-community/Qwen3-8B-4bit
+    litellm_params: *q38b
+  - model_name: q3-14b
+    deprecated_for: mlx-community/Qwen3-14B-4bit
+    litellm_params: *q314b
+  - model_name: q3-30b
+    deprecated_for: mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit
+    litellm_params: *q330b
+  - model_name: q3-coder
+    deprecated_for: mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
+    litellm_params: *q3coder
+  - model_name: eval-4b
+    deprecated_for: Qwen3-4B-Instruct-2507-Q4_K_M
+    litellm_params: *eval4b
+  - model_name: eval-imajev-4b
+    deprecated_for: imajev-4b-Q8_0
+    litellm_params: *evalimajev4b
+  - model_name: eval-7b
+    deprecated_for: Qwen2.5-7B-Instruct-Q4_K_M
+    litellm_params: *eval7b
+  - model_name: eval-12b
+    deprecated_for: google_gemma-3-12b-it-Q4_K_M
+    litellm_params: *eval12b
+
 litellm_settings:
   drop_params: true
   # Refuse response_format on aliases whose server would silently ignore it (#315).
   # usage_log records each request's shape, never its text, to the store (#481).
-  callbacks: ["schema_guard.proxy_handler_instance", "usage_log.proxy_handler_instance"]
+  # served_model names the model that answered in the reply and its headers (#670).
+  callbacks: ["schema_guard.proxy_handler_instance", "usage_log.proxy_handler_instance",
+              "served_model.proxy_handler_instance"]
   # mlx_lm.server implements /v1/chat/completions but NOT /v1/responses.
   # Without this, LiteLLM routes /v1/messages through its Responses adapter
   # and every Anthropic-shaped request 404s upstream.

@@ -331,3 +331,12 @@ def test_mcp_artifacts_follow_the_home_in_force_when_called(mcp_server, tmp_path
     """OUTDIR was fixed at import, so a test importing it at collection wrote to the real home."""
     monkeypatch.setenv("LOCALHARNESS_HOME", str(tmp_path / "elsewhere"))
     assert str(mcp_server._out("svg", ".svg")).startswith(str(tmp_path / "elsewhere"))
+
+
+def test_a_reply_that_echoes_an_alias_is_reported_by_the_real_id(fake, monkeypatch):
+    """An old gateway echoes the alias in `model`; the caller still learns what answered. #670."""
+    import sys
+    from harness import gateway
+    monkeypatch.setenv("GATEWAY_CONFIG", str(gateway.REPO / "gateway" / "config.yaml"))
+    monkeypatch.setattr(sys.modules[__name__], "SERVED", "eval-7b")
+    assert delegate.complete("code", "write add")["model"] == "Qwen2.5-7B-Instruct-Q4_K_M"

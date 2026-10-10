@@ -28,6 +28,12 @@ def _entries(path):
     return [(e["model_name"], e["litellm_params"]) for e in body["model_list"]]
 
 
+def _own(path):
+    """Entries naming weights of their own; a deprecated alias shares its target's. #670."""
+    body = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return [e for e in body["model_list"] if not e.get("deprecated_for")]
+
+
 def test_the_cuda_config_exists():
     assert CUDA.exists(), (
         "a machine with an NVIDIA card needs a gateway config of its own: the "
@@ -38,8 +44,8 @@ def test_the_cuda_config_exists():
 def test_no_two_aliases_name_the_same_weights(path):
     """A sweep over both would measure one model twice and call it a tie."""
     seen = {}
-    for name, params in _entries(path):
-        model = params["model"]
+    for e in _own(path):
+        name, model = e["model_name"], e["litellm_params"]["model"]
         assert model not in seen, (
             f"{name} and {seen[model]} both resolve to {model}; a sweep over "
             f"the two would compare it against itself")
@@ -53,11 +59,11 @@ def test_every_alias_reaches_one_hot_swapping_server(path):
     need every candidate in a sweep resident at once, which is the thing a
     12 GB card cannot do.
 
-    One server PER ENGINE: on the Mac, eval-* aliases go to llama-server for
-    enforced JSON (#286) and everything else to mlx_lm.server."""
+    One server PER ENGINE: on the Mac, GGUF entries (a source_file) go to
+    llama-server for enforced JSON (#286) and everything else to mlx_lm.server."""
     for group in (True, False):
-        bases = {params["api_base"] for name, params in _entries(path)
-                 if name.startswith("eval-") == group and "api_base" in params}
+        bases = {e["litellm_params"]["api_base"] for e in _own(path)
+                 if bool(e.get("source_file")) == group and "api_base" in e["litellm_params"]}
         assert len(bases) <= 1, f"{path.name} spreads its aliases over {bases}"
 
 

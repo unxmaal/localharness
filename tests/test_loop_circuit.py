@@ -167,7 +167,7 @@ def world(monkeypatch, tmp_path, _home):
         encoding="utf-8")
     config = tmp_path / "config.yaml"
     config.write_text(yaml.safe_dump({"model_list": [
-        {"model_name": "q3-4b", "litellm_params": {
+        {"model_name": INCUMBENT_UPSTREAM, "litellm_params": {
             "model": f"openai/{INCUMBENT_UPSTREAM}", "api_base": f"{SERVER}/v1",
             "api_key": "not-needed"}}]}), encoding="utf-8")
     monkeypatch.setenv(gateway.ENV_VAR, str(config))
@@ -265,11 +265,11 @@ def test_the_loop_ends_with_the_lane_alias_serving_the_challenger(world):
 
 
 def test_a_method_crossed_with_the_incumbent_climbs_the_same_ladder(world):
-    """Nobody typed `plan:q3-4b`: the loop crossed it, screened it and measured it
+    """Nobody typed `plan:<incumbent>`: the loop crossed it, screened it and measured it
     against the incumbent with the paired gate, and its verdict carries its cost. #576."""
     loop("--top", "3")
     assert adopted() == {"code": CHALLENGER}
-    for spec in ("plan:q3-4b", "best-of:3:q3-4b"):
+    for spec in (f"plan:{INCUMBENT_UPSTREAM}", f"best-of:3:{INCUMBENT_UPSTREAM}"):
         conn = ms.connect()
         try:
             tiers = [r["tier"] for r in conn.execute(
@@ -288,7 +288,7 @@ def test_a_method_crossed_with_the_incumbent_climbs_the_same_ladder(world):
         finally:
             conn.close()
         cost = json.loads(power)["cost"]
-        assert cost["base"] == "q3-4b" and cost["calls"] == (2.0 if spec[0] == "p" else 3.0)
+        assert cost["base"] == INCUMBENT_UPSTREAM and cost["calls"] == (2.0 if spec[0] == "p" else 3.0)
 
 
 def test_a_model_server_that_dies_mid_screen_is_the_harnesss_fault(world):

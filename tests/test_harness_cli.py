@@ -460,10 +460,10 @@ def test_not_found_is_passed_through_as_the_answer(tmp_path, capsys):
 
 
 def test_the_extract_default_model_is_the_one_that_actually_answers():
-    """The lane is for delegating cheap work, but the eval ranked local-small
-    at 40% and local-large at 90%. 0.79s is still cheap; being wrong is not."""
+    """The lane is for delegating cheap work, but the eval ranked Qwen2.5-0.5B
+    at 40% and Qwen2.5-7B at 90%. 0.79s is still cheap; being wrong is not."""
     a = cli.build_parser().parse_args(["extract", "q"])
-    assert cli.lane_model("extract", a.model) == "local-large"
+    assert cli.lane_model("extract", a.model) == "mlx-community/Qwen2.5-7B-Instruct-4bit"
 
 
 # ---- cloned voices from the CLI --------------------------------------------

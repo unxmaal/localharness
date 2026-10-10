@@ -341,11 +341,11 @@ def test_publish_refuses_private_text_however_it_is_escaped(imported):
 
 # --- the lane --------------------------------------------------------------------------
 
-def test_claims_is_a_wanted_schema_lane_served_by_eval_7b():
+def test_claims_is_a_wanted_schema_lane_served_by_qwen25_7b_on_llama_server():
     from harness import completion, gateway, lanes, winners
     assert "claims" in lanes.WANTED and "claims" in lanes.GGUF_SERVED
     assert "claims" in gateway.TEXT_LANES and "claims" in gateway.SCHEMA_LANES
-    assert winners.typed()["claims"] == "eval-7b"
+    assert winners.typed()["claims"] == "Qwen2.5-7B-Instruct-Q4_K_M"
     assert completion.budget("claims") == 400
     assert completion.SAMPLING["claims"] == {"temperature": 0.0}
 
@@ -746,8 +746,17 @@ def test_a_schema_invalid_reply_counts_against_every_interface_the_case_holds():
 def test_the_report_states_that_every_reviewed_claim_came_from_one_model():
     from evals import claims_report as R
     text = R.render(R.report([], []))
-    assert R.REVIEWED_FROM == "eval-7b"
-    assert "eval-7b" in text and "circular" in text
+    assert R.REVIEWED_FROM == "Qwen2.5-7B-Instruct-Q4_K_M"
+    assert "Qwen2.5-7B-Instruct-Q4_K_M" in text and "circular" in text
+
+
+def test_a_run_of_the_renamed_model_is_the_control_under_either_name():
+    from evals import claims_report as R
+    rows, cases = _control_rows("x")
+    renamed = [dict(r, candidate="Qwen2.5-7B-Instruct-Q4_K_M") if r["candidate"] == "eval-7b" else r
+               for r in rows]
+    assert "control" in R.report(renamed, cases)["Qwen2.5-7B-Instruct-Q4_K_M"]
+    assert "control" in R.report(rows, cases)["eval-7b"]
 
 
 def _control_rows(*claims, reviewed=None):

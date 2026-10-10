@@ -102,7 +102,9 @@ def cmd_throughput(a) -> int:
     if serve and not a.model.startswith(serving.VLLM_PREFIX):
         return err(f"--serve starts a vLLM server; --model must be "
                    f"{serving.VLLM_PREFIX}<repo id>, not {a.model}")
-    note(f"{a.model} on {engine}: {len(texts)} texts at {levels} in flight, "
+    from harness import models
+    models.warn(a.model)
+    note(f"{models.display(a.model)} on {engine}: {len(texts)} texts at {levels} in flight, "
          f"max_tokens {a.max_tokens}", flush=True)
     pid = getattr(a, "server_pid", None)
     with exclusive.held("eval"), contextlib.ExitStack() as stack:

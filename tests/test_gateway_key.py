@@ -418,3 +418,12 @@ def test_both_configs_answer_a_bad_key_with_401(path):
     hook = body["general_settings"]["custom_auth"]
     assert (REPO / "gateway" / (hook.rsplit(".", 1)[0] + ".py")).exists()
     assert "allow_requests_on_db_unavailable" not in str(body)
+
+
+def test_smoke_asks_by_model_id_never_by_a_deprecated_nickname(gateway, tmp_path):
+    """#670: the old nicknames go next release, and smoke must not be what breaks then."""
+    from harness import models
+    _smoke({"SOHOT_GATEWAY_KEY": "sk-right",
+            "GATEWAY_PORT": str(gateway.server_address[1])}, tmp_path)
+    sent = {b.get("model") for b in gateway.bodies}
+    assert sent and not sent & set(models.deprecated()), sent

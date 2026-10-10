@@ -20,6 +20,12 @@ def _entries():
     return [(e["model_name"], e["litellm_params"]) for e in body["model_list"]]
 
 
+def _own_entries():
+    """Entries that name a model of their own; a deprecated alias shares its target's params."""
+    body = yaml.safe_load(MAC.read_text(encoding="utf-8"))
+    return [e for e in body["model_list"] if not e.get("deprecated_for")]
+
+
 def _default_port() -> str:
     m = re.search(r'LLAMACPP_PORT="\$\{LLAMACPP_PORT:-(\d+)\}"',
                   SERVE.read_text(encoding="utf-8"))
@@ -42,22 +48,28 @@ def test_the_eval_port_is_not_the_mlx_port():
     assert _default_port() != "8081", "mlx_lm.server holds 8081 on this machine"
 
 
-def test_every_eval_alias_reaches_the_eval_server():
+def test_every_gguf_entry_reaches_the_eval_server():
     """Gauntlet #2: the port is written in the script and in the config, so
-    the two copies are read and compared rather than trusted."""
+    the two copies are read and compared rather than trusted. A GGUF entry is
+    one with a source_file; its name says nothing about where it is served. #670."""
     port = _default_port()
-    evals = [(n, p) for n, p in _entries() if n.startswith("eval-")]
-    assert evals, "no eval-* alias in gateway/config.yaml"
-    for name, params in evals:
-        assert params["api_base"] == f"http://127.0.0.1:{port}/v1", name
+    ggufs = [e for e in _own_entries() if str(e.get("source_file", "")).endswith(".gguf")]
+    assert ggufs, "no GGUF entry in gateway/config.yaml"
+    for e in ggufs:
+        assert e["litellm_params"]["api_base"] == f"http://127.0.0.1:{port}/v1", e["model_name"]
 
 
-def test_no_other_alias_reaches_the_eval_server():
-    """A non-eval alias on this port would silently lose the MLX engine."""
+def test_only_gguf_entries_reach_the_eval_server():
+    """An MLX entry on this port would silently lose the MLX engine; the router serves a
+    file by its stem, so the upstream id must be the GGUF's stem."""
     port = _default_port()
-    for name, params in _entries():
-        if not name.startswith("eval-") and "api_base" in params:
-            assert f":{port}/" not in params["api_base"], name
+    for e in _own_entries():
+        params = e["litellm_params"]
+        if f":{port}/" not in str(params.get("api_base", "")):
+            continue
+        source = str(e.get("source_file", ""))
+        assert source.endswith(".gguf"), e["model_name"]
+        assert params["model"].removeprefix("openai/") == Path(source).stem, e["model_name"]
 
 
 def test_the_eval_server_unloads_when_idle():

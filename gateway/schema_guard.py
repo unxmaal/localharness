@@ -22,7 +22,8 @@ except ImportError:  # the test suite has no litellm
 
 def _enforcing() -> list[str]:
     return sorted(str(e["model_name"]) for e in gateway.load(CONFIG).get("model_list") or []
-                  if serving.engine_for(str(e["model_name"]), config=CONFIG) == serving.LLAMACPP)
+                  if not e.get("deprecated_for")
+                  and serving.engine_for(str(e["model_name"]), config=CONFIG) == serving.LLAMACPP)
 
 
 def refusal(data: dict) -> str:

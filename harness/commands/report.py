@@ -32,7 +32,7 @@ def cmd_report(a) -> int:
         print(f"  {state['loop']['line']}")
     for l in lanes:
         if l.get("adoption"):
-            print(f"  {l['lane']}: {l['serves']} adopted {l['adoption']}")
+            print(f"  {l['lane']}: {report._model(l['serves'])} adopted {l['adoption']}")
         if l.get("refused"):
             print(f"  {l['lane']}: {l['refused']}")
     if unverified:
