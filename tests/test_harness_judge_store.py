@@ -200,7 +200,8 @@ def test_the_rubric_names_a_model_every_gateway_actually_serves():
     assert configs, "no gateway config found; this test checks nothing"
     for path in configs:
         raw = _yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        aliases = {m.get("model_name") for m in (raw.get("model_list") or [])}
+        aliases = ({m.get("model_name") for m in (raw.get("model_list") or [])}
+                   | {m.get("in_place_of") for m in (raw.get("model_list") or [])})
         assert model in aliases, (
             f"the rubric judges with {model!r}, which {path.name} does not "
             f"serve. Either the config is missing the alias or the rubric "

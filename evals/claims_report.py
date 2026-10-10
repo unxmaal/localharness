@@ -16,13 +16,19 @@ from pathlib import Path
 from harness.checks import claims as claims_check
 
 #: The model every reviewed claim so far was extracted by.
-REVIEWED_FROM = "eval-7b"
+REVIEWED_FROM = "Qwen2.5-7B-Instruct-Q4_K_M"
 #: The interface whose reviews REVIEWED_FROM produced under the current prompt at temperature 0.
 CONTROL_INTERFACE = "conversation"
 #: Control recall under which the matcher, not the model, is the suspect.
 CONTROL_RECALL = 0.9
 CAVEAT = (f"caveat: every reviewed claim was extracted by {REVIEWED_FROM}, so recall is circular "
           f"and favours {REVIEWED_FROM}-like output until another model's claims are reviewed")
+
+
+def _reviewed_model(candidate: str) -> bool:
+    """True for a run of the model the reviews came from, under its id or its old nickname. #670."""
+    from harness import models
+    return models.resolve(candidate) == REVIEWED_FROM
 
 
 def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
@@ -94,7 +100,7 @@ def report(rows: list[dict], cases) -> dict:
                 "schema_invalid": sum(1 for x in xs if not x["schema_valid"])}
         mine["empty"] = {k: _slice(*v) for k, v in sorted(mine["empty"].items())}
         control = mine["reviewed"].get(CONTROL_INTERFACE)
-        if cand == REVIEWED_FROM and control:
+        if _reviewed_model(cand) and control:
             xs = mine["_raw"][CONTROL_INTERFACE]
             missed = control["good_total"] - sum(x["good_found"] for x in xs)
             near = sum(x["near_miss"] for x in xs)

@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from harness import adopt, lanes, reverify, runs, workqueue as wq
+from harness import adopt, cli, lanes, reverify, runs, workqueue as wq
 from harness import memory_store as ms
 
 DAY = 86400.0
@@ -78,7 +78,8 @@ def test_a_runtime_upgrade_since_the_last_pass_queues_one_reverify(conn, on):
     [job] = queued(conn)
     assert job["state"] == wq.PENDING
     assert job["argv"][job["argv"].index("--modality") + 1] == "code"
-    assert job["argv"][job["argv"].index("--candidates") + 1] == "q3-4b"
+    # The lane serves the renamed id; the old nickname's run is its measured row (#670).
+    assert job["argv"][job["argv"].index("--candidates") + 1] == cli.DEFAULT_CODE_MODEL
     [entry] = got["queued"]
     assert entry["triggers"] == [[reverify.VERSIONS, "mlx-lm 0.28.0 -> 0.29.1"]]
 

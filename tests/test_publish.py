@@ -159,7 +159,7 @@ def test_a_lane_whose_serving_model_was_refused_has_no_headline_score(store):
     store.commit()
     doc = publish.export(store, machine_id=_mid(store), now=1.79e9)
     lane = next(l for l in doc["lanes"] if l["lane"] == "decide")
-    assert lane["serves"] == "eval-imajev-4b"
+    assert lane["serves"] == "imajev-4b-Q8_0"
     assert lane["not_run"] == "refused_by_gateway"
     assert lane["pass_rate"] is None and lane["median_s"] is None
     row = next(line for line in publish.render_site([doc], now=1.79e9).split("<tr")

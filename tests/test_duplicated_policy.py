@@ -75,25 +75,29 @@ def _lane_defaults():
     return out
 
 
+def _serves(config):
+    """Names a gateway config answers to: its entries, and the ids its builds stand in for. #670."""
+    entries = yaml.safe_load((REPO / config).read_text(encoding="utf-8"))["model_list"]
+    return ({m["model_name"] for m in entries}
+            | {m["in_place_of"] for m in entries if m.get("in_place_of")})
+
+
 @pytest.mark.parametrize("config", GATEWAYS)
-def test_every_lane_default_is_an_alias_the_gateway_serves(config):
-    """Rename an alias in either gateway config and every text lane breaks at
+def test_every_lane_default_is_a_model_the_gateway_serves(config):
+    """Rename an entry in either gateway config and every text lane breaks at
     runtime, on a machine, with nothing in the suite noticing. The CLI names
-    aliases; the config defines them; neither imports the other."""
-    served = {m["model_name"] for m in
-              yaml.safe_load((REPO / config).read_text(encoding="utf-8"))["model_list"]}
-    for name, alias in sorted(_lane_defaults().items()):
-        assert alias in served, (
-            f"{name} = {alias!r}, which {config} does not serve. "
+    model ids; the config defines them; neither imports the other."""
+    served = _serves(config)
+    for name, model in sorted(_lane_defaults().items()):
+        assert model in served, (
+            f"{name} = {model!r}, which {config} does not serve. "
             f"The lane would fail on a real machine and pass here")
 
 
-def test_both_gateways_serve_the_same_alias_names():
-    """The runtime differs; the VOCABULARY must not. `lh svg` names one alias
-    and must reach an implementation whichever machine it runs on."""
-    names = [ {m["model_name"] for m in
-               yaml.safe_load((REPO / c).read_text(encoding="utf-8"))["model_list"]}
-              for c in GATEWAYS ]
+def test_both_gateways_serve_every_lane_default():
+    """The runtime differs; the VOCABULARY must not. `soh svg` names one model
+    id and must reach a build of it whichever machine it runs on."""
+    names = [_serves(c) for c in GATEWAYS]
     for name in _lane_defaults().values():
         assert all(name in n for n in names), \
             f"{name} is served by one gateway config and not the other"

@@ -141,3 +141,21 @@ def key_for(conn, spec: str) -> str:
     if conn is not None and ensure(conn, spec):
         return get(conn, spec)["receipt_key"]
     return key_of(spec)
+
+
+def served(conn, spec: str, *, lane: str = "", config=None) -> int | None:
+    """The candidate a lane's spec is measured under: its own row, or a deprecated old
+    name's row while the renamed spec has no results of its own. #670."""
+    from harness import models
+    cid = ensure(conn, spec, lane=lane)
+    if cid is None or _has_results(conn, cid):
+        return cid
+    for old in models.old_names(spec, config):
+        if conn.execute("SELECT 1 FROM results WHERE candidate = ? LIMIT 1", (old,)).fetchone():
+            return ensure(conn, old, lane=lane)
+    return cid
+
+
+def _has_results(conn, cid: int) -> bool:
+    return conn.execute("SELECT 1 FROM results WHERE candidate_id = ? LIMIT 1",
+                        (cid,)).fetchone() is not None

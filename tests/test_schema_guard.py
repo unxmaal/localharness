@@ -17,7 +17,9 @@ SCHEMA = {"type": "json_schema",
 
 def test_a_schema_sent_to_an_mlx_alias_is_refused_with_the_way_out():
     why = guard.refusal({"model": "q3-30b", "response_format": SCHEMA})
-    assert "q3-30b" in why and "eval-4b" in why
+    assert "q3-30b" in why and "Qwen3-4B-Instruct-2507-Q4_K_M" in why
+    # The way out names real ids, never a deprecated nickname. #670.
+    assert "eval-4b" not in why
 
 
 @pytest.mark.parametrize("data", [

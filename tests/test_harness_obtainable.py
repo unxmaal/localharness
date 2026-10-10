@@ -63,7 +63,7 @@ def test_the_real_cuda_config_is_the_known_instance():
     verifying an alias means guessing the repo, and guessing the repo is
     exactly what produced four wrong ones."""
     bad = {n.alias for n, _ in ob.unresolvable(REPO)}
-    assert "q3-4b" in bad and "q3-1.7b" in bad
+    assert "qwen3-4b-instruct-2507-q4_k_m" in bad and "qwen3-1.7b-q4_k_m" in bad
 
 
 # ---- what must NOT be flagged ---------------------------------------------

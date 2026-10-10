@@ -5,7 +5,7 @@ this machine use? That is the antidote to re-architecting every time a better
 method turns up on GitHub.
 
     make evals                                       # default candidates
-    make evals MODALITY=svg CANDIDATES=local-mid,local-large
+    make evals MODALITY=svg CANDIDATES=mlx-community/Qwen2.5-1.5B-Instruct-4bit,mlx-community/Qwen2.5-7B-Instruct-4bit
     uv run python -m evals.run --modality image --repeat 3 --out .logs/img \
       --candidates mflux:flux2-klein-4b,mflux:z-image-turbo
 
@@ -13,7 +13,7 @@ method turns up on GitHub.
 
 | form | example | runner |
 |---|---|---|
-| gateway alias | `local-large` | HTTP to the gateway |
+| gateway model id | `mlx-community/Qwen2.5-7B-Instruct-4bit` | HTTP to the gateway |
 | engine spec | `mflux:z-image-turbo,quantize=4` | subprocess, measured |
 | tts | `tts:mlx-community/Kokoro-82M-bf16,voice=bm_george` | HTTP to mlx-audio |
 | tts, cloned | `tts:litmudoc/Chatterbox-Multilingual-MLX-v2-Q8,lang_code=fr,ref_audio=<clip>,ear=whisper:fr` | HTTP to mlx-audio |

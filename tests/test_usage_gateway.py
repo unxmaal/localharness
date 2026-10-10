@@ -81,7 +81,8 @@ def gateway(tmp_path):
     threading.Thread(target=up.serve_forever, daemon=True).start()
     base_up = f"http://127.0.0.1:{up.server_address[1]}/v1"
     # The served config sits beside gateway/; here shims beside the tmp config import its modules.
-    for mod, name in (("usage_log", "proxy_handler_instance"), ("key_auth", "user_api_key_auth")):
+    for mod, name in (("usage_log", "proxy_handler_instance"), ("key_auth", "user_api_key_auth"),
+                      ("served_model", "proxy_handler_instance")):
         (tmp_path / f"{mod}.py").write_text(
             f"import sys\nsys.path.insert(0, {str(REPO)!r})\n"
             f"from gateway.{mod} import {name}  # noqa: F401\n", encoding="utf-8")
@@ -92,7 +93,7 @@ def gateway(tmp_path):
   - model_name: boom
     litellm_params: {{model: openai/boom, api_base: "{base_up}", api_key: not-needed}}
 litellm_settings:
-  callbacks: ["usage_log.proxy_handler_instance"]
+  callbacks: ["usage_log.proxy_handler_instance", "served_model.proxy_handler_instance"]
   num_retries: 0
   use_chat_completions_url_for_anthropic_messages: true
 general_settings:
@@ -104,7 +105,7 @@ general_settings:
     exe = Path(sys.executable).parent / "litellm"
     proc = subprocess.Popen(
         [str(exe), "--config", str(cfg), "--host", "127.0.0.1", "--port", str(port)],
-        env={**os.environ, "LITELLM_MASTER_KEY": KEY,
+        env={**os.environ, "LITELLM_MASTER_KEY": KEY, "GATEWAY_CONFIG": str(cfg),
              "LITELLM_USE_CHAT_COMPLETIONS_URL_FOR_ANTHROPIC_MESSAGES": "1"},
         stdout=log, stderr=subprocess.STDOUT)
     base = f"http://127.0.0.1:{port}"
@@ -174,3 +175,21 @@ def test_real_requests_through_a_real_proxy_become_rows_without_text(gateway):
     assert anth["client"] == "claude-cli/2.0" and anth["tool_calls_valid"] == 1
     for f in paths.home().glob("discovery.db*"):
         assert SECRET.encode() not in f.read_bytes(), f.name
+
+
+def test_the_reply_names_the_model_that_answered_not_the_alias(gateway):
+    """#670 inside a real LiteLLM proxy: two headers carry the upstream id. LiteLLM 1.100.0
+    restamps the body's model to the name the client asked for after every hook."""
+    h = {"Authorization": f"Bearer {KEY}"}
+    msgs = [{"role": "user", "content": "hi"}]
+    r = httpx.post(f"{gateway}/v1/chat/completions", headers=h, timeout=30,
+                   json={"model": "sohot-code", "messages": msgs})
+    assert r.status_code == 200
+    assert r.json()["model"] == "sohot-code"
+    assert r.headers.get("x-sohot-model") == "up"
+    assert r.headers.get("x-sohot-served-as") == "sohot-code"
+    with httpx.stream("POST", f"{gateway}/v1/chat/completions", headers=h, timeout=30,
+                      json={"model": "sohot-code", "messages": msgs, "stream": True}) as s:
+        assert s.headers.get("x-sohot-model") == "up"
+        for _ in s.iter_lines():
+            pass

@@ -16,6 +16,9 @@ MLX = "http://127.0.0.1:8081"
 STEM = "Ornith-1.5-35B-Q4_K_M"
 
 CONFIG = {"model_list": [
+    {"model_name": "mlx-community/Qwen3-4B-Instruct-2507-4bit", "litellm_params": {
+        "model": "openai/mlx-community/Qwen3-4B-Instruct-2507-4bit",
+        "api_base": f"{MLX}/v1", "api_key": "not-needed"}},
     {"model_name": "q3-4b", "litellm_params": {
         "model": "openai/mlx-community/Qwen3-4B-Instruct-2507-4bit",
         "api_base": f"{MLX}/v1", "api_key": "not-needed"}},

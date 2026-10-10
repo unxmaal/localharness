@@ -14,6 +14,10 @@ if [ -z "$KEY" ]; then
   echo "FAIL  no gateway key: run \`soh gateway key\` on the gateway's machine and set SOHOT_GATEWAY_KEY"
   exit 1
 fi
+# Ask by model id, never a nickname (#670): this machine's build of each.
+build(){ uv run python -c "from harness.models import build_here; print(build_here('$1'))" 2>/dev/null || echo "$1"; }
+SMALL="${SMOKE_SMALL:-$(build mlx-community/Qwen2.5-0.5B-Instruct-4bit)}"
+MID="${SMOKE_MID:-$(build mlx-community/Qwen2.5-1.5B-Instruct-4bit)}"
 ok(){ printf 'PASS  %s\n' "$1"; }
 no(){ printf 'FAIL  %s\n' "$1"; FAIL=1; }
 
@@ -30,7 +34,7 @@ ready=0
 for i in $(seq 1 "$READY_TIMEOUT"); do
   if curl -sf --max-time 10 "$G/v1/chat/completions" -H 'Content-Type: application/json' \
        -H "Authorization: Bearer $KEY" \
-       -d '{"model":"local-small","messages":[{"role":"user","content":"hi"}],"max_tokens":2}' \
+       -d '{"model":"'"$SMALL"'","messages":[{"role":"user","content":"hi"}],"max_tokens":2}' \
        2>/dev/null | grep -q '"content"'; then
     printf ' ready after ~%ss\n' "$i"; ready=1; break
   fi
@@ -53,28 +57,34 @@ fi
 
 curl -sf "$G/v1/chat/completions" -H 'Content-Type: application/json' \
   -H "Authorization: Bearer $KEY" \
-  -d '{"model":"local-small","messages":[{"role":"user","content":"Reply with exactly: OK"}],"max_tokens":10}' \
+  -d '{"model":"'"$SMALL"'","messages":[{"role":"user","content":"Reply with exactly: OK"}],"max_tokens":10}' \
   | grep -q '"content"' && ok "gateway openai chat" || no "gateway openai chat"
+
+# The reply names the model that answered, not the alias asked for (#670).
+curl -sf -D - -o /dev/null "$G/v1/chat/completions" -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $KEY" \
+  -d '{"model":"sohot-extract","messages":[{"role":"user","content":"Reply with exactly: OK"}],"max_tokens":5}' \
+  | grep -qi '^x-sohot-model: ' && ok "gateway names the served model" || no "gateway names the served model"
 
 curl -sfN "$G/v1/chat/completions" -H 'Content-Type: application/json' \
   -H "Authorization: Bearer $KEY" \
-  -d '{"model":"local-small","messages":[{"role":"user","content":"count 1 2 3"}],"max_tokens":20,"stream":true}' \
+  -d '{"model":"'"$SMALL"'","messages":[{"role":"user","content":"count 1 2 3"}],"max_tokens":20,"stream":true}' \
   | grep -q 'data: \[DONE\]' && ok "gateway sse streaming" || no "gateway sse streaming"
 
 # The regression this exists to catch.
 curl -sf "$G/v1/messages" -H 'Content-Type: application/json' \
   -H "x-api-key: $KEY" -H 'anthropic-version: 2023-06-01' \
-  -d '{"model":"local-small","max_tokens":20,"messages":[{"role":"user","content":"Reply with exactly: OK"}]}' \
+  -d '{"model":"'"$SMALL"'","max_tokens":20,"messages":[{"role":"user","content":"Reply with exactly: OK"}]}' \
   | grep -q '"type":"message"' && ok "gateway anthropic /v1/messages" || no "gateway anthropic /v1/messages"
 
 curl -sf "$G/v1/chat/completions" -H 'Content-Type: application/json' \
   -H "Authorization: Bearer $KEY" \
-  -d '{"model":"local-mid","messages":[{"role":"user","content":"Weather in Paris? Use the tool."}],"tools":[{"type":"function","function":{"name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}],"max_tokens":80}' \
+  -d '{"model":"'"$MID"'","messages":[{"role":"user","content":"Weather in Paris? Use the tool."}],"tools":[{"type":"function","function":{"name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}],"max_tokens":80}' \
   | grep -q '"tool_calls"' && ok "openai tool calling" || no "openai tool calling"
 
 curl -sf "$G/v1/messages" -H 'Content-Type: application/json' \
   -H "x-api-key: $KEY" -H 'anthropic-version: 2023-06-01' \
-  -d '{"model":"local-mid","max_tokens":80,"messages":[{"role":"user","content":"Weather in Paris? Use the tool."}],"tools":[{"name":"get_weather","input_schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}]}' \
+  -d '{"model":"'"$MID"'","max_tokens":80,"messages":[{"role":"user","content":"Weather in Paris? Use the tool."}],"tools":[{"name":"get_weather","input_schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}]}' \
   | grep -q '"type": *"tool_use"' && ok "anthropic tool calling" || no "anthropic tool calling"
 
 # The decide lane's requests carry a schema, so its alias must take one; a 200 without it proves nothing. #572.

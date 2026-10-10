@@ -72,7 +72,7 @@ DEFAULT_TEMPERATURE = 0.2
 # repo has a commit called "--repeat: one sample per prompt ranks noise" and
 # an eval suite built for exactly this question, so the honest state is that
 # the knob exists, is measurable, and has not been measured. Compare with:
-#   uv run python -m evals.run --modality svg --repeat 5 --candidates local-large
+#   uv run python -m evals.run --modality svg --repeat 5 --candidates mlx-community/Qwen2.5-7B-Instruct-4bit
 # against a run overriding sampling to turn it off.
 #
 # `extract` and `code` are deliberately absent. Extract pulls one fact out of

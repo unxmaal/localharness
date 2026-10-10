@@ -79,7 +79,7 @@ def named(root: Path, configs=CONFIGS) -> list[Named]:
         for entry in body.get("model_list", []):
             params = entry.get("litellm_params") or {}
             model = params.get("model")
-            if not model:
+            if not model or entry.get("deprecated_for"):
                 continue
             out.append(Named(rel, entry.get("model_name", "?"),
                              strip_provider(model)))

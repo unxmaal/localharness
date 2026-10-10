@@ -33,8 +33,10 @@ class Refused(ValueError):
 
 def lane_model(lane: str, chosen: str | None = None) -> str:
     """-m when given, else the lane's adopted model here, else its typed constant. #297."""
-    from harness import adopt, winners
-    return chosen or adopt.default_for(lane, winners.typed().get(lane, ""))
+    from harness import adopt, models, winners
+    spec = chosen or adopt.default_for(lane, winners.typed().get(lane, ""))
+    models.warn(spec)
+    return spec
 
 
 def route(lane: str, chosen: str | None = None, via: str = "") -> tuple[str, serving.Route]:
@@ -112,7 +114,7 @@ def _budget(spec: str, max_tokens: int, *texts: str) -> None:
 
 
 def _call_label(spec: str, n: int, modality: str) -> str:
-    """Which call of a method this is, e.g. "call 2 of plan:q3-4b (the answer)"; "" for a plain model."""
+    """Which call of a method this is, e.g. "call 2 of plan:<model> (the answer)"; "" for a plain model."""
     from harness import methods
     try:
         parsed = methods.parse(spec)
@@ -295,8 +297,14 @@ def complete(lane: str, prompt: str, system: str | None = None,
     text, cost, replies = generate(spec, where, lane, prompt, call)
     got = replies[-1]
     return {"text": text, "lane": lane, "spec": spec,
-            "model": got.model or where.model, "method": cost or None,
+            "model": _answered_by(got.model or where.model), "method": cost or None,
             **_timing(got, started, replies)}
+
+
+def _answered_by(model: str) -> str:
+    """The real id behind a model name a server echoed; the name when nothing resolves it. #670."""
+    from harness import models
+    return models.resolve(model) or model
 
 
 def check_schema(schema) -> dict:

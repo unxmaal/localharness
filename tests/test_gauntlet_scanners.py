@@ -183,7 +183,7 @@ def test_the_live_home_is_derived_only_in_harness_paths():
 
 # Inventories: reported, never grown. Lower a pin when a fix lands.
 SWALLOWED_PIN = 60
-CONFIG_LESS_PIN = 158
+CONFIG_LESS_PIN = 154
 
 
 def test_swallowed_errors_are_an_inventory_that_only_shrinks():

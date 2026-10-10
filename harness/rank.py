@@ -438,6 +438,8 @@ def serving(config=None) -> set[str]:
         return set()
     out = set()
     for entry in data.get("model_list") or []:
+        if entry.get("deprecated_for"):
+            continue
         if entry.get("source_repo"):
             out.add(str(entry["source_repo"]).lower())
             continue

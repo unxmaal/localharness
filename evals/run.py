@@ -1,6 +1,6 @@
 """Run the eval suite and print a comparison.
 
-    uv run python -m evals.run --modality svg --candidates local-mid,local-small
+    uv run python -m evals.run --modality svg --candidates mlx-community/Qwen2.5-1.5B-Instruct-4bit,mlx-community/Qwen2.5-0.5B-Instruct-4bit
     uv run python -m evals.run --modality image \
         --candidates mflux:flux2-klein-4b,mflux:z-image-turbo
 
@@ -60,11 +60,11 @@ PROCESS_ENGINES = tuple(sorted(engine_names()))
 #: `trace:<engine spec>` so the engine underneath stays the ordinary spec.
 TRACE_PREFIX = "trace"
 #: Every method, trace among them, lives in harness/methods.py. #576.
-from harness import methods  # noqa: E402
+from harness import methods, models  # noqa: E402
 # candidate prefix -> vector.TRACE_PRESETS key
 TRACE_PREFIXES = methods.TRACE_PRESETS
-#: Generate, check, repair. A WORKFLOW rather than a model: `local-large` and
-#: `repair:local-large` are different products. See evals/runners/repair.py.
+#: Generate, check, repair. A WORKFLOW rather than a model: `<model>` and
+#: `repair:<model>` are different products. See evals/runners/repair.py.
 REPAIR_PREFIX = "repair"
 REPAIR_OPTIONS = {"attempts"}
 #: The svg lane's THIRD method: a model that emits draw commands as tokens.
@@ -288,6 +288,12 @@ def method_receipts(specs: dict) -> dict:
     return out
 
 
+def resolved_models(specs: dict, config=None) -> dict:
+    """receipt key -> the model id each text candidate resolved to now, for the receipt. #670."""
+    return {key: models.resolve(text_spec(spec), config) for key, spec in specs.items()
+            if text_candidate(spec)}
+
+
 def greedy(candidates: list[str]) -> list[str]:
     """Pin text candidates to temperature 0, so a screen is one fixed draw. #308."""
     out = []
@@ -501,7 +507,7 @@ def _build_runner(candidate: str, gateway: str, outdir: Path | None,
                 f"allowed: {', '.join(sorted(REPAIR_OPTIONS))}")
         if not model.strip():
             raise SystemExit("a repair candidate needs a model, e.g. "
-                             "repair:local-large")
+                             "repair:mlx-community/Qwen2.5-7B-Instruct-4bit")
         return RepairRunner(gateway, model.strip(),
                             attempts=int(options.get("attempts", 3)))
     if kind == "chain":
@@ -920,6 +926,8 @@ def _execute_at(args, overrides: dict) -> int:
         specs[runner.candidate] = candidate
         _servable(candidate)
         planned.append((candidate, runner, mine))
+        models.warn(candidate)
+    resolved = resolved_models(specs)
     for candidate, runner, mine in planned:
         with _served(candidate) as launched:
             if launched:
@@ -929,7 +937,7 @@ def _execute_at(args, overrides: dict) -> int:
     if not results:
         raise SystemExit("nothing ran: no candidate matched any case")
 
-    report(summarize(results))
+    report(summarize(results), resolved)
     if outdir:
         # The RECEIPT: what this run was, so a later run can be told apart
         # from it before anyone ranks the two together. See core.comparable().
@@ -955,7 +963,8 @@ def _execute_at(args, overrides: dict) -> int:
             max_tokens=budget,
             knobs=knobs.settings(args.modality, overrides),
             router_swaps=evicted,
-            budget_ladder=ladder)
+            budget_ladder=ladder,
+            resolved=resolved)
         now = time.time()
         ids = candidate_ids(specs, args.modality)
         for r in results:
@@ -1396,7 +1405,7 @@ def _note_ranking_disagreements(summary: dict, metric_names: list) -> None:
                   f"the pass rate punishes a strong model that slips once.")
 
 
-def report(summary: dict) -> None:
+def report(summary: dict, resolved: dict | None = None) -> None:
     """Print the comparison, ordered by what actually distinguishes candidates.
 
     Pass rate first, then the quality metrics, then latency. Sorting on latency
@@ -1458,6 +1467,12 @@ def report(summary: dict) -> None:
             line += (f" {worst:>13.3f}" if worst is not None else f" {'-':>13}")
         line += f" {s.get('wrong', 0):>6} {s.get('budget', 0):>6}"
         print(line)
+
+    named = {n: models.display(n, resolved) for n in summary if models.is_alias(n)}
+    if named:
+        print("\nmodels behind the aliases above:")
+        for n, shown in named.items():
+            print(f"  {n} = {shown}")
 
     agents = {n: (s2.get("agent") or {}).get("ctx") for n, s2 in summary.items()
               if "agent" in s2}

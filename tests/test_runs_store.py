@@ -194,7 +194,7 @@ def _seed_dir():
         "generated": "2026-10-05T00:00:00",
         "environment": {"hw_model": "Mac17,15", "os": "o", "arch": "a"},
         "receipt": {"modality": "svg", "tier": "measure"},
-        "rows": [{"case_id": "c", "candidate": "local-large", "passed": True},
+        "rows": [{"case_id": "c", "candidate": "mlx-community/Qwen2.5-7B-Instruct-4bit", "passed": True},
                  {"case_id": "c", "candidate": "nobody/knows", "passed": False}]
     }), encoding="utf-8")
     (root / "rubric-x").mkdir()

@@ -735,7 +735,7 @@ with its scope and how it was made, and any adoption refused here.
 
 ```bash
 soh code "Write is_palindrome(s)."          # the code lane's adopted model
-soh code "..." -m q3-4b                     # a specific one
+soh code "..." -m mlx-community/Qwen3-4B-Instruct-2507-4bit   # a specific one
 ```
 
 For other programs the gateway serves one stable alias per text lane:
@@ -745,6 +745,50 @@ base config plus those aliases, from the adoptions table), and an adoption in a
 text lane switches the alias to the winner without anyone editing
 `gateway/config.yaml`. An adopted GGUF is also served under its own stem.
 llama-server runs with `--jinja`, so tool calls pass through.
+
+### Model names
+
+Every gateway entry is named by the id it sends upstream: a repo id for MLX
+(`mlx-community/Qwen3-4B-Instruct-2507-4bit`), the GGUF stem for llama-server
+(`Qwen2.5-7B-Instruct-Q4_K_M`). Only two kinds of alias remain: the lane aliases
+`sohot-<lane>`, which adoption repoints, and `cloud-opus`. Reports, the
+benchmarks page and `soh` output name the model a row measured, with the alias
+beside it as "served as"; a run records what each alias resolved to in its
+receipt (`resolved`), and an older row labelled only by a lane alias reads
+"(model unknown)". Each benchmark row also says what the model is (base family,
+parameter count, quantisation, publisher, source link), from the store's
+proposals, lineage and downloads, or "unknown". Every gateway reply carries the headers `x-sohot-model` (the real
+id) and `x-sohot-served-as` (the alias asked for, if any) from
+`gateway/served_model.py`, streamed or not, so a client records what answered
+without a lookup. The body's `model` stays the name asked for: LiteLLM 1.100.0
+restamps it after every callback.
+
+The old nicknames were renamed in #670 and stay one release as deprecated
+entries (`deprecated_for` in the config), so queued jobs and clients keep
+working; `soh` and `evals.run` print a warning naming the replacement:
+
+| old | new (Mac) |
+|---|---|
+| local-small | mlx-community/Qwen2.5-0.5B-Instruct-4bit |
+| local-mid | mlx-community/Qwen2.5-1.5B-Instruct-4bit |
+| local-large | mlx-community/Qwen2.5-7B-Instruct-4bit |
+| q3-1.7b | mlx-community/Qwen3-1.7B-4bit |
+| q3-4b | mlx-community/Qwen3-4B-Instruct-2507-4bit |
+| q3-8b | mlx-community/Qwen3-8B-4bit |
+| q3-14b | mlx-community/Qwen3-14B-4bit |
+| q3-30b | mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit |
+| q3-coder | mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit |
+| eval-4b | Qwen3-4B-Instruct-2507-Q4_K_M |
+| eval-imajev-4b | imajev-4b-Q8_0 |
+| eval-7b | Qwen2.5-7B-Instruct-Q4_K_M |
+| eval-12b | google_gemma-3-12b-it-Q4_K_M |
+
+`gateway/config.cuda.yaml` names its GGUF builds by stem
+(`qwen2.5-7b-instruct-q4_k_m`) and marks each with `in_place_of`, the Mac id it
+stands in for, so a typed default reaches this machine's build. A stored run
+of an old nickname still counts as the lane's measured row until the renamed id
+has one of its own. Which server answers an entry is read from its `api_base`
+(a GGUF entry carries `source_file` and goes to `:8082`), never from its name.
 
 An alias switch does not drop a session. LiteLLM 1.100.0 can add or change a
 model on a running gateway only with a Postgres database behind it
@@ -1374,10 +1418,10 @@ best-of:<n>:<base>          code, web, svg      sample n at the lane's temperatu
 plan:<base>                 code, web, svg, extract   a plan, then the answer: two calls
 ```
 
-The base is any spec its runner already takes (`q3-4b`, `llamacpp:<stem>`, a
+The base is any spec its runner already takes (a gateway model id, `llamacpp:<stem>`, a
 repo id, `mflux:flux2-klein-4b`), and the method runs over that runner and its
 route, so it needs no server of its own. A method spec is a candidate
-everywhere: `evals.run --candidates q3-4b,best-of:3:q3-4b`, the screen and the
+everywhere: `evals.run --candidates <id>,best-of:3:<id>`, the screen and the
 paired adopt gate. Its rows carry `method_calls` (and for best-of
 `method_samples` and `method_chosen`), reported in the table and never ranked
 on; its seconds are the whole method. The receipt records each method and its
@@ -1402,7 +1446,7 @@ over its base's route:
   `method` field, with tokens summed over every call. `thinking` and the
   context-sized `max_tokens` cap apply to each call a method makes, and a
   budget refused or spent on reasoning names the call (`call 2 of
-  plan:q3-4b (the answer)`). A lane serving a trace
+  plan:<id> (the answer)`). A lane serving a trace
   method refuses delegation and says to run `soh svg`.
 - The gateway's `sohot-<lane>` alias keeps serving the method's base model. A
   LiteLLM alias is a routing entry and cannot run Python, so a LAN client that
@@ -1500,7 +1544,7 @@ The `claims` lane measures infovore's claim extraction: a system prompt, a
 numbered chat transcript as the user turn, and a reply held to a JSON schema
 (`{"c": [[user, claim, [refs]]]}`, claim at most 220 characters) at
 temperature 0 and 400 tokens. It is a schema lane, so it is served and adopted
-only on llama-server; the typed default is `eval-7b`.
+only on llama-server; the typed default is `Qwen2.5-7B-Instruct-Q4_K_M`.
 
 Its cases are verbatim chat text, so they never enter this repo. They live
 under `$LOCALHARNESS_HOME/cases/claims/`, written by:
@@ -1526,7 +1570,7 @@ import has written it; the lane keeps no copy of its own. The schema under
 cases private. `case_digest`, the split and `comparable()` treat them as any
 other case. Run the lane with:
 
-    uv run python -m evals.run --modality claims --candidates eval-7b
+    uv run python -m evals.run --modality claims --candidates Qwen2.5-7B-Instruct-Q4_K_M
 
 Each review carries the `interface` its reviewer judged it in: `cited-only`
 (only the cited lines) or `conversation` (the whole conversation). These are
@@ -1568,12 +1612,13 @@ scored before interfaces existed reads as `legacy`. `--rescore` re-checks each
 row's stored reply against the cases (this machine's, or `--cases DIR`, such
 as a fresh import written outside the cases tree) without loading a model.
 
-Every reviewed claim so far was extracted by eval-7b, so recall against the
-reviews is circular and favours eval-7b-like output; the report says so on
-every run until reviews of another model's claims exist. The `conversation`
-reviews came from eval-7b under the current prompt at temperature 0, which
-makes eval-7b's `conversation` row a control for the matcher: the report
-prints its recall, verbatim matches and near misses, and blames the matcher
+Every reviewed claim so far was extracted by Qwen2.5-7B-Instruct-Q4_K_M (then
+called eval-7b), so recall against the reviews is circular and favours its
+output; the report says so on every run until reviews of another model's claims
+exist. The `conversation` reviews came from that model under the current prompt
+at temperature 0, which makes its `conversation` row (under either name) a
+control for the matcher: the report prints its recall, verbatim matches and
+near misses, and blames the matcher
 only when recall is under 0.9 and at least half the misses sat just under
 the threshold. Otherwise the model did not reproduce its own reviewed claims.
 `tests/fixtures/claims/paraphrase.json` pins the matcher on synthetic text:
@@ -1693,7 +1738,7 @@ asks for more (more slots share one pool, so each request can still use the
 whole context). If the preset cannot be written, every model gets
 `LLAMACPP_CTX` (16384).
 
-eval-7b (`Qwen2.5-7B-Instruct-Q4_K_M`) is the exception: it is served at a
+`Qwen2.5-7B-Instruct-Q4_K_M` (once eval-7b) is the exception: it is served at a
 fixed number of slots and a context per slot, the knobs `eval7b_slots` and
 `eval7b_slot_ctx` (`harness/context.py`), so infovore's bulk claims run can
 keep several requests in flight. Its pool is slots times the slot context, one
@@ -1781,8 +1826,8 @@ uv run python -m evals.run --modality image --out .logs/img \
   --candidates mflux:flux2-klein-4b,mflux:z-image-turbo
 ```
 
-A candidate is written as a short spec: a model nickname for text
-(`local-large`), `mflux:<model>` for anything that runs as a separate program, or
+A candidate is written as a short spec: a model id for text
+(`mlx-community/Qwen2.5-7B-Instruct-4bit`), `mflux:<model>` for anything that runs as a separate program, or
 `tts:<model>,voice=<name>` for speech.
 
 A candidate can also be a **method**, a way of working rather than a model. A
@@ -1792,7 +1837,7 @@ method can beat a better model:
 --candidates trace:mflux:flux2-klein-4b        # draw a picture, then trace it to vector
 --candidates trace-icon:mflux:flux2-klein-4b   # same, tuned small: 3.2x fewer bytes
 --candidates omnisvg:4B                        # a model that emits SVG draw commands as tokens
---candidates repair:q3-4b                      # generate, check it, fix it, repeat
+--candidates repair:mlx-community/Qwen3-4B-Instruct-2507-4bit   # generate, check it, fix it, repeat
 --candidates claude-code:claude-opus-5-5       # a frontier reference, through headless Claude Code
 ```
 
@@ -1800,7 +1845,7 @@ method can beat a better model:
 login on this machine, with the lane's own system prompt and no tools, so a
 subscription covers it. It is a ceiling to measure the local models against,
 not a lane default. On the code lane it scored 9/9 at a 5.7 s median against
-q3-4b's 7/9 (Mac Studio, 2026-10-05).
+mlx-community/Qwen3-4B-Instruct-2507-4bit's 7/9 (then q3-4b; Mac Studio, 2026-10-05).
 
 `omnisvg` needs `./scripts/setup-omnisvg.sh` first: it has its own checkout, its
 own venv and 16 GiB of weights.
@@ -1819,8 +1864,8 @@ A text model is asked for one letter per field, with the answer tokens'
 logprobs where the server returns them; `claude-code:` gives answers only and
 is scored one-hot, as uncalibrated. Every decide request carries the reply as
 `response_format` json_schema, which only llama-server enforces, so the lane's
-default is `eval-imajev-4b` (mindchain/imajev-4b-GGUF, Q8_0, best measured on the
-lane in #311) on llama-server, never an mlx_lm.server alias, which the gateway
+default is `imajev-4b-Q8_0` (mindchain/imajev-4b-GGUF, Q8_0, best measured on the
+lane in #311) on llama-server, never an mlx_lm.server model, which the gateway
 refuses for a schema. Its GGUF must be in the router's models dir
 (`scripts/fetch-gguf.sh mindchain/imajev-4b-GGUF imajev-4b-Q8_0.gguf`), and
 `scripts/smoke.sh` asks `sohot-decide` for an answer under a schema.
@@ -1856,7 +1901,7 @@ reported under runners wanted rather than guessed at.
 `needle:needle3[,layers=N]` runs Cactus-Compute/needle3 through its own CLI (the card's platform binary and `needle3.cact` at a pinned revision, fetched into the HF cache on first use with `HF_HUB_OFFLINE=0`) in the decide lane, one call per field with a whole-call confidence rather than per-option probabilities, and in the agent lane over `--serve`.
 
     uv run python -m evals.run --modality decide --candidates \
-      q3-4b,claude-code:claude-opus-5-5,nimble:bespokelabs/Bespoke-Nimble-9B,decider:StrandsAgents/strands-decider-2B-hobson-v21
+      mlx-community/Qwen3-4B-Instruct-2507-4bit,claude-code:claude-opus-5-5,nimble:bespokelabs/Bespoke-Nimble-9B,decider:StrandsAgents/strands-decider-2B-hobson-v21
 
 The agent lane measures a model the way opencode and Claude Code use it: a
 tool loop over a small repo. Each case under `evals/cases/agent/` names a bundle
@@ -1890,7 +1935,7 @@ malformed call counts as invalid only when it shows up as a tool_use that
 never reached the server.
 
     uv run python -m evals.run --modality agent --candidates \
-      sohot-code,q3-coder,claude-code:claude-opus-5-5
+      sohot-code,mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit,claude-code:claude-opus-5-5
 
 The ocr lane reads text out of an image. Its eight cases under
 `evals/cases/ocr/` are PNGs rendered by `uv run python -m evals.ocr_corpus`
@@ -2108,7 +2153,7 @@ Long jobs from anyone go on one queue: an agent on another machine calling the
 MCP `image` or `video` tool, or someone here typing
 
 ```bash
-soh jobs add --title "30B coder on code" -- uv run python -m evals.run --modality code --candidates q3-coder,q3-4b
+soh jobs add --title "30B coder on code" -- uv run python -m evals.run --modality code --candidates mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit,mlx-community/Qwen3-4B-Instruct-2507-4bit
 soh jobs list      # each job's state, and whether the next one may start
 soh jobs pause     # hold everything; a running job still finishes
 soh jobs resume
@@ -2178,8 +2223,8 @@ killed 32 of its 50 requests on 2026-10-04.
 ### How many requests a server can take at once
 
 ```bash
-soh throughput --model eval-7b --texts convos.jsonl --levels 1,2,4
-soh throughput --model eval-7b --claims claims.jsonl --levels 1,4,8 --max-tokens 400
+soh throughput --model Qwen2.5-7B-Instruct-Q4_K_M --texts convos.jsonl --levels 1,2,4
+soh throughput --model Qwen2.5-7B-Instruct-Q4_K_M --claims claims.jsonl --levels 1,4,8 --max-tokens 400
 ```
 
 The command sends every line's `text` to a gateway alias with 1, 2 and 4
@@ -2361,12 +2406,12 @@ a fact, which category, how severe). The answer is JSON that must match a
 schema, and the only reference is a person's labels.
 
 `mlx_lm.server` ignores `response_format`, so on the Mac the gateway refuses
-it for an MLX alias with a 400 naming the aliases that enforce it
+it for an MLX model with a 400 naming the models that enforce it
 (`gateway/schema_guard.py`). Before that, the schema was silently dropped and
 the model wrote whatever it liked. `llama-server` enforces it. Each alias's
 real upstream id is at `GET :4000/model/info`.
 `scripts/serve-eval.sh` runs it beside the MLX server on `:8082`, and the
-gateway's `eval-*` aliases point there. It unloads its model after five idle
+gateway's GGUF entries (those with a `source_file`) point there. It unloads its model after five idle
 minutes. Weights are GGUF files in `$HF_HOME/gguf`:
 
 ```bash
@@ -2385,7 +2430,7 @@ out of the repo because the items are usually other people's words:
 ```bash
 soh rubric label <name>                     # a page, one item at a time
 soh rubric status <name>                    # how many are labelled, and your repeat agreement
-soh rubric run <name> --candidates eval-4b  # score models against your labels
+soh rubric run <name> --candidates Qwen3-4B-Instruct-2507-Q4_K_M  # score against your labels
 ```
 
 About one item in five is shown again, looking like any other, so your

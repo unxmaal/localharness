@@ -54,7 +54,7 @@ CACHE_BYTES = {"f32": (4, 1), "f16": (2, 1), "bf16": (2, 1), "q8_0": (34, 32),
                "q4_0": (18, 32), "iq4_nl": (18, 32)}
 
 
-#: eval-7b serves infovore's bulk claims run in parallel: slots, and the context each slot is sized for. #665.
+#: Qwen2.5-7B-Instruct-Q4_K_M (once eval-7b) serves infovore's bulk claims run in parallel: slots, and the context each slot is sized for. #665.
 EVAL_7B_STEM = "Qwen2.5-7B-Instruct-Q4_K_M"
 EVAL_7B_SLOTS = 8
 EVAL_7B_SLOT_CTX = 4096

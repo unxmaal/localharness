@@ -18,7 +18,7 @@ this compares nothing and must not fail.
 """
 from __future__ import annotations
 
-#: A candidate spec that is not a bare model: `repair:local-large` is a
+#: A candidate spec that is not a bare model: `repair:<model>` is a
 #: WORKFLOW built on a model, and `trace/mflux/...` a composition. Both can win
 #: a lane on merit, and neither is what a `--model` default can be set to.
 _COMPOSITE = (":", "/")
@@ -103,12 +103,14 @@ def typed() -> dict[str, str]:
     would be the accelerator mistake in another costume.
     """
     from harness import audio, cli
-    return {"svg": cli.DEFAULT_SVG_MODEL, "web": cli.DEFAULT_WEB_MODEL,
-            "code": cli.DEFAULT_CODE_MODEL,
-            "extract": cli.DEFAULT_EXTRACT_MODEL,
-            "decide": cli.DEFAULT_DECIDE_MODEL,
-            "claims": cli.DEFAULT_CLAIMS_MODEL,
-            "agent": cli.DEFAULT_AGENT_MODEL,
+    from harness.models import build_here
+    # A text default is a model id; a machine whose gateway serves another build of it uses that. #670.
+    return {"svg": build_here(cli.DEFAULT_SVG_MODEL), "web": build_here(cli.DEFAULT_WEB_MODEL),
+            "code": build_here(cli.DEFAULT_CODE_MODEL),
+            "extract": build_here(cli.DEFAULT_EXTRACT_MODEL),
+            "decide": build_here(cli.DEFAULT_DECIDE_MODEL),
+            "claims": build_here(cli.DEFAULT_CLAIMS_MODEL),
+            "agent": build_here(cli.DEFAULT_AGENT_MODEL),
             "image": cli.DEFAULT_IMAGE_ENGINE,
             "video": cli.DEFAULT_VIDEO_ENGINE,
             "music": cli.DEFAULT_MUSIC_ENGINE,
@@ -140,7 +142,7 @@ def served_ids(conn) -> dict[str, int]:
         if lane in out:
             continue
         spec = screen.candidate_for(lane, name) or name
-        cid = candidates.ensure(conn, spec, lane=lane)
+        cid = candidates.served(conn, spec, lane=lane)
         if cid:
             out[lane] = cid
     return out

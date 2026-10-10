@@ -228,18 +228,18 @@ def methods() -> list[Capability]:
     """Workflows the harness implements, as opposed to models it can call."""
     out = [
         Capability("method", "llm", "svg", "harness/cli.py",
-                   "--candidates local-large",
+                   "--candidates mlx-community/Qwen2.5-7B-Instruct-4bit",
                    note="the baseline every workflow has to beat"),
         Capability("method", "trace", "svg", "harness/vector.py",
                    "--candidates trace:mflux:flux2-klein-4b",
                    note="raster then vectorize; beat five language models 4/4 "
                         "to 2/6 on this lane"),
         Capability("method", "repair", "code", "evals/runners/repair.py",
-                   "--candidates repair:q3-4b --modality code",
+                   "--candidates repair:mlx-community/Qwen3-4B-Instruct-2507-4bit --modality code",
                    note="generate, check with the checker that already exists, "
                         "repair; code 20/27 -> 24/27 at --repeat 3"),
         Capability("method", "repair", "svg", "evals/runners/repair.py",
-                   "--candidates repair:local-large --modality svg",
+                   "--candidates repair:mlx-community/Qwen2.5-7B-Instruct-4bit --modality svg",
                    note="svg 6/9 -> 9/9 at --repeat 3, mean ~1.4 attempts"),
     ]
     from harness import methods as registry
@@ -248,7 +248,7 @@ def methods() -> list[Capability]:
         for lane in m.lanes:
             if (m.name, lane) not in have:
                 out.append(Capability("method", m.name, lane, "harness/methods.py",
-                                      f"--candidates {m.compose('q3-4b')} --modality {lane}"
+                                      f"--candidates {m.compose('mlx-community/Qwen3-4B-Instruct-2507-4bit')} --modality {lane}"
                                       if not m.base_lane else
                                       f"--candidates {m.compose('mflux:flux2-klein-4b')}",
                                       note=m.note))

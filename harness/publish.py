@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 #: Bumped when the JSON's shape changes in a way the renderer must know about.
-EXPORT_VERSION = 2
+EXPORT_VERSION = 3
 BRANCH = "reports"
 WORKFLOW = "pages.yml"
 #: Per-machine switch for publishing at the end of a discovery loop; absent is off.
@@ -161,14 +161,39 @@ def not_run(s: dict, never_ran: tuple[str, ...]) -> str:
     return best
 
 
+def model_html(row: dict) -> str:
+    """A row's model and what it is, never an alias alone; an export from before #670 is labelled now. #670."""
+    from harness import models
+    from harness.report import _esc
+    key = str(row.get("candidate") or "")
+    if "model" in row:
+        named = {"model": row.get("model") or "", "served_as": row.get("served_as") or ""}
+    else:
+        named = models.label(key)
+    shown = named["model"] or f'{named["served_as"] or key} ({models.UNKNOWN})'
+    if named["model"] and named["served_as"]:
+        shown += f' (served as {named["served_as"]})'
+    if key not in (named["model"], named["served_as"]):
+        shown = f"{key}: {shown}"
+    about = row.get("about") or models.UNKNOWN_FACT
+    link = row.get("source") or ""
+    src = f' <a href="{_esc(link)}">source</a>' if link else ""
+    return f'{_esc(shown)}<div class="about">{_esc(about)}{src}</div>'
+
+
 def not_run_text(row: dict) -> str:
     return f'not run ({row.get("not_run")})'
 
 
-def _row(key: str, s: dict) -> dict:
-    from harness import adopt, reasons
+def _row(key: str, s: dict, resolved: dict | None = None, conn=None) -> dict:
+    from harness import adopt, models, reasons
     why = not_run(s, reasons.NEVER_RAN)
+    named = models.label(key, resolved)
+    facts = models.about(conn, named["model"]) if conn is not None else {}
     return {"candidate": key,
+            # The model the row measured and the alias it was asked for by; "" model is unknown. #670.
+            "model": named["model"], "served_as": named["served_as"],
+            "about": models.about_text(facts), "source": facts.get("source", ""),
             "reference": adopt.is_reference(key),
             "not_run": why,
             "passed": None if why else s.get("passed"), "total": s.get("total"),
@@ -196,10 +221,13 @@ def _candidate_id(conn, lane: str, spec: str) -> int | None:
     from harness import screen
     if not spec:
         return None
-    for s in (screen.candidate_for(lane, spec) or spec, spec):
+    from harness import models
+    olds = models.old_names(spec)
+    for s in (screen.candidate_for(lane, spec) or spec, spec, *olds):
         row = conn.execute("SELECT id FROM candidates WHERE spec = ?",
                            (s,)).fetchone()
-        if row:
+        if row and (s not in olds or conn.execute(
+                "SELECT 1 FROM results WHERE candidate_id = ?", (row["id"],)).fetchone()):
             return int(row["id"])
     return None
 
@@ -246,6 +274,14 @@ def exam_receipt(conn, run: dict):
                    router_swaps=raw.get("router_swaps") or {})
 
 
+def _resolved(run: dict | None) -> dict:
+    """The receipt's record of the model each key resolved to when it ran; {} before #670."""
+    try:
+        return dict(json.loads((run or {}).get("receipt") or "{}").get("resolved") or {})
+    except (ValueError, AttributeError):
+        return {}
+
+
 def _rank(r: dict) -> tuple:
     return (bool(r["reference"]), bool(r["not_run"]), -(r["pass_rate"] or 0),
             r["median_s"] or 0)
@@ -264,9 +300,10 @@ def exams(conn, mid: int, lane: str) -> list[dict]:
     for group in mutual_groups(found, same):
         rows: dict[str, dict] = {}
         for run, _ in group:
+            resolved = _resolved(run)
             for key, s in runs.summarize(runs.rows(conn, run["id"])).items():
                 if key not in rows:
-                    rows[key] = {**_row(key, s), "run_at": _iso(run["generated_at"])}
+                    rows[key] = {**_row(key, s, resolved, conn), "run_at": _iso(run["generated_at"])}
         ids = group[0][1].case_ids
         cases = len({c.partition("#")[0] for c in ids})
         # Repeats as the case ids carry them: a lane that does not repeat ignores --repeat.
@@ -295,12 +332,13 @@ def _lane(conn, mid: int, lane: str, held: dict, typed: dict, now: float) -> dic
     table = []
     if newest:
         summary = runs.summarize(runs.rows(conn, newest["id"]))
-        table = sorted((_row(k, s) for k, s in summary.items()),
+        table = sorted((_row(k, s, _resolved(newest), conn) for k, s in summary.items()),
                        key=lambda r: (bool(r["not_run"]), -(r["pass_rate"] or 0),
                                       r["median_s"] or 0))
     return {
         "lane": lane, "wanted": lane in L.WANTED,
         "serves": serves, "adopted": bool(held),
+        "serves_model": _serves_model(serves, conn),
         "adopted_how": held.get("how", ""),
         "not_run": why,
         "pass_rate": here.get("pass_rate"), "median_s": here.get("median_s"),
@@ -315,6 +353,14 @@ def _lane(conn, mid: int, lane: str, held: dict, typed: dict, now: float) -> dic
         "comparison": table,
         "exams": exams(conn, mid, lane),
     }
+
+
+def _serves_model(spec: str, conn) -> str:
+    """What a lane serves, named by its model id with what it is beside it. #670."""
+    from harness import models
+    if not spec:
+        return ""
+    return f"{models.display(spec)}; {models.about_text(models.about(conn, models.resolve(spec)))}"
 
 
 def _adoptions(conn, mid: int) -> list[dict]:
@@ -567,15 +613,15 @@ def _cell(lane: dict | None) -> str:
     if not lane:
         return '<td class="dim">--</td>'
     if lane.get("parked"):
-        return f'<td><span class="tag warn">parked</span> {_esc(lane.get("serves"))}</td>'
+        return f'<td><span class="tag warn">parked</span> {_esc(lane.get("serves_model") or lane.get("serves"))}</td>'
     if lane.get("unverified"):
-        return (f'<td>{_esc(lane.get("serves")) or "--"} '
+        return (f'<td>{_esc(lane.get("serves_model") or lane.get("serves")) or "--"} '
                 f'<span class="tag bad">no receipt</span></td>')
     if lane.get("not_run"):
-        return (f'<td>{_esc(lane.get("serves"))} '
+        return (f'<td>{_esc(lane.get("serves_model") or lane.get("serves"))} '
                 f'<span class="tag bad">{_esc(not_run_text(lane))}</span></td>')
     stale = ' <span class="tag warn">stale</span>' if lane.get("stale") else ""
-    return (f'<td>{_esc(lane.get("serves"))}<br><span class="dim">'
+    return (f'<td>{_esc(lane.get("serves_model") or lane.get("serves"))}<br><span class="dim">'
             f'{_num(lane.get("pass_rate"))} pass, {_num(lane.get("median_s"))}s, '
             f'{_date(lane.get("measured_at"))}</span>{stale}</td>')
 
@@ -609,7 +655,7 @@ def _section(doc: dict) -> str:
             tags.append('<span class="tag warn">stale</span>')
         rows.append(
             f'<tr><td>{_esc(lane["lane"])}</td>'
-            f'<td>{_esc(lane.get("serves")) or "--"}</td>'
+            f'<td>{_esc(lane.get("serves_model") or lane.get("serves")) or "--"}</td>'
             f'<td class="num">{_num(lane.get("pass_rate"))}</td>'
             f'<td class="num">{_num(lane.get("median_s"))}</td>'
             f'<td class="num">{_ttft_cell(lane)}</td>'
@@ -623,7 +669,7 @@ def _section(doc: dict) -> str:
             continue
         body = "".join(
             f'<tr{" class=changed" if r["candidate"] == lane.get("serves") else ""}>'
-            f'<td>{_esc(r["candidate"])}'
+            f'<td>{model_html(r)}'
             f'{" <span class=dim>(reference)</span>" if r.get("reference") else ""}</td>'
             + (f'<td class="num" colspan="2">{_esc(not_run_text(r))}</td>' if r.get("not_run") else
                f'<td class="num">{r.get("passed")}/{r.get("total")}</td>'
