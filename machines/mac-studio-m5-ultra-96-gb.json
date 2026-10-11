@@ -34,12 +34,12 @@
   }
  ],
  "export_version": 2,
- "generated_at": "2026-10-08T12:11:28Z",
+ "generated_at": "2026-10-11T01:59:49Z",
  "lanes": [
   {
    "adopted": true,
    "adopted_how": "by-hand",
-   "age_days": 1.89,
+   "age_days": 4.47,
    "comparison": [
     {
      "candidate": "mflux/flux2-klein-4b-q8",
@@ -201,46 +201,196 @@
   {
    "adopted": true,
    "adopted_how": "measured",
-   "age_days": 0.13,
+   "age_days": 1.13,
    "comparison": [
     {
-     "candidate": "plan/llamacpp:Ornith-1.5-35B-Q4_K_M",
-     "first_s": 1.926,
-     "median_s": 14.248,
-     "metrics": {
-      "code_pass": 0.8751,
-      "completion_tokens": 1483.8637,
-      "method_calls": 2.0
-     },
-     "not_run": "",
-     "pass_rate": 0.559,
-     "passed": 504,
-     "peak_gb": 0.0,
-     "reference": false,
-     "total": 902,
-     "ttft_median_s": null,
-     "ttft_p95_s": null
-    },
-    {
      "candidate": "llamacpp:Ornith-1.5-35B-Q4_K_M",
-     "first_s": 0.981,
-     "median_s": 12.323,
+     "first_s": 941.195,
+     "median_s": 15.588,
      "metrics": {
-      "code_pass": 0.787,
-      "completion_tokens": 1130.9459,
-      "tokens_per_s": 138.303
+      "code_pass": 0.9176,
+      "completion_tokens": 5263.1481,
+      "tokens_per_s": 136.938
      },
      "not_run": "",
-     "pass_rate": 0.491,
-     "passed": 443,
+     "pass_rate": 0.814,
+     "passed": 96,
      "peak_gb": 0.0,
      "reference": false,
-     "total": 902,
-     "ttft_median_s": 4.374,
-     "ttft_p95_s": 23.157
+     "total": 118,
+     "ttft_median_s": 9.851,
+     "ttft_p95_s": 145.972
     }
    ],
    "exams": [
+    {
+     "cases": 118,
+     "first_run_at": "2026-10-09T22:51:12Z",
+     "repeat": 1,
+     "rows": [
+      {
+       "candidate": "llamacpp:Ornith-1.5-35B-Q4_K_M",
+       "first_s": 941.195,
+       "median_s": 15.588,
+       "metrics": {
+        "code_pass": 0.9176,
+        "completion_tokens": 5263.1481,
+        "tokens_per_s": 136.938
+       },
+       "not_run": "",
+       "pass_rate": 0.814,
+       "passed": 96,
+       "peak_gb": 0.0,
+       "reference": false,
+       "run_at": "2026-10-09T22:51:12Z",
+       "total": 118,
+       "ttft_median_s": 9.851,
+       "ttft_p95_s": 145.972
+      }
+     ],
+     "run_at": "2026-10-09T22:51:12Z",
+     "runs": 1
+    },
+    {
+     "cases": 118,
+     "first_run_at": "2026-10-09T15:32:00Z",
+     "repeat": 1,
+     "rows": [
+      {
+       "candidate": "llamacpp:Ornith-1.5-35B-Q4_K_M",
+       "first_s": 238.826,
+       "median_s": 14.946,
+       "metrics": {
+        "code_pass": 0.9144,
+        "completion_tokens": 4197.7216,
+        "tokens_per_s": 137.8959
+       },
+       "not_run": "",
+       "pass_rate": 0.737,
+       "passed": 87,
+       "peak_gb": 0.0,
+       "reference": false,
+       "run_at": "2026-10-09T15:32:00Z",
+       "total": 118,
+       "ttft_median_s": 8.885,
+       "ttft_p95_s": 141.6
+      }
+     ],
+     "run_at": "2026-10-09T15:32:00Z",
+     "runs": 1
+    },
+    {
+     "cases": 118,
+     "first_run_at": "2026-10-09T13:20:08Z",
+     "repeat": 1,
+     "rows": [
+      {
+       "candidate": "llamacpp:Ornith-1.5-35B-Q4_K_M",
+       "first_s": 114.508,
+       "median_s": 15.479,
+       "metrics": {
+        "code_pass": 0.9169,
+        "completion_tokens": 2864.0337,
+        "tokens_per_s": 138.2854
+       },
+       "not_run": "",
+       "pass_rate": 0.669,
+       "passed": 79,
+       "peak_gb": 0.0,
+       "reference": false,
+       "run_at": "2026-10-09T13:20:08Z",
+       "total": 118,
+       "ttft_median_s": 7.625,
+       "ttft_p95_s": 77.602
+      }
+     ],
+     "run_at": "2026-10-09T13:20:08Z",
+     "runs": 1
+    },
+    {
+     "cases": 118,
+     "first_run_at": "2026-10-09T11:54:43Z",
+     "repeat": 1,
+     "rows": [
+      {
+       "candidate": "llamacpp:Ornith-1.5-35B-Q4_K_M",
+       "first_s": 51.354,
+       "median_s": 14.834,
+       "metrics": {
+        "code_pass": 0.9425,
+        "completion_tokens": 1138.1507,
+        "tokens_per_s": 137.2507
+       },
+       "not_run": "",
+       "pass_rate": 0.576,
+       "passed": 68,
+       "peak_gb": 0.0,
+       "reference": false,
+       "run_at": "2026-10-09T11:54:43Z",
+       "total": 118,
+       "ttft_median_s": 4.793,
+       "ttft_p95_s": 23.856
+      }
+     ],
+     "run_at": "2026-10-09T11:54:43Z",
+     "runs": 1
+    },
+    {
+     "cases": 119,
+     "first_run_at": "2026-10-08T14:52:06Z",
+     "repeat": 1,
+     "rows": [
+      {
+       "candidate": "llamacpp:Ornith-1.5-35B-Q4_K_M",
+       "first_s": 0.83,
+       "median_s": 20.964,
+       "metrics": {
+        "code_pass": 0.8438,
+        "completion_tokens": 2875.4302,
+        "tokens_per_s": 139.3419
+       },
+       "not_run": "",
+       "pass_rate": 0.571,
+       "passed": 68,
+       "peak_gb": 0.0,
+       "reference": false,
+       "run_at": "2026-10-08T14:52:06Z",
+       "total": 119,
+       "ttft_median_s": 7.474,
+       "ttft_p95_s": 76.123
+      }
+     ],
+     "run_at": "2026-10-08T14:52:06Z",
+     "runs": 1
+    },
+    {
+     "cases": 119,
+     "first_run_at": "2026-10-08T13:20:49Z",
+     "repeat": 1,
+     "rows": [
+      {
+       "candidate": "llamacpp:Ornith-1.5-35B-Q4_K_M",
+       "first_s": 23.356,
+       "median_s": 20.734,
+       "metrics": {
+        "code_pass": 0.8304,
+        "completion_tokens": 1148.6377,
+        "tokens_per_s": 135.2797
+       },
+       "not_run": "",
+       "pass_rate": 0.471,
+       "passed": 56,
+       "peak_gb": 0.0,
+       "reference": false,
+       "run_at": "2026-10-08T13:20:49Z",
+       "total": 119,
+       "ttft_median_s": 4.952,
+       "ttft_p95_s": 25.321
+      }
+     ],
+     "run_at": "2026-10-08T13:20:49Z",
+     "runs": 1
+    },
     {
      "cases": 451,
      "first_run_at": "2026-10-08T09:02:56Z",
@@ -953,50 +1103,50 @@
     }
    ],
    "lane": "code",
-   "last_run_at": "2026-10-08T09:02:56Z",
-   "measured_at": "2026-10-08T09:02:56Z",
-   "median_s": 12.323,
+   "last_run_at": "2026-10-09T22:51:12Z",
+   "measured_at": "2026-10-09T22:51:12Z",
+   "median_s": 15.588,
    "metrics": {
-    "code_pass": 0.787,
-    "completion_tokens": 1130.9459,
-    "tokens_per_s": 138.303
+    "code_pass": 0.9176,
+    "completion_tokens": 5263.1481,
+    "tokens_per_s": 136.938
    },
    "not_run": "",
    "parked": "",
    "parked_until": "",
-   "pass_rate": 0.491,
+   "pass_rate": 0.814,
    "real_use": {
-    "completion_tokens": 12565,
+    "completion_tokens": 23931,
     "error_rate": 0.0,
     "errors": 0,
     "invalid_calls": 0,
     "invalid_rate": 0.0,
-    "prompt_tokens": 481389,
-    "requests": 109,
+    "prompt_tokens": 499585,
+    "requests": 123,
     "tool_calls": 94,
     "ttft_p50": 0.12477779388427734,
     "ttft_p95": 0.4040029048919678
    },
    "serves": "llamacpp:Ornith-1.5-35B-Q4_K_M",
    "stale": false,
-   "ttft_median_s": 4.374,
-   "ttft_p95_s": 23.157,
+   "ttft_median_s": 9.851,
+   "ttft_p95_s": 145.972,
    "unverified": false,
    "wanted": true
   },
   {
    "adopted": false,
    "adopted_how": "",
-   "age_days": 2.52,
+   "age_days": 0.02,
    "comparison": [
     {
      "candidate": "q3-4b",
-     "first_s": 15.458,
-     "median_s": 7.299,
+     "first_s": 8.099,
+     "median_s": 7.973,
      "metrics": {
-      "completion_tokens": 1308.1333,
-      "ink": 0.4501,
-      "tokens_per_s": 163.6667
+      "completion_tokens": 1279.9333,
+      "ink": 0.4376,
+      "tokens_per_s": 167.3
      },
      "not_run": "",
      "pass_rate": 1.0,
@@ -1004,57 +1154,21 @@
      "peak_gb": 0.0,
      "reference": false,
      "total": 15,
-     "ttft_median_s": null,
-     "ttft_p95_s": null
+     "ttft_median_s": 0.082,
+     "ttft_p95_s": 0.154
     },
     {
-     "candidate": "claude-code:claude-opus-5-5",
-     "first_s": 22.569,
-     "median_s": 17.835,
+     "candidate": "plan/q3-4b",
+     "first_s": 9.395,
+     "median_s": 6.829,
      "metrics": {
-      "completion_tokens": 2805.8571,
-      "ink": 0.6232,
-      "tokens_per_s": 126.15
+      "completion_tokens": 1447.0667,
+      "ink": 0.4372,
+      "method_calls": 2.0
      },
      "not_run": "",
      "pass_rate": 0.933,
      "passed": 14,
-     "peak_gb": 0.0,
-     "reference": true,
-     "total": 15,
-     "ttft_median_s": null,
-     "ttft_p95_s": null
-    },
-    {
-     "candidate": "q3-30b",
-     "first_s": 10.117,
-     "median_s": 7.314,
-     "metrics": {
-      "completion_tokens": 1056.6667,
-      "ink": 0.5815,
-      "tokens_per_s": 118.2667
-     },
-     "not_run": "",
-     "pass_rate": 0.8,
-     "passed": 12,
-     "peak_gb": 0.0,
-     "reference": false,
-     "total": 15,
-     "ttft_median_s": null,
-     "ttft_p95_s": null
-    },
-    {
-     "candidate": "q3-coder",
-     "first_s": 11.441,
-     "median_s": 7.769,
-     "metrics": {
-      "completion_tokens": 1028.8,
-      "ink": 0.4554,
-      "tokens_per_s": 118.9067
-     },
-     "not_run": "",
-     "pass_rate": 0.8,
-     "passed": 12,
      "peak_gb": 0.0,
      "reference": false,
      "total": 15,
@@ -1063,6 +1177,74 @@
     }
    ],
    "exams": [
+    {
+     "cases": 5,
+     "first_run_at": "2026-10-11T01:27:08Z",
+     "repeat": 3,
+     "rows": [
+      {
+       "candidate": "q3-4b",
+       "first_s": 8.099,
+       "median_s": 7.973,
+       "metrics": {
+        "completion_tokens": 1279.9333,
+        "ink": 0.4376,
+        "tokens_per_s": 167.3
+       },
+       "not_run": "",
+       "pass_rate": 1.0,
+       "passed": 15,
+       "peak_gb": 0.0,
+       "reference": false,
+       "run_at": "2026-10-11T01:31:27Z",
+       "total": 15,
+       "ttft_median_s": 0.082,
+       "ttft_p95_s": 0.154
+      },
+      {
+       "candidate": "best-of-3/q3-4b",
+       "first_s": 43.455,
+       "median_s": 33.584,
+       "metrics": {
+        "completion_tokens": 3787.4,
+        "ink": 0.3645,
+        "method_calls": 3.0,
+        "method_chosen": 1.0,
+        "method_samples": 3.0
+       },
+       "not_run": "",
+       "pass_rate": 1.0,
+       "passed": 15,
+       "peak_gb": 0.0,
+       "reference": false,
+       "run_at": "2026-10-11T01:27:08Z",
+       "total": 15,
+       "ttft_median_s": null,
+       "ttft_p95_s": null
+      },
+      {
+       "candidate": "plan/q3-4b",
+       "first_s": 9.395,
+       "median_s": 6.829,
+       "metrics": {
+        "completion_tokens": 1447.0667,
+        "ink": 0.4372,
+        "method_calls": 2.0
+       },
+       "not_run": "",
+       "pass_rate": 0.933,
+       "passed": 14,
+       "peak_gb": 0.0,
+       "reference": false,
+       "run_at": "2026-10-11T01:31:27Z",
+       "total": 15,
+       "ttft_median_s": null,
+       "ttft_p95_s": null
+      }
+     ],
+     "run_at": "2026-10-11T01:31:27Z",
+     "runs": 2
+    },
     {
      "cases": 5,
      "first_run_at": "2026-10-05T23:48:31Z",
@@ -1178,13 +1360,13 @@
     }
    ],
    "lane": "web",
-   "last_run_at": "2026-10-05T23:48:31Z",
-   "measured_at": "2026-10-05T23:48:31Z",
-   "median_s": 7.299,
+   "last_run_at": "2026-10-11T01:31:27Z",
+   "measured_at": "2026-10-11T01:31:27Z",
+   "median_s": 7.973,
    "metrics": {
-    "completion_tokens": 1308.1333,
-    "ink": 0.4501,
-    "tokens_per_s": 163.6667
+    "completion_tokens": 1279.9333,
+    "ink": 0.4376,
+    "tokens_per_s": 167.3
    },
    "not_run": "",
    "parked": "",
@@ -1193,15 +1375,15 @@
    "real_use": null,
    "serves": "q3-4b",
    "stale": false,
-   "ttft_median_s": null,
-   "ttft_p95_s": null,
+   "ttft_median_s": 0.082,
+   "ttft_p95_s": 0.154,
    "unverified": false,
    "wanted": true
   },
   {
    "adopted": true,
    "adopted_how": "measured",
-   "age_days": 1.68,
+   "age_days": 4.25,
    "comparison": [
     {
      "candidate": "q3-30b",
@@ -1426,13 +1608,13 @@
    "parked_until": "",
    "pass_rate": 1.0,
    "real_use": {
-    "completion_tokens": 82,
+    "completion_tokens": 102,
     "error_rate": 0.0,
     "errors": 0,
     "invalid_calls": 0,
     "invalid_rate": null,
-    "prompt_tokens": 190,
-    "requests": 21,
+    "prompt_tokens": 235,
+    "requests": 26,
     "tool_calls": 0,
     "ttft_p50": null,
     "ttft_p95": null
@@ -1447,7 +1629,7 @@
   {
    "adopted": false,
    "adopted_how": "",
-   "age_days": 2.59,
+   "age_days": 5.16,
    "comparison": [
     {
      "candidate": "h3/minimax-h3@ssd_streaming=false",
@@ -1548,7 +1730,7 @@
   {
    "adopted": false,
    "adopted_how": "",
-   "age_days": 1.03,
+   "age_days": 3.61,
    "comparison": [
     {
      "candidate": "acestep/acestep-v15-turbo",
@@ -1642,7 +1824,7 @@
   {
    "adopted": false,
    "adopted_how": "",
-   "age_days": 0.47,
+   "age_days": 3.04,
    "comparison": [
     {
      "candidate": "eval-imajev-4b",
@@ -1950,13 +2132,13 @@
    "parked_until": "",
    "pass_rate": 0.445,
    "real_use": {
-    "completion_tokens": 106,
+    "completion_tokens": 126,
     "error_rate": 0.0,
     "errors": 0,
     "invalid_calls": 0,
     "invalid_rate": null,
-    "prompt_tokens": 278,
-    "requests": 24,
+    "prompt_tokens": 333,
+    "requests": 29,
     "tool_calls": 0,
     "ttft_p50": null,
     "ttft_p95": null
@@ -1971,7 +2153,7 @@
   {
    "adopted": true,
    "adopted_how": "measured",
-   "age_days": 1.41,
+   "age_days": 3.99,
    "comparison": [
     {
      "candidate": "llamacpp:Ornith-1.5-35B-Q4_K_M",
@@ -2141,13 +2323,13 @@
    "parked_until": "",
    "pass_rate": 1.0,
    "real_use": {
-    "completion_tokens": 100,
+    "completion_tokens": 120,
     "error_rate": 0.0,
     "errors": 0,
     "invalid_calls": 0,
     "invalid_rate": null,
-    "prompt_tokens": 268,
-    "requests": 24,
+    "prompt_tokens": 323,
+    "requests": 29,
     "tool_calls": 0,
     "ttft_p50": null,
     "ttft_p95": null
@@ -2162,7 +2344,7 @@
   {
    "adopted": false,
    "adopted_how": "",
-   "age_days": 0.47,
+   "age_days": 3.04,
    "comparison": [
     {
      "candidate": "osocr/auto",
@@ -2274,7 +2456,7 @@
   {
    "adopted": false,
    "adopted_how": "",
-   "age_days": 0.47,
+   "age_days": 3.04,
    "comparison": [
     {
      "candidate": "bm25/okapi",
@@ -2391,7 +2573,7 @@
   {
    "adopted": false,
    "adopted_how": "",
-   "age_days": 0.47,
+   "age_days": 3.04,
    "comparison": [
     {
      "candidate": "pii-regex/patterns",
@@ -2513,7 +2695,282 @@
   {
    "adopted": false,
    "adopted_how": "",
-   "age_days": 0.47,
+   "age_days": 2.25,
+   "comparison": [
+    {
+     "candidate": "eval-4b",
+     "first_s": 3.732,
+     "median_s": 0.116,
+     "metrics": {
+      "claims_bad_matched_cited_only": 0.0952,
+      "claims_bad_matched_conversation": 0.0,
+      "claims_emitted": 0.6485,
+      "claims_empty_rate": 0.972,
+      "claims_judge_calibrated": 0.0,
+      "claims_near_miss_cited_only": 0.5714,
+      "claims_near_miss_conversation": 0.4048,
+      "claims_pass_cited_only": 0.381,
+      "claims_pass_conversation": 0.4762,
+      "claims_precision_cited_only": 0.8529,
+      "claims_precision_conversation": 0.9697,
+      "claims_recall_cited_only": 0.3919,
+      "claims_recall_conversation": 0.3299,
+      "claims_schema_valid": 0.9799,
+      "claims_unreviewed_cited_only": 2.2857,
+      "claims_unreviewed_conversation": 2.9048,
+      "claims_verbatim_cited_only": 0.0476,
+      "claims_verbatim_conversation": 0.0476,
+      "completion_tokens": 34.2609,
+      "tokens_per_s": 62.1321
+     },
+     "not_run": "",
+     "pass_rate": 0.863,
+     "passed": 258,
+     "peak_gb": 0.0,
+     "reference": false,
+     "total": 299,
+     "ttft_median_s": 0.082,
+     "ttft_p95_s": 0.18
+    },
+    {
+     "candidate": "eval-7b",
+     "first_s": 5.867,
+     "median_s": 0.133,
+     "metrics": {
+      "claims_bad_matched_cited_only": 0.087,
+      "claims_bad_matched_conversation": 0.0,
+      "claims_emitted": 0.9262,
+      "claims_empty_rate": 0.6653,
+      "claims_judge_calibrated": 0.0,
+      "claims_near_miss_cited_only": 0.3043,
+      "claims_near_miss_conversation": 0.0652,
+      "claims_pass_cited_only": 0.3478,
+      "claims_pass_conversation": 0.7826,
+      "claims_precision_cited_only": 0.8571,
+      "claims_precision_conversation": 0.9241,
+      "claims_recall_cited_only": 0.3,
+      "claims_recall_conversation": 0.6518,
+      "claims_schema_valid": 0.9967,
+      "claims_unreviewed_cited_only": 1.6957,
+      "claims_unreviewed_conversation": 1.5217,
+      "claims_verbatim_cited_only": 0.1739,
+      "claims_verbatim_conversation": 0.913,
+      "completion_tokens": 29.7191,
+      "tokens_per_s": 69.903
+     },
+     "not_run": "",
+     "pass_rate": 0.642,
+     "passed": 192,
+     "peak_gb": 0.0,
+     "reference": false,
+     "total": 299,
+     "ttft_median_s": 0.09,
+     "ttft_p95_s": 0.219
+    }
+   ],
+   "exams": [
+    {
+     "cases": 299,
+     "first_run_at": "2026-10-08T19:57:13Z",
+     "repeat": 1,
+     "rows": [
+      {
+       "candidate": "eval-4b",
+       "first_s": 3.732,
+       "median_s": 0.116,
+       "metrics": {
+        "claims_bad_matched_cited_only": 0.0952,
+        "claims_bad_matched_conversation": 0.0,
+        "claims_emitted": 0.6485,
+        "claims_empty_rate": 0.972,
+        "claims_judge_calibrated": 0.0,
+        "claims_near_miss_cited_only": 0.5714,
+        "claims_near_miss_conversation": 0.4048,
+        "claims_pass_cited_only": 0.381,
+        "claims_pass_conversation": 0.4762,
+        "claims_precision_cited_only": 0.8529,
+        "claims_precision_conversation": 0.9697,
+        "claims_recall_cited_only": 0.3919,
+        "claims_recall_conversation": 0.3299,
+        "claims_schema_valid": 0.9799,
+        "claims_unreviewed_cited_only": 2.2857,
+        "claims_unreviewed_conversation": 2.9048,
+        "claims_verbatim_cited_only": 0.0476,
+        "claims_verbatim_conversation": 0.0476,
+        "completion_tokens": 34.2609,
+        "tokens_per_s": 62.1321
+       },
+       "not_run": "",
+       "pass_rate": 0.863,
+       "passed": 258,
+       "peak_gb": 0.0,
+       "reference": false,
+       "run_at": "2026-10-08T19:57:13Z",
+       "total": 299,
+       "ttft_median_s": 0.082,
+       "ttft_p95_s": 0.18
+      },
+      {
+       "candidate": "eval-7b",
+       "first_s": 5.867,
+       "median_s": 0.133,
+       "metrics": {
+        "claims_bad_matched_cited_only": 0.087,
+        "claims_bad_matched_conversation": 0.0,
+        "claims_emitted": 0.9262,
+        "claims_empty_rate": 0.6653,
+        "claims_judge_calibrated": 0.0,
+        "claims_near_miss_cited_only": 0.3043,
+        "claims_near_miss_conversation": 0.0652,
+        "claims_pass_cited_only": 0.3478,
+        "claims_pass_conversation": 0.7826,
+        "claims_precision_cited_only": 0.8571,
+        "claims_precision_conversation": 0.9241,
+        "claims_recall_cited_only": 0.3,
+        "claims_recall_conversation": 0.6518,
+        "claims_schema_valid": 0.9967,
+        "claims_unreviewed_cited_only": 1.6957,
+        "claims_unreviewed_conversation": 1.5217,
+        "claims_verbatim_cited_only": 0.1739,
+        "claims_verbatim_conversation": 0.913,
+        "completion_tokens": 29.7191,
+        "tokens_per_s": 69.903
+       },
+       "not_run": "",
+       "pass_rate": 0.642,
+       "passed": 192,
+       "peak_gb": 0.0,
+       "reference": false,
+       "run_at": "2026-10-08T19:57:13Z",
+       "total": 299,
+       "ttft_median_s": 0.09,
+       "ttft_p95_s": 0.219
+      }
+     ],
+     "run_at": "2026-10-08T19:57:13Z",
+     "runs": 1
+    },
+    {
+     "cases": 274,
+     "first_run_at": "2026-10-08T17:41:49Z",
+     "repeat": 1,
+     "rows": [
+      {
+       "candidate": "eval-4b",
+       "first_s": 3.715,
+       "median_s": 0.12,
+       "metrics": {
+        "claims_bad_matched": 0.1,
+        "claims_emitted": 0.4333,
+        "claims_empty_rate": 0.972,
+        "claims_good_found": 1.45,
+        "claims_good_total": 3.7,
+        "claims_judge_calibrated": 0.0,
+        "claims_precision": 0.4924,
+        "claims_recall": 0.3442,
+        "claims_reviewed_matched": 1.7,
+        "claims_schema_valid": 0.9854,
+        "claims_unreviewed": 2.4,
+        "completion_tokens": 25.1825,
+        "tokens_per_s": 52.3088
+       },
+       "not_run": "",
+       "pass_rate": 0.912,
+       "passed": 250,
+       "peak_gb": 0.0,
+       "reference": false,
+       "run_at": "2026-10-08T17:41:49Z",
+       "total": 274,
+       "ttft_median_s": 0.086,
+       "ttft_p95_s": 0.167
+      },
+      {
+       "candidate": "eval-7b",
+       "first_s": 0.651,
+       "median_s": 0.134,
+       "metrics": {
+        "claims_bad_matched": 0.0909,
+        "claims_emitted": 0.7216,
+        "claims_empty_rate": 0.6653,
+        "claims_good_found": 1.3636,
+        "claims_good_total": 4.5455,
+        "claims_judge_calibrated": 0.0,
+        "claims_precision": 0.6273,
+        "claims_recall": 0.3982,
+        "claims_reviewed_matched": 1.5,
+        "claims_schema_valid": 0.9964,
+        "claims_unreviewed": 1.7727,
+        "completion_tokens": 23.9416,
+        "tokens_per_s": 62.7208
+       },
+       "not_run": "",
+       "pass_rate": 0.635,
+       "passed": 174,
+       "peak_gb": 0.0,
+       "reference": false,
+       "run_at": "2026-10-08T17:41:49Z",
+       "total": 274,
+       "ttft_median_s": 0.093,
+       "ttft_p95_s": 0.216
+      }
+     ],
+     "run_at": "2026-10-08T17:41:49Z",
+     "runs": 1
+    }
+   ],
+   "lane": "claims",
+   "last_run_at": "2026-10-08T19:57:13Z",
+   "measured_at": "2026-10-08T19:57:13Z",
+   "median_s": 0.133,
+   "metrics": {
+    "claims_bad_matched_cited_only": 0.087,
+    "claims_bad_matched_conversation": 0.0,
+    "claims_emitted": 0.9262,
+    "claims_empty_rate": 0.6653,
+    "claims_judge_calibrated": 0.0,
+    "claims_near_miss_cited_only": 0.3043,
+    "claims_near_miss_conversation": 0.0652,
+    "claims_pass_cited_only": 0.3478,
+    "claims_pass_conversation": 0.7826,
+    "claims_precision_cited_only": 0.8571,
+    "claims_precision_conversation": 0.9241,
+    "claims_recall_cited_only": 0.3,
+    "claims_recall_conversation": 0.6518,
+    "claims_schema_valid": 0.9967,
+    "claims_unreviewed_cited_only": 1.6957,
+    "claims_unreviewed_conversation": 1.5217,
+    "claims_verbatim_cited_only": 0.1739,
+    "claims_verbatim_conversation": 0.913,
+    "completion_tokens": 29.7191,
+    "tokens_per_s": 69.903
+   },
+   "not_run": "",
+   "parked": "",
+   "parked_until": "",
+   "pass_rate": 0.642,
+   "real_use": {
+    "completion_tokens": 4,
+    "error_rate": 0.0,
+    "errors": 0,
+    "invalid_calls": 0,
+    "invalid_rate": null,
+    "prompt_tokens": 30,
+    "requests": 1,
+    "tool_calls": 0,
+    "ttft_p50": null,
+    "ttft_p95": null
+   },
+   "serves": "eval-7b",
+   "stale": false,
+   "ttft_median_s": 0.09,
+   "ttft_p95_s": 0.219,
+   "unverified": false,
+   "wanted": true
+  },
+  {
+   "adopted": false,
+   "adopted_how": "",
+   "age_days": 3.04,
    "comparison": [
     {
      "candidate": "local-large",
@@ -2747,26 +3204,52 @@
   {
    "adopted": false,
    "adopted_how": "",
-   "age_days": 2.66,
+   "age_days": 2.55,
    "comparison": [
     {
      "candidate": "parakeet-tdt-0.6b-v2",
-     "first_s": 0.139,
-     "median_s": 0.075,
+     "first_s": 0.153,
+     "median_s": 0.074,
      "metrics": {
-      "wer": 0.0162
+      "wer": 0.0201
      },
      "not_run": "",
-     "pass_rate": 1.0,
-     "passed": 300,
+     "pass_rate": 0.827,
+     "passed": 110,
      "peak_gb": 0.0,
      "reference": false,
-     "total": 300,
+     "total": 133,
      "ttft_median_s": null,
      "ttft_p95_s": null
     }
    ],
    "exams": [
+    {
+     "cases": 133,
+     "first_run_at": "2026-10-08T12:47:44Z",
+     "repeat": 1,
+     "rows": [
+      {
+       "candidate": "parakeet-tdt-0.6b-v2",
+       "first_s": 0.153,
+       "median_s": 0.074,
+       "metrics": {
+        "wer": 0.0201
+       },
+       "not_run": "",
+       "pass_rate": 0.827,
+       "passed": 110,
+       "peak_gb": 0.0,
+       "reference": false,
+       "run_at": "2026-10-08T12:47:44Z",
+       "total": 133,
+       "ttft_median_s": null,
+       "ttft_p95_s": null
+      }
+     ],
+     "run_at": "2026-10-08T12:47:44Z",
+     "runs": 1
+    },
     {
      "cases": 300,
      "first_run_at": "2026-10-05T20:15:57Z",
@@ -2795,16 +3278,16 @@
     }
    ],
    "lane": "stt",
-   "last_run_at": "2026-10-05T20:15:57Z",
-   "measured_at": "2026-10-05T20:15:57Z",
-   "median_s": 0.075,
+   "last_run_at": "2026-10-08T12:47:44Z",
+   "measured_at": "2026-10-08T12:47:44Z",
+   "median_s": 0.074,
    "metrics": {
-    "wer": 0.0162
+    "wer": 0.0201
    },
    "not_run": "",
    "parked": "",
    "parked_until": "",
-   "pass_rate": 1.0,
+   "pass_rate": 0.827,
    "real_use": null,
    "serves": "mlx-community/parakeet-tdt-0.6b-v2",
    "stale": false,
@@ -2816,7 +3299,7 @@
   {
    "adopted": false,
    "adopted_how": "",
-   "age_days": 0.0,
+   "age_days": 2.58,
    "comparison": [
     {
      "candidate": "Kokoro-82M-bf16/bm_george",
@@ -2959,7 +3442,7 @@
   "first_seen": "2026-10-05T19:28:52Z",
   "hw_model": "Mac17,15",
   "label": "Mac Studio M5 Ultra 96 GB",
-  "last_seen": "2026-10-08T12:08:19Z",
+  "last_seen": "2026-10-11T01:31:27Z",
   "memory_gb": 96.0,
   "os": "macOS 27.0.1",
   "runtimes": [
@@ -2984,5 +3467,5 @@
    "transformers": "5.16.1"
   }
  },
- "schema": 61
+ "schema": 63
 }
